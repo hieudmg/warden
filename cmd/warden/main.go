@@ -136,6 +136,12 @@ func runDB(args []string, configPath string, configPathSet bool, stdout, stderr 
 	}
 
 	cl := api.New(cfg.APIBaseURL, &http.Client{Timeout: cfg.Timeout})
+	// context.Background() is deliberate and mirrors runSSH: both CLI
+	// commands are one-shot processes, the default SIGINT behavior
+	// terminates them, and API calls are bounded by cfg.Timeout. A hung
+	// DB query is not bounded by ctx (the driver would abort on cancel);
+	// cancellation of long queries is a known limitation shared with
+	// warden ssh.
 	ctx := context.Background()
 
 	conns, err := cl.ListDB(ctx)

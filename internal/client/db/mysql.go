@@ -9,6 +9,7 @@ import (
 	"net"
 	"strconv"
 	"strings"
+	"unicode"
 
 	"github.com/go-sql-driver/mysql"
 
@@ -36,7 +37,11 @@ func RunQuery(ctx context.Context, bundle model.DBBundle, sqlText string, out io
 		Net:                  "tcp",
 		Addr:                 net.JoinHostPort(bundle.Host, strconv.Itoa(bundle.Port)),
 		DBName:               bundle.Database,
-		MaxAllowedPacket:     1 << 20,
+		// The MySQL wire packet adds a 1-byte COM_QUERY header to the SQL
+		// text, so MaxAllowedPacket must be one byte larger than the input
+		// bound: a query of exactly maxSQLBytes must not be rejected by the
+		// driver with ErrPktTooLarge.
+		MaxAllowedPacket:     maxSQLBytes + 1,
 		AllowNativePasswords: true,
 	}
 
@@ -93,7 +98,13 @@ func RunQuery(ctx context.Context, bundle model.DBBundle, sqlText string, out io
 
 // sanitize removes the bundle's password from an error message. Errors
 // that contain no password are returned unchanged so error wrapping and
-// errors.Is keep working.
+// errors.Is keep working. When the password is found and scrubbed, the
+// original error chain is preserved through redactedError so callers can
+// still classify the underlying failure.
+//
+// Tradeoff: a short password (e.g. "a") replaces characters inside
+// unrelated error text, mangling the message even though the chain stays
+// intact; callers should rely on errors.Is/As rather than the message.
 func sanitize(err error, bundle model.DBBundle) error {
 	if err == nil {
 		return nil
@@ -106,8 +117,18 @@ func sanitize(err error, bundle model.DBBundle) error {
 	if msg == err.Error() {
 		return err
 	}
-	return fmt.Errorf("%s", msg)
+	return &redactedError{msg: msg, err: err}
 }
+
+// redactedError carries a password-scrubbed message while unwrapping to
+// the original error, preserving errors.Is/errors.As classification.
+type redactedError struct {
+	msg string
+	err error
+}
+
+func (e *redactedError) Error() string { return e.msg }
+func (e *redactedError) Unwrap() error { return e.err }
 
 // formatRow converts scanned database values to printable strings. nil
 // becomes NULL; byte slices (MySQL text columns) become strings.
@@ -126,11 +147,13 @@ func formatRow(raw []any) []string {
 	return row
 }
 
-// sanitizeCell replaces control characters that would break tabular output.
+// sanitizeCell replaces control characters that would break tabular output
+// or corrupt a terminal. Each control rune (C0, DEL, and NUL included) is
+// replaced by a single space; printable Unicode is preserved. The mapping
+// is strictly 1:1 per rune, so output never grows.
 func sanitizeCell(s string) string {
 	return strings.Map(func(r rune) rune {
-		switch r {
-		case '\n', '\r', '\t':
+		if unicode.IsControl(r) {
 			return ' '
 		}
 		return r
