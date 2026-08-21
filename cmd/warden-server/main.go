@@ -6,6 +6,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"io/fs"
 	"net/http"
 	"os"
 	"os/signal"
@@ -19,6 +20,7 @@ import (
 	"warden/internal/server/profiles"
 	"warden/internal/server/reports"
 	"warden/internal/store"
+	"warden/internal/web"
 )
 
 func main() {
@@ -42,19 +44,19 @@ func run(args []string, stdout, stderr io.Writer, lookupEnv func(string) (string
 }
 
 func runServe(args []string, stdout, stderr io.Writer, lookupEnv func(string) (string, bool)) int {
-	fs := flag.NewFlagSet("serve", flag.ContinueOnError)
-	fs.SetOutput(stderr)
-	fs.Usage = func() {}
+	cmd := flag.NewFlagSet("serve", flag.ContinueOnError)
+	cmd.SetOutput(stderr)
+	cmd.Usage = func() {}
 
-	configPath := fs.String("config", "", "path to server config JSON")
-	if err := fs.Parse(args); err != nil {
+	configPath := cmd.String("config", "", "path to server config JSON")
+	if err := cmd.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			printServeUsage(stdout)
 			return 0
 		}
 		return 2
 	}
-	if fs.NArg() != 0 {
+	if cmd.NArg() != 0 {
 		fmt.Fprintln(stderr, "serve does not accept positional arguments")
 		printServeUsage(stderr)
 		return 2
@@ -62,7 +64,7 @@ func runServe(args []string, stdout, stderr io.Writer, lookupEnv func(string) (s
 
 	cfg, err := config.LoadServer(config.ServerOptions{
 		ConfigPath:    *configPath,
-		ConfigPathSet: flagWasSet(fs, "config"),
+		ConfigPathSet: flagWasSet(cmd, "config"),
 		LookupEnv:     lookupEnv,
 	})
 	if err != nil {
@@ -87,7 +89,16 @@ func runServe(args []string, stdout, stderr io.Writer, lookupEnv func(string) (s
 	profiles.New(s, rec).Register(mux)
 	reports.New(s, rec).Register(mux)
 
-	srv := server.New(cfg.ListenAddr, mux)
+	// The management UI is embedded by default; WARDEN_SERVER_STATIC_FS
+	// overrides it with a directory that mirrors the embedded layout
+	// (static/index.html, static/app.js, static/styles.css).
+	var assets fs.FS = web.Assets
+	if cfg.StaticFS != "" {
+		assets = os.DirFS(cfg.StaticFS)
+	}
+	handler := server.ServeUI(mux, assets)
+
+	srv := server.New(cfg.ListenAddr, handler)
 	errCh := make(chan error, 1)
 	go func() { errCh <- srv.ListenAndServe() }()
 
