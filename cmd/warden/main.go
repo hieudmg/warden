@@ -1,12 +1,16 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"flag"
 	"fmt"
 	"io"
+	"net/http"
 	"os"
 
+	"warden/internal/client/api"
+	clientssh "warden/internal/client/ssh"
 	"warden/internal/config"
 )
 
@@ -75,8 +79,43 @@ func runSSH(args []string, configPath string, configPathSet bool, stdout, stderr
 		return 1
 	}
 
-	fmt.Fprintf(stdout, "client bootstrap ready for ssh via %s\n", cfg.APIBaseURL)
-	return 0
+	cl := api.New(cfg.APIBaseURL, &http.Client{Timeout: cfg.Timeout})
+	ctx := context.Background()
+
+	conns, err := cl.ListSSH(ctx)
+	if err != nil {
+		fmt.Fprintf(stderr, "ssh: %v\n", err)
+		return 1
+	}
+
+	id := int64(-1)
+	for _, c := range conns {
+		if c.Name == args[0] {
+			id = c.ID
+			break
+		}
+	}
+	if id < 0 {
+		fmt.Fprintf(stderr, "ssh: connection %q not found\n", args[0])
+		return 1
+	}
+
+	bundle, err := cl.GetSSHBundle(ctx, id)
+	if err != nil {
+		fmt.Fprintf(stderr, "ssh: %v\n", err)
+		return 1
+	}
+
+	err = clientssh.RunCommand(ctx, bundle, args[1], clientssh.Streams{Stdin: os.Stdin, Stdout: stdout, Stderr: stderr})
+	if err == nil {
+		return 0
+	}
+	var exitErr *clientssh.ExitStatusError
+	if errors.As(err, &exitErr) {
+		return exitErr.Status
+	}
+	fmt.Fprintf(stderr, "ssh: %v\n", err)
+	return 1
 }
 
 func runDB(args []string, configPath string, configPathSet bool, stdout, stderr io.Writer, lookupEnv func(string) (string, bool)) int {
