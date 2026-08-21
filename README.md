@@ -1,14 +1,65 @@
 # Warden
 
-Task 1 bootstrap for Warden Hub.
+Warden is a personal central hub for LLM agents: a management server plus a
+cross-platform CLI that stores SSH/MySQL/MariaDB connection profiles
+(credentials encrypted at rest), resolves them into transport bundles, and
+executes connections locally on the client. It also stores immutable agent
+change reports (project, title, summary, agent_model, server timestamp).
 
-Current scope:
-- Go module with separate `warden-server` and `warden` entrypoints.
-- Strict JSON config loading with defaults and environment overrides.
-- Build targets for Linux server/client and Windows client cross-build.
+Deployment is tailnet-only: the server has **no application
+authentication**, and tailnet membership is the full trust boundary. Every
+peer that can reach the API can manage profiles, retrieve credentials, and
+run client operations.
 
-Not in Task 1:
-- SQLite, crypto, HTTP API, SSH, DB, UI, reports, or PTY support.
+## Components
+
+- `warden-server` — Linux x86-64 service. Owns SQLite (project storage) and
+  the master key. Serves the JSON API and the embedded management UI from
+  one listener. Never executes commands.
+- `warden` — Linux x86-64 and Windows x86-64 client. HTTP API wrapper; for
+  transport commands it fetches the resolved bundle and executes locally
+  (SSH via `golang.org/x/crypto/ssh`, MySQL via the Go driver, no native
+  `ssh`, `sshpass`, `mysql`, or `fzf` dependencies).
+
+## Quick start (development)
+
+```bash
+# 1. Build both binaries.
+go build ./cmd/warden-server
+go build ./cmd/warden
+
+# 2. Generate the master key (32 raw random bytes, mode 0600, your uid).
+openssl rand -out /tmp/warden-master.key 32
+chmod 0600 /tmp/warden-master.key
+
+# 3. Start the server on loopback with temporary state.
+WARDEN_SERVER_LISTEN_ADDR=127.0.0.1:8080 \
+WARDEN_SERVER_DB_PATH=/tmp/warden-e2e/warden.db \
+WARDEN_SERVER_MASTER_KEY_PATH=/tmp/warden-master.key \
+  ./warden-server serve
+
+# 4. Point the client at the server.
+export WARDEN_CLIENT_API_BASE_URL=http://127.0.0.1:8080
+
+# 5. Manage profiles via the API (curl) or the web UI at http://127.0.0.1:8080/,
+#    then use the CLI, e.g.:
+./warden ssh my-host "uname -a"
+./warden report create my-project --title "deployed" --summary "v2 shipped" --agent-model gpt-5.4
+```
+
+## Master key
+
+- 32 random bytes in a standalone file (default `/etc/warden/master.key`),
+  mode `0600`, owned by the service user.
+- Generate with `openssl rand -out master.key 32` followed by
+  `chmod 0600 master.key`. Do **not** pipe `head -c 32 /dev/urandom |
+  base64` — that produces ASCII, and the server rejects any key that is not
+  exactly 32 raw bytes.
+- The server refuses to start if the key is missing, wrong length, wrong
+  owner, or has any permission other than `0600` (including special bits).
+- The key is a separate secret from the database: it decrypts every stored
+  credential. Back it up separately (see below); losing it makes the
+  database unreadable.
 
 ## Configuration
 
@@ -34,12 +85,15 @@ Environment overrides:
 - `WARDEN_SERVER_MASTER_KEY_PATH`
 - `WARDEN_SERVER_STATIC_FS`
 
-`static_fs` overrides the embedded management UI for development. The directory layout must mirror `internal/web/static/` and contain exactly `index.html`, `app.js`, and `styles.css`; missing files silently 404.
+`static_fs` overrides the embedded management UI for development. The
+directory layout must mirror `internal/web/static/` and contain exactly
+`index.html`, `app.js`, and `styles.css`; missing files silently 404.
 
 ### Client config
 
 Default file:
-- Linux/macOS: `$XDG_CONFIG_HOME/warden/client.json` when `XDG_CONFIG_HOME` exists, otherwise `$HOME/.config/warden/client.json`
+- Linux/macOS: `$XDG_CONFIG_HOME/warden/client.json` when `XDG_CONFIG_HOME`
+  exists, otherwise `$HOME/.config/warden/client.json`
 - Windows: `%AppData%\warden\client.json`
 
 ```json
@@ -54,21 +108,100 @@ Environment overrides:
 - `WARDEN_CLIENT_API_BASE_URL`
 - `WARDEN_CLIENT_TIMEOUT`
 
-Client config contains only API settings. It does not read server DB paths or master-key material.
+Client config contains only API settings. It never reads server DB paths or
+master-key material.
 
-## Commands
+## Deployment (systemd)
+
+See [`deploy/systemd/README.md`](deploy/systemd/README.md) for the full
+guide: service user, master-key generation, environment file, unit
+installation, tailnet-only exposure, and backup/restore.
+
+Key points:
+
+- The unit runs `warden-server serve` as the dedicated `warden` user with
+  `StateDirectory=warden`, `UMask=0077`, `NoNewPrivileges=yes`,
+  `ProtectSystem=strict`, and `Restart=on-failure`.
+- Runtime settings live in `/etc/warden/warden-server.env` (non-secret
+  paths only; never credentials).
+- Bind loopback (plus `tailscale serve`) or the tailnet IP directly; never
+  a public interface.
+- Logs contain only startup/shutdown/audit-write warnings — never
+  credentials, SQL text, or command payloads.
+
+## Backup
+
+Back up **two separate things**:
+
+1. **SQLite database** — checkpoint WAL first and copy, or use the online
+   backup: `sudo -u warden sqlite3 /var/lib/warden/warden.db ".backup
+   /var/backups/warden/warden.db"`. Never copy only the main `.db` file
+   while WAL mode is active without a checkpoint.
+2. **Master key** — store in a different location/backup than the database.
+   Without it the database is unreadable.
+
+Restore both with the original owner (`warden`) and permissions (`0600` key).
+
+## SSH host-key verification
+
+- The client verifies against the platform-standard known-hosts file:
+  `~/.ssh/known_hosts` on Linux and `%USERPROFILE%\.ssh\known_hosts` on
+  Windows.
+- Known keys are accepted. **Changed keys always fail** (potential MITM).
+- Unknown keys fail closed by default. `--accept-new` (interactive `xssh`
+  only) shows the SHA-256 fingerprint and requires an explicit `yes` before
+  persisting the key; it never prompts in noninteractive mode.
+- Malformed lines in `known_hosts` are skipped OpenSSH-style; one bad line
+  never blocks all connections (a warning is printed to stderr).
+
+## CLI examples
 
 ```text
-warden-server serve
+# Run a command over SSH (target + optional jump chain, resolved server-side).
 warden ssh <connection> "<command>"
-warden db <connection> "<SQL>"
-warden xssh [connection]
+
+# Run one SQL statement against a MySQL/MariaDB profile, locally or through
+# an SSH tunnel; tabular output; no SQL or credentials in logs.
+warden db <connection> "<sql>"
+
+# Interactive shell (PTY). Omit the name for the built-in picker.
+# --accept-new enables interactive host-key confirmation.
+warden xssh [--accept-new] [connection]
+
+# Record an agent change report. Immutable, append-only.
 warden report create <project> --title <title> --summary <summary> --agent-model <name>
+
+# Redacted profile listing.
 warden config list
 warden config get <connection>
 ```
 
-Task 1 command handlers are bootstrap stubs: they parse usage and validate config, then exit without implementing transport or API behavior.
+Exit status mirrors the remote command/query: 0 on success, nonzero on
+failure (remote exit status is propagated for `ssh`).
+
+## Native Windows usage
+
+Build the client:
+
+```powershell
+$env:GOOS = "windows"; $env:GOARCH = "amd64"
+go build -o warden.exe ./cmd/warden
+```
+
+Run from PowerShell or cmd. Config file: `%AppData%\warden\client.json`
+(created manually — see the client config section). Environment overrides
+work the same as on Linux (`WARDEN_CLIENT_CONFIG`,
+`WARDEN_CLIENT_API_BASE_URL`, `WARDEN_CLIENT_TIMEOUT`).
+
+```powershell
+$env:WARDEN_CLIENT_API_BASE_URL = "http://<tailnet-host>:8080"
+.\warden.exe ssh my-host "ver"
+.\warden.exe xssh
+```
+
+`xssh` uses native Windows console APIs (raw-mode input, resize, Ctrl-C
+translation); no WSL, Cygwin, or native SSH is required. Host keys are
+verified against `%USERPROFILE%\.ssh\known_hosts`.
 
 ## Build
 
@@ -78,8 +211,31 @@ go build ./cmd/warden
 GOOS=windows GOARCH=amd64 go build ./cmd/warden
 ```
 
-Or use `make build`, `make build-client-windows`, `make test`, and `make vet`.
+Or use `make build`, `make build-client-windows`, `make test`, and
+`make vet`. For reproducible release artifacts (all three targets plus
+SHA-256 checksums into `dist/`):
 
-## Validation status
+```bash
+bash scripts/build-release.sh
+```
 
-Windows client cross-build is wired, but native Windows runtime and PTY behavior are not claimed until native tests exist.
+## Tests
+
+```bash
+go test ./...
+go test -race ./...
+go vet ./...
+bash scripts/test.sh   # end-to-end: server + API + CLI on an ephemeral port
+```
+
+## Security model (summary)
+
+- Tailnet is the trust boundary; there is no application authentication.
+- Secrets are encrypted at rest with AES-256-GCM (fresh nonce per value,
+  AAD bound to `warden/<kind>/<id>/<field>`), keyed by the standalone
+  `0600` master key the server alone reads.
+- The API returns redacted metadata for normal reads; only transport
+  endpoints return decrypted credentials, marked `Cache-Control: no-store`.
+- The server never executes user commands; execution is local on the client.
+- Audit events store operation/resource/source/result/timestamp — never
+  credentials, SQL text, or commands.

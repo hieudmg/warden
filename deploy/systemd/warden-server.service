@@ -1,0 +1,50 @@
+# warden-server systemd unit.
+#
+# Install: see deploy/systemd/README.md.
+# The server has no application authentication: tailnet membership is the
+# trust boundary. The listener must be loopback or a tailnet address only;
+# never bind a public interface (see README).
+#
+# Credentials (master key, passwords, private keys) are NEVER placed in
+# this file or in the environment file /etc/warden/warden-server.env.
+[Unit]
+Description=Warden Hub management server
+Documentation=file:///etc/warden/README.md
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=warden
+Group=warden
+
+# Creates /var/lib/warden (state) and /etc/warden (configuration) and
+# grants the service write access to the former.
+StateDirectory=warden
+ConfigurationDirectory=warden
+# The running service must not be able to modify its own configuration
+# or key material. Read-only wins over ConfigurationDirectory's
+# read-write grant for the same path.
+ReadOnlyPaths=/etc/warden
+
+# Non-secret runtime settings only (listen address, DB path, master key
+# path, optional static UI override). The `-` prefix tolerates a missing
+# file so the unit still starts with compiled-in defaults.
+EnvironmentFile=-/etc/warden/warden-server.env
+ExecStart=/usr/local/bin/warden-server serve
+
+UMask=0077
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+
+Restart=on-failure
+RestartSec=5s
+TimeoutStopSec=15s
+
+[Install]
+WantedBy=multi-user.target
