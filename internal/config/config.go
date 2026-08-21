@@ -48,16 +48,18 @@ type Client struct {
 }
 
 type ServerOptions struct {
-	ConfigPath string
-	LookupEnv  func(string) (string, bool)
+	ConfigPath    string
+	ConfigPathSet bool
+	LookupEnv     func(string) (string, bool)
 
 	defaultConfigPath string
 	readFile          func(string) ([]byte, error)
 }
 
 type ClientOptions struct {
-	ConfigPath string
-	LookupEnv  func(string) (string, bool)
+	ConfigPath    string
+	ConfigPathSet bool
+	LookupEnv     func(string) (string, bool)
 
 	defaultConfigPath string
 	readFile          func(string) ([]byte, error)
@@ -110,7 +112,10 @@ func LoadServer(opts ServerOptions) (Server, error) {
 	}
 
 	cfg := DefaultServer()
-	configPath, required := serverConfigPath(opts, lookupEnv)
+	configPath, required, err := serverConfigPath(opts, lookupEnv)
+	if err != nil {
+		return Server{}, err
+	}
 	if err := mergeServerFile(&cfg, configPath, required, opts.readFile); err != nil {
 		return Server{}, err
 	}
@@ -130,7 +135,10 @@ func LoadClient(opts ClientOptions) (Client, error) {
 	}
 
 	cfg := DefaultClient()
-	configPath, required := clientConfigPath(opts, lookupEnv)
+	configPath, required, err := clientConfigPath(opts, lookupEnv)
+	if err != nil {
+		return Client{}, err
+	}
 	if err := mergeClientFile(&cfg, configPath, required, opts.readFile); err != nil {
 		return Client{}, err
 	}
@@ -145,30 +153,31 @@ func LoadClient(opts ClientOptions) (Client, error) {
 	return cfg, nil
 }
 
-func serverConfigPath(opts ServerOptions, lookupEnv func(string) (string, bool)) (string, bool) {
-	if opts.ConfigPath != "" {
-		return opts.ConfigPath, true
-	}
-	if value, ok := lookupTrimmed(lookupEnv, serverConfigEnv); ok {
-		return value, true
-	}
-	if opts.defaultConfigPath != "" {
-		return opts.defaultConfigPath, false
-	}
-	return DefaultServerConfigPath(), false
+func serverConfigPath(opts ServerOptions, lookupEnv func(string) (string, bool)) (string, bool, error) {
+	return resolveConfigPath(opts.ConfigPath, opts.ConfigPathSet, serverConfigEnv, lookupEnv, opts.defaultConfigPath, DefaultServerConfigPath())
 }
 
-func clientConfigPath(opts ClientOptions, lookupEnv func(string) (string, bool)) (string, bool) {
-	if opts.ConfigPath != "" {
-		return opts.ConfigPath, true
+func clientConfigPath(opts ClientOptions, lookupEnv func(string) (string, bool)) (string, bool, error) {
+	return resolveConfigPath(opts.ConfigPath, opts.ConfigPathSet, clientConfigEnv, lookupEnv, opts.defaultConfigPath, DefaultClientConfigPath())
+}
+
+func resolveConfigPath(explicitPath string, explicitPathSet bool, envKey string, lookupEnv func(string) (string, bool), defaultPath string, fallbackPath string) (string, bool, error) {
+	if path := strings.TrimSpace(explicitPath); path != "" {
+		return path, true, nil
 	}
-	if value, ok := lookupTrimmed(lookupEnv, clientConfigEnv); ok {
-		return value, true
+	if explicitPathSet {
+		return "", false, errors.New("--config must not be empty")
 	}
-	if opts.defaultConfigPath != "" {
-		return opts.defaultConfigPath, false
+	if value, ok := lookupTrimmed(lookupEnv, envKey); ok {
+		if value == "" {
+			return "", false, fmt.Errorf("%s must not be empty when set", envKey)
+		}
+		return value, true, nil
 	}
-	return DefaultClientConfigPath(), false
+	if defaultPath != "" {
+		return defaultPath, false, nil
+	}
+	return fallbackPath, false, nil
 }
 
 func mergeServerFile(cfg *Server, path string, required bool, readFile func(string) ([]byte, error)) error {
@@ -225,6 +234,9 @@ func mergeClientFile(cfg *Client, path string, required bool, readFile func(stri
 
 func readConfigFile(path string, required bool, readFile func(string) ([]byte, error)) ([]byte, error) {
 	if path == "" {
+		if required {
+			return nil, errors.New("config path must not be empty")
+		}
 		return nil, nil
 	}
 	if readFile == nil {

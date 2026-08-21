@@ -39,17 +39,19 @@ func run(args []string, stdout, stderr io.Writer, lookupEnv func(string) (string
 		return 0
 	}
 
+	configPathSet := flagWasSet(root, "config")
+
 	switch rest[0] {
 	case "ssh":
-		return runSSH(rest[1:], *configPath, stdout, stderr, lookupEnv)
+		return runSSH(rest[1:], *configPath, configPathSet, stdout, stderr, lookupEnv)
 	case "db":
-		return runDB(rest[1:], *configPath, stdout, stderr, lookupEnv)
+		return runDB(rest[1:], *configPath, configPathSet, stdout, stderr, lookupEnv)
 	case "xssh":
-		return runXSSH(rest[1:], *configPath, stdout, stderr, lookupEnv)
+		return runXSSH(rest[1:], *configPath, configPathSet, stdout, stderr, lookupEnv)
 	case "report":
-		return runReport(rest[1:], *configPath, stdout, stderr, lookupEnv)
+		return runReport(rest[1:], *configPath, configPathSet, stdout, stderr, lookupEnv)
 	case "config":
-		return runConfig(rest[1:], *configPath, stdout, stderr, lookupEnv)
+		return runConfig(rest[1:], *configPath, configPathSet, stdout, stderr, lookupEnv)
 	default:
 		fmt.Fprintf(stderr, "unknown command %q\n\n", rest[0])
 		printUsage(stderr)
@@ -57,13 +59,17 @@ func run(args []string, stdout, stderr io.Writer, lookupEnv func(string) (string
 	}
 }
 
-func runSSH(args []string, configPath string, stdout, stderr io.Writer, lookupEnv func(string) (string, bool)) int {
+func runSSH(args []string, configPath string, configPathSet bool, stdout, stderr io.Writer, lookupEnv func(string) (string, bool)) int {
+	if len(args) == 1 && isFlagHelp(args[0]) {
+		printSSHUsage(stdout)
+		return 0
+	}
 	if len(args) != 2 {
 		fmt.Fprintln(stderr, "usage: warden ssh <connection> <command>")
 		return 2
 	}
 
-	cfg, err := loadClient(configPath, lookupEnv)
+	cfg, err := loadClient(configPath, configPathSet, lookupEnv)
 	if err != nil {
 		fmt.Fprintf(stderr, "invalid client config: %v\n", err)
 		return 1
@@ -73,13 +79,17 @@ func runSSH(args []string, configPath string, stdout, stderr io.Writer, lookupEn
 	return 0
 }
 
-func runDB(args []string, configPath string, stdout, stderr io.Writer, lookupEnv func(string) (string, bool)) int {
+func runDB(args []string, configPath string, configPathSet bool, stdout, stderr io.Writer, lookupEnv func(string) (string, bool)) int {
+	if len(args) == 1 && isFlagHelp(args[0]) {
+		printDBUsage(stdout)
+		return 0
+	}
 	if len(args) != 2 {
 		fmt.Fprintln(stderr, "usage: warden db <connection> <sql>")
 		return 2
 	}
 
-	cfg, err := loadClient(configPath, lookupEnv)
+	cfg, err := loadClient(configPath, configPathSet, lookupEnv)
 	if err != nil {
 		fmt.Fprintf(stderr, "invalid client config: %v\n", err)
 		return 1
@@ -89,13 +99,17 @@ func runDB(args []string, configPath string, stdout, stderr io.Writer, lookupEnv
 	return 0
 }
 
-func runXSSH(args []string, configPath string, stdout, stderr io.Writer, lookupEnv func(string) (string, bool)) int {
+func runXSSH(args []string, configPath string, configPathSet bool, stdout, stderr io.Writer, lookupEnv func(string) (string, bool)) int {
+	if len(args) == 1 && isFlagHelp(args[0]) {
+		printXSSHUsage(stdout)
+		return 0
+	}
 	if len(args) > 1 {
 		fmt.Fprintln(stderr, "usage: warden xssh [connection]")
 		return 2
 	}
 
-	cfg, err := loadClient(configPath, lookupEnv)
+	cfg, err := loadClient(configPath, configPathSet, lookupEnv)
 	if err != nil {
 		fmt.Fprintf(stderr, "invalid client config: %v\n", err)
 		return 1
@@ -105,7 +119,7 @@ func runXSSH(args []string, configPath string, stdout, stderr io.Writer, lookupE
 	return 0
 }
 
-func runReport(args []string, configPath string, stdout, stderr io.Writer, lookupEnv func(string) (string, bool)) int {
+func runReport(args []string, configPath string, configPathSet bool, stdout, stderr io.Writer, lookupEnv func(string) (string, bool)) int {
 	if len(args) == 0 || isHelp(args[0]) {
 		printReportUsage(stdout)
 		return 0
@@ -116,10 +130,10 @@ func runReport(args []string, configPath string, stdout, stderr io.Writer, looku
 		return 2
 	}
 
-	return runReportCreate(args[1:], configPath, stdout, stderr, lookupEnv)
+	return runReportCreate(args[1:], configPath, configPathSet, stdout, stderr, lookupEnv)
 }
 
-func runReportCreate(args []string, configPath string, stdout, stderr io.Writer, lookupEnv func(string) (string, bool)) int {
+func runReportCreate(args []string, configPath string, configPathSet bool, stdout, stderr io.Writer, lookupEnv func(string) (string, bool)) int {
 	if len(args) == 0 || isHelp(args[0]) {
 		printReportCreateUsage(stdout)
 		return 0
@@ -151,7 +165,7 @@ func runReportCreate(args []string, configPath string, stdout, stderr io.Writer,
 		return 2
 	}
 
-	cfg, err := loadClient(configPath, lookupEnv)
+	cfg, err := loadClient(configPath, configPathSet, lookupEnv)
 	if err != nil {
 		fmt.Fprintf(stderr, "invalid client config: %v\n", err)
 		return 1
@@ -161,7 +175,7 @@ func runReportCreate(args []string, configPath string, stdout, stderr io.Writer,
 	return 0
 }
 
-func runConfig(args []string, configPath string, stdout, stderr io.Writer, lookupEnv func(string) (string, bool)) int {
+func runConfig(args []string, configPath string, configPathSet bool, stdout, stderr io.Writer, lookupEnv func(string) (string, bool)) int {
 	if len(args) == 0 || isHelp(args[0]) {
 		printConfigUsage(stdout)
 		return 0
@@ -169,11 +183,19 @@ func runConfig(args []string, configPath string, stdout, stderr io.Writer, looku
 
 	switch args[0] {
 	case "list":
+		if len(args) == 2 && isFlagHelp(args[1]) {
+			printConfigListUsage(stdout)
+			return 0
+		}
 		if len(args) != 1 {
 			fmt.Fprintln(stderr, "usage: warden config list")
 			return 2
 		}
 	case "get":
+		if len(args) == 2 && isFlagHelp(args[1]) {
+			printConfigGetUsage(stdout)
+			return 0
+		}
 		if len(args) != 2 {
 			fmt.Fprintln(stderr, "usage: warden config get <connection>")
 			return 2
@@ -184,7 +206,7 @@ func runConfig(args []string, configPath string, stdout, stderr io.Writer, looku
 		return 2
 	}
 
-	cfg, err := loadClient(configPath, lookupEnv)
+	cfg, err := loadClient(configPath, configPathSet, lookupEnv)
 	if err != nil {
 		fmt.Fprintf(stderr, "invalid client config: %v\n", err)
 		return 1
@@ -194,10 +216,11 @@ func runConfig(args []string, configPath string, stdout, stderr io.Writer, looku
 	return 0
 }
 
-func loadClient(configPath string, lookupEnv func(string) (string, bool)) (config.Client, error) {
+func loadClient(configPath string, configPathSet bool, lookupEnv func(string) (string, bool)) (config.Client, error) {
 	return config.LoadClient(config.ClientOptions{
-		ConfigPath: configPath,
-		LookupEnv:  lookupEnv,
+		ConfigPath:    configPath,
+		ConfigPathSet: configPathSet,
+		LookupEnv:     lookupEnv,
 	})
 }
 
@@ -215,6 +238,24 @@ Environment overrides:
   WARDEN_CLIENT_CONFIG
   WARDEN_CLIENT_API_BASE_URL
   WARDEN_CLIENT_TIMEOUT
+`)
+}
+
+func printSSHUsage(w io.Writer) {
+	fmt.Fprint(w, `Usage:
+  warden ssh <connection> <command>
+`)
+}
+
+func printDBUsage(w io.Writer) {
+	fmt.Fprint(w, `Usage:
+  warden db <connection> <sql>
+`)
+}
+
+func printXSSHUsage(w io.Writer) {
+	fmt.Fprint(w, `Usage:
+  warden xssh [connection]
 `)
 }
 
@@ -237,6 +278,32 @@ func printConfigUsage(w io.Writer) {
 `)
 }
 
+func printConfigListUsage(w io.Writer) {
+	fmt.Fprint(w, `Usage:
+  warden config list
+`)
+}
+
+func printConfigGetUsage(w io.Writer) {
+	fmt.Fprint(w, `Usage:
+  warden config get <connection>
+`)
+}
+
 func isHelp(value string) bool {
-	return value == "-h" || value == "--help" || value == "help"
+	return isFlagHelp(value) || value == "help"
+}
+
+func isFlagHelp(value string) bool {
+	return value == "-h" || value == "--help"
+}
+
+func flagWasSet(fs *flag.FlagSet, name string) bool {
+	found := false
+	fs.Visit(func(f *flag.Flag) {
+		if f.Name == name {
+			found = true
+		}
+	})
+	return found
 }

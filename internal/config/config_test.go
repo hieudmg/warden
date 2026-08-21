@@ -138,6 +138,75 @@ func TestLoadServerRejectsUnknownJSONField(t *testing.T) {
 	}
 }
 
+func TestLoadServerRejectsEmptyConfigPathEnvBeforeRead(t *testing.T) {
+	t.Parallel()
+
+	readCalled := false
+	_, err := LoadServer(ServerOptions{
+		LookupEnv: lookupEnvFromMap(map[string]string{
+			serverConfigEnv: "   ",
+		}),
+		defaultConfigPath: filepath.Join(t.TempDir(), "server.json"),
+		readFile: func(string) ([]byte, error) {
+			readCalled = true
+			return nil, nil
+		},
+	})
+	if err == nil {
+		t.Fatal("LoadServer() error = nil, want error")
+	}
+	if !strings.Contains(err.Error(), serverConfigEnv) {
+		t.Fatalf("LoadServer() error = %v, want %q in error", err, serverConfigEnv)
+	}
+	if readCalled {
+		t.Fatal("LoadServer() read config file, want early rejection")
+	}
+}
+
+func TestLoadClientRejectsEmptyConfigPathEnvBeforeRead(t *testing.T) {
+	t.Parallel()
+
+	readCalled := false
+	_, err := LoadClient(ClientOptions{
+		LookupEnv: lookupEnvFromMap(map[string]string{
+			clientConfigEnv: "   ",
+		}),
+		defaultConfigPath: filepath.Join(t.TempDir(), "client.json"),
+		readFile: func(string) ([]byte, error) {
+			readCalled = true
+			return nil, nil
+		},
+	})
+	if err == nil {
+		t.Fatal("LoadClient() error = nil, want error")
+	}
+	if !strings.Contains(err.Error(), clientConfigEnv) {
+		t.Fatalf("LoadClient() error = %v, want %q in error", err, clientConfigEnv)
+	}
+	if readCalled {
+		t.Fatal("LoadClient() read config file, want early rejection")
+	}
+}
+
+func TestReadConfigFileRejectsEmptyRequiredPath(t *testing.T) {
+	t.Parallel()
+
+	readCalled := false
+	_, err := readConfigFile("", true, func(string) ([]byte, error) {
+		readCalled = true
+		return nil, nil
+	})
+	if err == nil {
+		t.Fatal("readConfigFile() error = nil, want error")
+	}
+	if !strings.Contains(err.Error(), "config path") {
+		t.Fatalf("readConfigFile() error = %v, want config path error", err)
+	}
+	if readCalled {
+		t.Fatal("readConfigFile() called readFile, want early rejection")
+	}
+}
+
 func writeTestFile(t *testing.T, path, content string) {
 	t.Helper()
 

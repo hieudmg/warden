@@ -50,8 +50,9 @@ func runServe(args []string, stdout, stderr io.Writer, lookupEnv func(string) (s
 	}
 
 	cfg, err := config.LoadServer(config.ServerOptions{
-		ConfigPath: *configPath,
-		LookupEnv:  lookupEnv,
+		ConfigPath:    *configPath,
+		ConfigPathSet: flagWasSet(fs, "config"),
+		LookupEnv:     lookupEnv,
 	})
 	if err != nil {
 		fmt.Fprintf(stderr, "invalid server config: %v\n", err)
@@ -84,4 +85,14 @@ func printServeUsage(w io.Writer) {
 
 func isHelp(value string) bool {
 	return value == "-h" || value == "--help" || value == "help"
+}
+
+func flagWasSet(fs *flag.FlagSet, name string) bool {
+	found := false
+	fs.Visit(func(f *flag.Flag) {
+		if f.Name == name {
+			found = true
+		}
+	})
+	return found
 }
