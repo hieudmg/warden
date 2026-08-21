@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"context"
 	"errors"
 	"flag"
@@ -8,11 +9,15 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"strconv"
+	"strings"
 
 	"warden/internal/client/api"
 	clientdb "warden/internal/client/db"
 	clientssh "warden/internal/client/ssh"
+	"warden/internal/client/terminal"
 	"warden/internal/config"
+	"warden/internal/model"
 )
 
 func main() {
@@ -52,7 +57,7 @@ func run(args []string, stdout, stderr io.Writer, lookupEnv func(string) (string
 	case "db":
 		return runDB(rest[1:], *configPath, configPathSet, stdout, stderr, lookupEnv)
 	case "xssh":
-		return runXSSH(rest[1:], *configPath, configPathSet, stdout, stderr, lookupEnv)
+		return runXSSH(rest[1:], *configPath, configPathSet, stdout, stderr, os.Stdin, lookupEnv)
 	case "report":
 		return runReport(rest[1:], *configPath, configPathSet, stdout, stderr, lookupEnv)
 	case "config":
@@ -175,14 +180,25 @@ func runDB(args []string, configPath string, configPathSet bool, stdout, stderr 
 	return 0
 }
 
-func runXSSH(args []string, configPath string, configPathSet bool, stdout, stderr io.Writer, lookupEnv func(string) (string, bool)) int {
-	if len(args) == 1 && isFlagHelp(args[0]) {
-		printXSSHUsage(stdout)
-		return 0
-	}
-	if len(args) > 1 {
-		fmt.Fprintln(stderr, "usage: warden xssh [connection]")
+func runXSSH(args []string, configPath string, configPathSet bool, stdout, stderr io.Writer, stdin io.Reader, lookupEnv func(string) (string, bool)) int {
+	fs := flag.NewFlagSet("xssh", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	fs.Usage = func() {}
+	acceptNew := fs.Bool("accept-new", false, "accept unknown host keys after interactive confirmation")
+	if err := fs.Parse(args); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			printXSSHUsage(stdout)
+			return 0
+		}
 		return 2
+	}
+	if fs.NArg() > 1 {
+		fmt.Fprintln(stderr, "usage: warden xssh [--accept-new] [connection]")
+		return 2
+	}
+	name := ""
+	if fs.NArg() == 1 {
+		name = fs.Arg(0)
 	}
 
 	cfg, err := loadClient(configPath, configPathSet, lookupEnv)
@@ -191,8 +207,114 @@ func runXSSH(args []string, configPath string, configPathSet bool, stdout, stder
 		return 1
 	}
 
-	fmt.Fprintf(stdout, "client bootstrap ready for xssh via %s\n", cfg.APIBaseURL)
+	cl := api.New(cfg.APIBaseURL, &http.Client{Timeout: cfg.Timeout})
+	ctx := context.Background()
+
+	conns, err := cl.ListSSH(ctx)
+	if err != nil {
+		fmt.Fprintf(stderr, "xssh: %v\n", err)
+		return 1
+	}
+
+	var sel model.SSHConnection
+	if name != "" {
+		found := false
+		for _, c := range conns {
+			if c.Name == name {
+				sel = c
+				found = true
+				break
+			}
+		}
+		if !found {
+			fmt.Fprintf(stderr, "xssh: connection %q not found\n", name)
+			return 1
+		}
+	} else {
+		sel, err = pickConnection(stdin, stdout, conns)
+		if err != nil {
+			fmt.Fprintf(stderr, "xssh: %v\n", err)
+			return 1
+		}
+	}
+
+	bundle, err := cl.GetSSHBundle(ctx, sel.ID)
+	if err != nil {
+		fmt.Fprintf(stderr, "xssh: %v\n", err)
+		return 1
+	}
+
+	term, err := terminal.NewSession()
+	if err != nil {
+		fmt.Fprintf(stderr, "xssh: %v\n", err)
+		return 1
+	}
+
+	if err := clientssh.RunInteractive(ctx, bundle, term, *acceptNew); err != nil {
+		var exitErr *clientssh.ExitStatusError
+		if errors.As(err, &exitErr) {
+			return exitErr.Status
+		}
+		fmt.Fprintf(stderr, "xssh: %v\n", err)
+		return 1
+	}
 	return 0
+}
+
+// pickConnection runs the built-in searchable picker over redacted SSH
+// connections, replacing the fzf dependency. Inputs are a list number, an
+// exact name, or a case-insensitive substring filter; "q"/"quit" aborts.
+// A filter matching exactly one connection selects it directly.
+func pickConnection(stdin io.Reader, stdout io.Writer, conns []model.SSHConnection) (model.SSHConnection, error) {
+	if len(conns) == 0 {
+		return model.SSHConnection{}, errors.New("no ssh connections configured")
+	}
+
+	current := conns
+	scanner := bufio.NewScanner(stdin)
+	for {
+		fmt.Fprintln(stdout, "Select an SSH connection (number, exact name, or filter; q to quit):")
+		for i, c := range current {
+			fmt.Fprintf(stdout, "  %2d  %-24s %s:%d  %s\n", i+1, c.Name, c.Host, c.Port, c.Username)
+		}
+		fmt.Fprint(stdout, "> ")
+		if !scanner.Scan() {
+			if err := scanner.Err(); err != nil {
+				return model.SSHConnection{}, err
+			}
+			return model.SSHConnection{}, errors.New("no selection made")
+		}
+		input := strings.TrimSpace(scanner.Text())
+		if input == "" {
+			continue
+		}
+		if input == "q" || input == "quit" {
+			return model.SSHConnection{}, errors.New("selection aborted")
+		}
+		if n, err := strconv.Atoi(input); err == nil && n >= 1 && n <= len(current) {
+			return current[n-1], nil
+		}
+		for _, c := range current {
+			if c.Name == input {
+				return c, nil
+			}
+		}
+		lower := strings.ToLower(input)
+		var matched []model.SSHConnection
+		for _, c := range current {
+			if strings.Contains(strings.ToLower(c.Name), lower) {
+				matched = append(matched, c)
+			}
+		}
+		switch len(matched) {
+		case 0:
+			fmt.Fprintf(stdout, "no connection matches %q\n", input)
+		case 1:
+			return matched[0], nil
+		default:
+			current = matched
+		}
+	}
 }
 
 func runReport(args []string, configPath string, configPathSet bool, stdout, stderr io.Writer, lookupEnv func(string) (string, bool)) int {
@@ -332,6 +454,9 @@ func printDBUsage(w io.Writer) {
 func printXSSHUsage(w io.Writer) {
 	fmt.Fprint(w, `Usage:
   warden xssh [connection]
+
+Options:
+  --accept-new  accept unknown host keys after interactive confirmation
 `)
 }
 
