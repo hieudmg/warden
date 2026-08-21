@@ -3,11 +3,13 @@ package ssh
 import (
 	"bytes"
 	"context"
+	"io"
 	"net"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"golang.org/x/crypto/ssh"
 	"golang.org/x/crypto/ssh/knownhosts"
@@ -182,6 +184,83 @@ func TestConfirmHostAcceptsLFLineEnd(t *testing.T) {
 	}
 	if err := dialWithHostKey(t, srv, cb); err != nil {
 		t.Fatalf("dial with LF-terminated yes: %v", err)
+	}
+}
+
+// blockingReader is an io.ReadWriter that delivers bytes from a queue
+// one at a time and blocks on an empty queue until more bytes arrive.
+// It mirrors a real raw terminal: bytes arrive one-by-one, and reading
+// before a byte is available blocks (no EOF).
+type blockingReader struct {
+	ch chan byte
+}
+
+func newBlockingReader() *blockingReader {
+	return &blockingReader{ch: make(chan byte, 16)}
+}
+
+func (b *blockingReader) Read(p []byte) (int, error) {
+	if len(p) == 0 {
+		return 0, nil
+	}
+	v, ok := <-b.ch
+	if !ok {
+		return 0, io.EOF
+	}
+	p[0] = v
+	return 1, nil
+}
+
+func (b *blockingReader) Write(p []byte) (int, error) { return len(p), nil }
+
+func (b *blockingReader) Push(s string) {
+	for i := 0; i < len(s); i++ {
+		b.ch <- s[i]
+	}
+}
+
+// TestConfirmHostRawTerminalCR verifies the byte-by-byte reader
+// terminates on a CR-only response — the case the prior
+// ReadString('\n') implementation would block forever on. Uses the
+// production hostkey.Callback path (no custom HostKeyCallback) so the
+// real confirmHost is invoked, and a blockingReader that delivers
+// bytes one at a time so the prompt cannot accidentally EOF.
+func TestConfirmHostRawTerminalCR(t *testing.T) {
+	t.Parallel()
+
+	srv := newTestSSHServer(t, "s3cret", nil)
+	path := filepath.Join(t.TempDir(), "known_hosts")
+
+	term := newBlockingReader()
+	go func() { term.Push("yes\r") }()
+
+	cb, err := hostkey.Callback(path, true, term)
+	if err != nil {
+		t.Fatalf("Callback: %v", err)
+	}
+
+	target := targetNode("s", srv.addr)
+	target.Username = "user"
+	target.Password = []byte("s3cret")
+
+	done := make(chan error, 1)
+	go func() {
+		client, derr := DialTarget(context.Background(), model.SSHBundle{Target: target},
+			DialOptions{HostKeyCallback: cb})
+		if derr != nil {
+			done <- derr
+			return
+		}
+		client.Close()
+		done <- nil
+	}()
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("dial with raw-terminal CR response: %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("confirmHost blocked on raw-terminal CR; ReadString bug regressed")
 	}
 }
 

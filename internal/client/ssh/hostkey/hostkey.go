@@ -224,31 +224,38 @@ func handleUnknown(hostname string, key ssh.PublicKey, path string, acceptNew bo
 }
 
 // confirmHost prints the fingerprint and requires an explicit "yes".
-// Either CR (0x0D) or LF (0x0A) terminates the response: in raw mode
-// `term.MakeRaw` disables ICRNL, so the Enter key yields CR only, and
-// a paste of an LF-terminated response must also work.
+// The reader is consumed byte-by-byte until a CR (\r) or LF (\n)
+// terminator or EOF is observed. ReadString('\n') would not work here:
+// in raw mode `term.MakeRaw` disables ICRNL, so Enter yields CR and
+// ReadString('\n') blocks forever. Byte-by-byte reading handles CR
+// alone, LF alone, and CRLF, and ignores any empty lines between the
+// prompt and the response.
 func confirmHost(terminal io.ReadWriter, hostname string, key ssh.PublicKey) bool {
 	fmt.Fprintf(terminal, "The authenticity of host %q can't be established.\n", hostname)
 	fmt.Fprintf(terminal, "%s key fingerprint is %s.\n", key.Type(), ssh.FingerprintSHA256(key))
 	fmt.Fprintf(terminal, "Are you sure you want to continue connecting (yes/no)? ")
 
-	reader := bufio.NewReader(terminal)
+	var buf []byte
+	one := make([]byte, 1)
 	for {
-		line, err := reader.ReadString('\n')
-		if err != nil && line == "" {
-			return false
+		n, err := terminal.Read(one)
+		if n > 0 {
+			b := one[0]
+			if b == '\n' || b == '\r' {
+				break
+			}
+			buf = append(buf, b)
+			// Bound the response length so a runaway sender cannot
+			// grow buf without limit.
+			if len(buf) > 256 {
+				return false
+			}
 		}
-		// A trailing CR (from a raw terminal) is not stripped by
-		// ReadString('\n'); trim it before comparing.
-		line = strings.TrimRight(line, "\r\n")
-		if line != "" {
-			return line == "yes"
-		}
-		// Empty line: keep reading until we see a terminator or EOF.
 		if err != nil {
-			return false
+			break
 		}
 	}
+	return strings.TrimSpace(string(buf)) == "yes"
 }
 
 // persist appends the accepted key to the known_hosts file, creating the
