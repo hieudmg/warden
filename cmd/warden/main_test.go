@@ -521,3 +521,106 @@ func handleCLITestConn(conn net.Conn, cfg *ssh.ServerConfig) {
 		}(ch, reqs)
 	}
 }
+
+func TestRunReportCreateRequiresAllFlags(t *testing.T) {
+	lookupEnv := func(string) (string, bool) { return "", false }
+
+	cases := [][]string{
+		{"report", "create", "demo", "--title", "t", "--summary", "s"},
+		{"report", "create", "demo", "--title", "t", "--agent-model", "a"},
+		{"report", "create", "demo", "--summary", "s", "--agent-model", "a"},
+		{"report", "create", "", "--title", "t", "--summary", "s", "--agent-model", "a"},
+	}
+	for _, args := range cases {
+		var stdout, stderr bytes.Buffer
+		exitCode := run(args, &stdout, &stderr, lookupEnv)
+		if exitCode != 2 {
+			t.Errorf("run(%v) exitCode = %d, want 2", args, exitCode)
+		}
+		if !strings.Contains(stderr.String(), "report create requires") {
+			t.Errorf("run(%v) stderr = %q, want missing-flags message", args, stderr.String())
+		}
+	}
+}
+
+func TestRunReportCreateAPIError(t *testing.T) {
+	apiSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusBadRequest)
+		io.WriteString(w, `{"code":"validation_error","message":"title must be 1-200 bytes"}`)
+	}))
+	defer apiSrv.Close()
+
+	lookupEnv := func(key string) (string, bool) {
+		switch key {
+		case "WARDEN_CLIENT_API_BASE_URL":
+			return apiSrv.URL, true
+		case "WARDEN_CLIENT_TIMEOUT":
+			return "10s", true
+		}
+		return "", false
+	}
+
+	var stdout, stderr bytes.Buffer
+	exitCode := run([]string{"report", "create", "demo", "--title", "t", "--summary", "s", "--agent-model", "a"},
+		&stdout, &stderr, lookupEnv)
+	if exitCode != 1 {
+		t.Fatalf("run() exitCode = %d, want 1, stderr=%q", exitCode, stderr.String())
+	}
+	if !strings.Contains(stderr.String(), "validation_error") {
+		t.Fatalf("stderr = %q, want validation_error surfaced", stderr.String())
+	}
+	if strings.Contains(stderr.String(), "title must be 1-200 bytes") == false {
+		t.Fatalf("stderr = %q, want server message", stderr.String())
+	}
+}
+
+func TestRunReportCreateSuccess(t *testing.T) {
+	apiSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/v1/reports" || r.Method != http.MethodPost {
+			t.Errorf("got %s %s, want POST /api/v1/reports", r.Method, r.URL.Path)
+		}
+		w.WriteHeader(http.StatusCreated)
+		io.WriteString(w, `{"id":11,"project":"demo","title":"t","summary":"s","agent_model":"a","created_at":"2026-08-21T10:00:00Z"}`)
+	}))
+	defer apiSrv.Close()
+
+	lookupEnv := func(key string) (string, bool) {
+		switch key {
+		case "WARDEN_CLIENT_API_BASE_URL":
+			return apiSrv.URL, true
+		case "WARDEN_CLIENT_TIMEOUT":
+			return "10s", true
+		}
+		return "", false
+	}
+
+	var stdout, stderr bytes.Buffer
+	exitCode := run([]string{"report", "create", "demo", "--title", "t", "--summary", "s", "--agent-model", "a"},
+		&stdout, &stderr, lookupEnv)
+	if exitCode != 0 {
+		t.Fatalf("run() exitCode = %d, want 0, stderr=%q", exitCode, stderr.String())
+	}
+	out := stdout.String()
+	if !strings.Contains(out, "11") || !strings.Contains(out, "2026-08-21T10:00:00Z") {
+		t.Fatalf("stdout = %q, want confirmation with report id and created_at", out)
+	}
+	if strings.Contains(out, `"summary"`) || strings.Contains(out, `"title"`) {
+		t.Fatalf("stdout = %q, must not echo report body", out)
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("stderr = %q, want empty", stderr.String())
+	}
+}
+
+func TestRunReportCreateUnknownCommand(t *testing.T) {
+	lookupEnv := func(string) (string, bool) { return "", false }
+
+	var stdout, stderr bytes.Buffer
+	exitCode := run([]string{"report", "list"}, &stdout, &stderr, lookupEnv)
+	if exitCode != 2 {
+		t.Fatalf("run() exitCode = %d, want 2", exitCode)
+	}
+	if !strings.Contains(stderr.String(), "unknown report command") {
+		t.Fatalf("stderr = %q, want unknown-command message", stderr.String())
+	}
+}

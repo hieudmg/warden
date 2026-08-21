@@ -17,6 +17,7 @@ import (
 	"warden/internal/server"
 	"warden/internal/server/audit"
 	"warden/internal/server/profiles"
+	"warden/internal/server/reports"
 	"warden/internal/store"
 )
 
@@ -84,6 +85,7 @@ func runServe(args []string, stdout, stderr io.Writer, lookupEnv func(string) (s
 	rec := audit.New(s)
 	mux := http.NewServeMux()
 	profiles.New(s, rec).Register(mux)
+	reports.New(s, rec).Register(mux)
 
 	srv := server.New(cfg.ListenAddr, mux)
 	errCh := make(chan error, 1)

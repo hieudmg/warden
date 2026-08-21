@@ -22,7 +22,7 @@ var (
 // stable identifier for a given name.
 func (s *Store) CreateProject(ctx context.Context, name string) (model.Project, error) {
 	if err := validateProjectName(name); err != nil {
-		return model.Project{}, err
+		return model.Project{}, fmt.Errorf("%w: %v", ErrValidation, err)
 	}
 	_, err := s.db.ExecContext(ctx, "INSERT INTO projects (name) VALUES (?)", name)
 	if err != nil {
@@ -73,10 +73,10 @@ func (s *Store) ListProjects(ctx context.Context) ([]model.Project, error) {
 // auto-created when missing.
 func (s *Store) CreateReport(ctx context.Context, project, title, summary, agentModel string) (model.Report, error) {
 	if err := validateProjectName(project); err != nil {
-		return model.Report{}, err
+		return model.Report{}, fmt.Errorf("%w: %v", ErrValidation, err)
 	}
 	if err := validateReportFields(title, summary, agentModel); err != nil {
-		return model.Report{}, err
+		return model.Report{}, fmt.Errorf("%w: %v", ErrValidation, err)
 	}
 
 	p, err := s.CreateProject(ctx, project)

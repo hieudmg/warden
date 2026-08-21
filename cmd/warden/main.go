@@ -11,9 +11,11 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"time"
 
 	"warden/internal/client/api"
 	clientdb "warden/internal/client/db"
+	clientreport "warden/internal/client/report"
 	clientssh "warden/internal/client/ssh"
 	"warden/internal/client/terminal"
 	"warden/internal/config"
@@ -369,7 +371,24 @@ func runReportCreate(args []string, configPath string, configPathSet bool, stdou
 		return 1
 	}
 
-	fmt.Fprintf(stdout, "client bootstrap ready for report create via %s\n", cfg.APIBaseURL)
+	cl := api.New(cfg.APIBaseURL, &http.Client{Timeout: cfg.Timeout})
+	reportClient := clientreport.New(cl)
+	ctx := context.Background()
+
+	r, err := reportClient.CreateReport(ctx, model.ReportRequest{
+		Project:    project,
+		Title:      *title,
+		Summary:    *summary,
+		AgentModel: *agentModel,
+	})
+	if err != nil {
+		fmt.Fprintf(stderr, "report create: %v\n", err)
+		return 1
+	}
+
+	// One-line confirmation only: report id and server timestamp, never the
+	// body (title/summary). The body is intentionally not echoed.
+	fmt.Fprintf(stdout, "report %d created for %s at %s\n", r.ID, r.Project, r.CreatedAt.UTC().Format(time.RFC3339))
 	return 0
 }
 

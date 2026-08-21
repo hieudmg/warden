@@ -119,12 +119,46 @@ func (c *Client) DBDependents(ctx context.Context, id int64) (model.DependentsRe
 	return out, err
 }
 
+// GetJSON performs a GET and strictly decodes a successful JSON response.
+// It is the exported form of getJSON used by API surface extensions that
+// live outside this package (e.g. reports).
+func (c *Client) GetJSON(ctx context.Context, path string, dst any) error {
+	return c.getJSON(ctx, path, dst)
+}
+
 // getJSON performs a GET and strictly decodes a successful JSON response.
 // Bodies are bounded and always closed; errors are sanitized API errors.
 func (c *Client) getJSON(ctx context.Context, path string, dst any) error {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+path, nil)
+	return c.requestJSON(ctx, http.MethodGet, path, nil, dst, http.StatusOK)
+}
+
+// PostJSON performs a POST with a JSON body and strictly decodes a
+// successful JSON response (200 OK or 201 Created). It is used by API
+// surface extensions (e.g. reports) that live outside this package.
+func (c *Client) PostJSON(ctx context.Context, path string, body any, dst any) error {
+	return c.requestJSON(ctx, http.MethodPost, path, body, dst, http.StatusOK, http.StatusCreated)
+}
+
+// requestJSON performs a request, bounds and closes the body, maps non-2xx
+// responses to *APIError, and strictly decodes a successful response into
+// dst. Accepting several success statuses is required by endpoints that
+// create resources (201) and those that idempotently retrieve (200).
+func (c *Client) requestJSON(ctx context.Context, method, path string, body any, dst any, successCodes ...int) error {
+	var reader io.Reader
+	if body != nil {
+		payload, err := json.Marshal(body)
+		if err != nil {
+			return fmt.Errorf("encode %s body: %w", path, err)
+		}
+		reader = bytes.NewReader(payload)
+	}
+
+	req, err := http.NewRequestWithContext(ctx, method, c.baseURL+path, reader)
 	if err != nil {
 		return fmt.Errorf("build request %s: %w", path, err)
+	}
+	if body != nil {
+		req.Header.Set("Content-Type", "application/json")
 	}
 
 	resp, err := c.http.Do(req)
@@ -133,19 +167,19 @@ func (c *Client) getJSON(ctx context.Context, path string, dst any) error {
 	}
 	defer resp.Body.Close()
 
-	if resp.StatusCode != http.StatusOK {
+	if !statusAccepted(resp.StatusCode, acceptCodes(successCodes)) {
 		return parseErrError(resp)
 	}
 
-	body, err := io.ReadAll(io.LimitReader(resp.Body, maxResponseBytes+1))
+	bodyBytes, err := io.ReadAll(io.LimitReader(resp.Body, maxResponseBytes+1))
 	if err != nil {
 		return fmt.Errorf("read %s response: %w", path, err)
 	}
-	if len(body) > maxResponseBytes {
+	if len(bodyBytes) > maxResponseBytes {
 		return fmt.Errorf("read %s response: body too large", path)
 	}
 
-	dec := json.NewDecoder(bytes.NewReader(body))
+	dec := json.NewDecoder(bytes.NewReader(bodyBytes))
 	dec.DisallowUnknownFields()
 	if err := dec.Decode(dst); err != nil {
 		return fmt.Errorf("decode %s response: %w", path, err)
@@ -154,6 +188,23 @@ func (c *Client) getJSON(ctx context.Context, path string, dst any) error {
 		return fmt.Errorf("decode %s response: unexpected trailing data", path)
 	}
 	return nil
+}
+
+func statusAccepted(status int, codes []int) bool {
+	for _, c := range codes {
+		if status == c {
+			return true
+		}
+	}
+	return false
+}
+
+// acceptCodes returns the effective set of accepted status codes.
+func acceptCodes(codes []int) []int {
+	if len(codes) == 0 {
+		return []int{http.StatusOK}
+	}
+	return codes
 }
 
 // errorEnvelope mirrors the server's stable JSON error envelope.
