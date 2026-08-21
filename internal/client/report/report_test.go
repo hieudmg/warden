@@ -140,7 +140,7 @@ func TestJSONErrorSurfacesAPIError(t *testing.T) {
 	if err == nil {
 		t.Fatal("CreateReport succeeded, want APIError")
 	}
-var apiErr *api.APIError
+	var apiErr *api.APIError
 	if !errors.As(err, &apiErr) {
 		t.Fatalf("err = %T, want *api.APIError", err)
 	}
