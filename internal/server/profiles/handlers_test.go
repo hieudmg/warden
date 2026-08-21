@@ -1,9 +1,11 @@
 package profiles_test
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"strings"
 	"testing"
@@ -419,6 +421,31 @@ func TestAuditRecordsFailure(t *testing.T) {
 	}
 	if strings.Contains(e.Error, "supersecret") {
 		t.Errorf("audit error leaks password: %q", e.Error)
+	}
+}
+
+func TestAuditFailureIsLogged(t *testing.T) {
+	mux, s, _ := newTestAPI(t)
+
+	var buf bytes.Buffer
+	logger := slog.New(slog.NewTextHandler(&buf, nil))
+	prev := slog.Default()
+	slog.SetDefault(logger)
+	t.Cleanup(func() { slog.SetDefault(prev) })
+
+	// Close the store so the list operation fails; the resulting audit
+	// write also fails and must be surfaced as a server warning, not
+	// silently dropped.
+	if err := s.Close(); err != nil {
+		t.Fatalf("close store: %v", err)
+	}
+
+	rec := doRequest(t, mux, http.MethodGet, "/api/v1/ssh-connections", "")
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want 500 (body=%s)", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(buf.String(), "audit write failed") {
+		t.Errorf("audit write failure not logged as a warning; output=%q", buf.String())
 	}
 }
 

@@ -12,19 +12,34 @@ import (
 	"warden/internal/store"
 )
 
-// maxJumpDepth bounds the total number of jump hops in a resolved route.
-const maxJumpDepth = 32
+// MaxJumpDepth bounds the number of nodes in a resolved jump route path
+// (target plus hop chain).
+const MaxJumpDepth = 32
+
+// ErrJumpDepthExceeded reports a jump route deeper than MaxJumpDepth.
+var ErrJumpDepthExceeded = errors.New("jump route exceeds the maximum depth")
 
 // GraphError reports a logically invalid jump route: missing references,
 // self-reference, cycles, malformed stored JSON, or depth overflow. It is
 // distinct from storage/decryption failures so handlers can map it to a
 // stable 422 invalid_graph response.
-type GraphError struct{ msg string }
+type GraphError struct {
+	msg   string
+	cause error
+}
 
 func (e *GraphError) Error() string { return e.msg }
 
+// Unwrap exposes the wrapped sentinel (e.g. ErrJumpDepthExceeded) so
+// callers can classify the specific graph failure with errors.Is.
+func (e *GraphError) Unwrap() error { return e.cause }
+
 func graphErrorf(format string, args ...any) error {
 	return &GraphError{msg: fmt.Sprintf(format, args...)}
+}
+
+func graphErrorWrap(cause error, format string, args ...any) error {
+	return &GraphError{msg: fmt.Sprintf(format, args...), cause: cause}
 }
 
 // Resolver resolves connection profiles into complete transport bundles,
@@ -73,8 +88,8 @@ func (r *Resolver) resolveJumps(ctx context.Context, ownerID int64, jumpJSON str
 		if path[jid] {
 			return graphErrorf("jump route cycle detected at connection %d", jid)
 		}
-		if len(*hops) >= maxJumpDepth {
-			return graphErrorf("jump route exceeds the maximum depth of %d", maxJumpDepth)
+		if len(path) >= MaxJumpDepth {
+			return graphErrorWrap(ErrJumpDepthExceeded, "jump route exceeds the maximum depth of %d", MaxJumpDepth)
 		}
 		node, err := r.store.GetSSH(ctx, jid)
 		if err != nil {

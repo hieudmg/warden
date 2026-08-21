@@ -179,6 +179,34 @@ func TestResolveSSHBundleAADMismatch(t *testing.T) {
 	}
 }
 
+func TestResolveSSHBundleRejectsChainExceedingMaxJumpDepth(t *testing.T) {
+	_, s, _ := newTestAPI(t)
+	r := profiles.NewResolver(s)
+	ctx := context.Background()
+
+	// Build a linear chain of MaxJumpDepth+1 rows: target -> j1 -> ... -> jN.
+	// Created in reverse so each node references the next one down.
+	const n = profiles.MaxJumpDepth
+	next := "[]"
+	for i := n; i >= 1; i-- {
+		node := createSSH(t, s, fmt.Sprintf("j%d", i), next)
+		next = fmt.Sprintf("[%d]", node.ID)
+	}
+	target := createSSH(t, s, "target", next)
+
+	bundle, err := r.ResolveSSHBundle(ctx, target.ID)
+	if !errors.Is(err, profiles.ErrJumpDepthExceeded) {
+		t.Fatalf("ResolveSSHBundle error = %v, want ErrJumpDepthExceeded", err)
+	}
+	var ge *profiles.GraphError
+	if !errors.As(err, &ge) {
+		t.Errorf("depth error %v is not a GraphError", err)
+	}
+	if bundle.Target.ID != 0 || len(bundle.Jumps) != 0 {
+		t.Errorf("partial bundle returned on depth failure: %+v", bundle)
+	}
+}
+
 func TestResolveDBBundleDirect(t *testing.T) {
 	_, s, _ := newTestAPI(t)
 	r := profiles.NewResolver(s)

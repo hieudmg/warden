@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"log/slog"
 	"net/http"
 	"strconv"
 
@@ -32,6 +33,21 @@ func New(s *store.Store, a *audit.Recorder) *Handler {
 	return &Handler{store: s, resolver: NewResolver(s), audit: a}
 }
 
+// record writes an audit event for an HTTP request and surfaces recorder
+// failures as a server warning so audit loss is never silent. Only
+// operation/resource identifiers and the sanitized recorder error are
+// logged — never secrets, SQL text, or request bodies.
+func (h *Handler) record(r *http.Request, op, resourceType, resourceID, result string, err error, metadata map[string]any) {
+	if aerr := h.audit.RecordRequest(r.Context(), r, op, resourceType, resourceID, result, err, metadata); aerr != nil {
+		slog.Warn("audit write failed",
+			"op", op,
+			"resource_type", resourceType,
+			"resource_id", resourceID,
+			"error", aerr,
+		)
+	}
+}
+
 // Register mounts all profile routes on mux.
 func (h *Handler) Register(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/v1/ssh-connections", h.listSSH)
@@ -55,7 +71,7 @@ func (h *Handler) Register(mux *http.ServeMux) {
 func (h *Handler) listSSH(w http.ResponseWriter, r *http.Request) {
 	profiles, err := h.store.ListSSH(r.Context())
 	if err != nil {
-		h.audit.RecordRequest(r.Context(), r, "ssh_connection.list", "ssh_connection", "", "failure", err, nil)
+		h.record(r, "ssh_connection.list", "ssh_connection", "", "failure", err, nil)
 		server.WriteError(w, http.StatusInternalServerError, server.ErrInternal, "list ssh connections failed")
 		return
 	}
@@ -63,14 +79,14 @@ func (h *Handler) listSSH(w http.ResponseWriter, r *http.Request) {
 	for _, p := range profiles {
 		resp = append(resp, redactSSH(p))
 	}
-	h.audit.RecordRequest(r.Context(), r, "ssh_connection.list", "ssh_connection", "", "success", nil, nil)
+	h.record(r, "ssh_connection.list", "ssh_connection", "", "success", nil, nil)
 	server.WriteJSON(w, http.StatusOK, resp)
 }
 
 func (h *Handler) createSSH(w http.ResponseWriter, r *http.Request) {
 	var req model.SSHConnectionRequest
 	if err := decodeStrict(w, r, &req); err != nil {
-		h.audit.RecordRequest(r.Context(), r, "ssh_connection.create", "ssh_connection", "", "failure", err, nil)
+		h.record(r, "ssh_connection.create", "ssh_connection", "", "failure", err, nil)
 		writeDecodeError(w, err)
 		return
 	}
@@ -99,11 +115,11 @@ func (h *Handler) createSSH(w http.ResponseWriter, r *http.Request) {
 
 	created, err := h.store.CreateSSH(r.Context(), p)
 	if err != nil {
-		h.audit.RecordRequest(r.Context(), r, "ssh_connection.create", "ssh_connection", "", "failure", err, nil)
+		h.record(r, "ssh_connection.create", "ssh_connection", "", "failure", err, nil)
 		writeStoreError(w, err)
 		return
 	}
-	h.audit.RecordRequest(r.Context(), r, "ssh_connection.create", "ssh_connection", strconv.FormatInt(created.ID, 10), "success", nil, nil)
+	h.record(r, "ssh_connection.create", "ssh_connection", strconv.FormatInt(created.ID, 10), "success", nil, nil)
 	server.WriteJSON(w, http.StatusCreated, redactSSH(created))
 }
 
@@ -114,11 +130,11 @@ func (h *Handler) getSSH(w http.ResponseWriter, r *http.Request) {
 	}
 	p, err := h.store.GetSSH(r.Context(), id)
 	if err != nil {
-		h.audit.RecordRequest(r.Context(), r, "ssh_connection.get", "ssh_connection", strconv.FormatInt(id, 10), "failure", err, nil)
+		h.record(r, "ssh_connection.get", "ssh_connection", strconv.FormatInt(id, 10), "failure", err, nil)
 		writeStoreError(w, err)
 		return
 	}
-	h.audit.RecordRequest(r.Context(), r, "ssh_connection.get", "ssh_connection", strconv.FormatInt(id, 10), "success", nil, nil)
+	h.record(r, "ssh_connection.get", "ssh_connection", strconv.FormatInt(id, 10), "success", nil, nil)
 	server.WriteJSON(w, http.StatusOK, redactSSH(p))
 }
 
@@ -129,7 +145,7 @@ func (h *Handler) updateSSH(w http.ResponseWriter, r *http.Request) {
 	}
 	var req model.SSHConnectionRequest
 	if err := decodeStrict(w, r, &req); err != nil {
-		h.audit.RecordRequest(r.Context(), r, "ssh_connection.update", "ssh_connection", strconv.FormatInt(id, 10), "failure", err, nil)
+		h.record(r, "ssh_connection.update", "ssh_connection", strconv.FormatInt(id, 10), "failure", err, nil)
 		writeDecodeError(w, err)
 		return
 	}
@@ -158,17 +174,17 @@ func (h *Handler) updateSSH(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := h.store.UpdateSSH(r.Context(), p); err != nil {
-		h.audit.RecordRequest(r.Context(), r, "ssh_connection.update", "ssh_connection", strconv.FormatInt(id, 10), "failure", err, nil)
+		h.record(r, "ssh_connection.update", "ssh_connection", strconv.FormatInt(id, 10), "failure", err, nil)
 		writeStoreError(w, err)
 		return
 	}
 	updated, err := h.store.GetSSH(r.Context(), id)
 	if err != nil {
-		h.audit.RecordRequest(r.Context(), r, "ssh_connection.update", "ssh_connection", strconv.FormatInt(id, 10), "failure", err, nil)
+		h.record(r, "ssh_connection.update", "ssh_connection", strconv.FormatInt(id, 10), "failure", err, nil)
 		writeStoreError(w, err)
 		return
 	}
-	h.audit.RecordRequest(r.Context(), r, "ssh_connection.update", "ssh_connection", strconv.FormatInt(id, 10), "success", nil, nil)
+	h.record(r, "ssh_connection.update", "ssh_connection", strconv.FormatInt(id, 10), "success", nil, nil)
 	server.WriteJSON(w, http.StatusOK, redactSSH(updated))
 }
 
@@ -178,11 +194,11 @@ func (h *Handler) deleteSSH(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := h.store.DeleteSSH(r.Context(), id); err != nil {
-		h.audit.RecordRequest(r.Context(), r, "ssh_connection.delete", "ssh_connection", strconv.FormatInt(id, 10), "failure", err, nil)
+		h.record(r, "ssh_connection.delete", "ssh_connection", strconv.FormatInt(id, 10), "failure", err, nil)
 		writeStoreError(w, err)
 		return
 	}
-	h.audit.RecordRequest(r.Context(), r, "ssh_connection.delete", "ssh_connection", strconv.FormatInt(id, 10), "success", nil, nil)
+	h.record(r, "ssh_connection.delete", "ssh_connection", strconv.FormatInt(id, 10), "success", nil, nil)
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -193,11 +209,11 @@ func (h *Handler) sshDependents(w http.ResponseWriter, r *http.Request) {
 	}
 	deps, err := h.store.SSHDependents(r.Context(), id)
 	if err != nil {
-		h.audit.RecordRequest(r.Context(), r, "ssh_connection.dependents", "ssh_connection", strconv.FormatInt(id, 10), "failure", err, nil)
+		h.record(r, "ssh_connection.dependents", "ssh_connection", strconv.FormatInt(id, 10), "failure", err, nil)
 		server.WriteError(w, http.StatusInternalServerError, server.ErrInternal, "list ssh dependents failed")
 		return
 	}
-	h.audit.RecordRequest(r.Context(), r, "ssh_connection.dependents", "ssh_connection", strconv.FormatInt(id, 10), "success", nil, nil)
+	h.record(r, "ssh_connection.dependents", "ssh_connection", strconv.FormatInt(id, 10), "success", nil, nil)
 	server.WriteJSON(w, http.StatusOK, model.DependentsResponse{
 		SSH: nonNilRefs(deps.SSH),
 		DB:  nonNilRefs(deps.DB),
@@ -207,7 +223,7 @@ func (h *Handler) sshDependents(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) listDB(w http.ResponseWriter, r *http.Request) {
 	profiles, err := h.store.ListDB(r.Context())
 	if err != nil {
-		h.audit.RecordRequest(r.Context(), r, "db_connection.list", "db_connection", "", "failure", err, nil)
+		h.record(r, "db_connection.list", "db_connection", "", "failure", err, nil)
 		server.WriteError(w, http.StatusInternalServerError, server.ErrInternal, "list db connections failed")
 		return
 	}
@@ -215,14 +231,14 @@ func (h *Handler) listDB(w http.ResponseWriter, r *http.Request) {
 	for _, p := range profiles {
 		resp = append(resp, redactDB(p))
 	}
-	h.audit.RecordRequest(r.Context(), r, "db_connection.list", "db_connection", "", "success", nil, nil)
+	h.record(r, "db_connection.list", "db_connection", "", "success", nil, nil)
 	server.WriteJSON(w, http.StatusOK, resp)
 }
 
 func (h *Handler) createDB(w http.ResponseWriter, r *http.Request) {
 	var req model.DBConnectionRequest
 	if err := decodeStrict(w, r, &req); err != nil {
-		h.audit.RecordRequest(r.Context(), r, "db_connection.create", "db_connection", "", "failure", err, nil)
+		h.record(r, "db_connection.create", "db_connection", "", "failure", err, nil)
 		writeDecodeError(w, err)
 		return
 	}
@@ -240,11 +256,11 @@ func (h *Handler) createDB(w http.ResponseWriter, r *http.Request) {
 
 	created, err := h.store.CreateDB(r.Context(), p)
 	if err != nil {
-		h.audit.RecordRequest(r.Context(), r, "db_connection.create", "db_connection", "", "failure", err, nil)
+		h.record(r, "db_connection.create", "db_connection", "", "failure", err, nil)
 		writeStoreError(w, err)
 		return
 	}
-	h.audit.RecordRequest(r.Context(), r, "db_connection.create", "db_connection", strconv.FormatInt(created.ID, 10), "success", nil, nil)
+	h.record(r, "db_connection.create", "db_connection", strconv.FormatInt(created.ID, 10), "success", nil, nil)
 	server.WriteJSON(w, http.StatusCreated, redactDB(created))
 }
 
@@ -255,11 +271,11 @@ func (h *Handler) getDB(w http.ResponseWriter, r *http.Request) {
 	}
 	p, err := h.store.GetDB(r.Context(), id)
 	if err != nil {
-		h.audit.RecordRequest(r.Context(), r, "db_connection.get", "db_connection", strconv.FormatInt(id, 10), "failure", err, nil)
+		h.record(r, "db_connection.get", "db_connection", strconv.FormatInt(id, 10), "failure", err, nil)
 		writeStoreError(w, err)
 		return
 	}
-	h.audit.RecordRequest(r.Context(), r, "db_connection.get", "db_connection", strconv.FormatInt(id, 10), "success", nil, nil)
+	h.record(r, "db_connection.get", "db_connection", strconv.FormatInt(id, 10), "success", nil, nil)
 	server.WriteJSON(w, http.StatusOK, redactDB(p))
 }
 
@@ -270,7 +286,7 @@ func (h *Handler) updateDB(w http.ResponseWriter, r *http.Request) {
 	}
 	var req model.DBConnectionRequest
 	if err := decodeStrict(w, r, &req); err != nil {
-		h.audit.RecordRequest(r.Context(), r, "db_connection.update", "db_connection", strconv.FormatInt(id, 10), "failure", err, nil)
+		h.record(r, "db_connection.update", "db_connection", strconv.FormatInt(id, 10), "failure", err, nil)
 		writeDecodeError(w, err)
 		return
 	}
@@ -288,17 +304,17 @@ func (h *Handler) updateDB(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := h.store.UpdateDB(r.Context(), p); err != nil {
-		h.audit.RecordRequest(r.Context(), r, "db_connection.update", "db_connection", strconv.FormatInt(id, 10), "failure", err, nil)
+		h.record(r, "db_connection.update", "db_connection", strconv.FormatInt(id, 10), "failure", err, nil)
 		writeStoreError(w, err)
 		return
 	}
 	updated, err := h.store.GetDB(r.Context(), id)
 	if err != nil {
-		h.audit.RecordRequest(r.Context(), r, "db_connection.update", "db_connection", strconv.FormatInt(id, 10), "failure", err, nil)
+		h.record(r, "db_connection.update", "db_connection", strconv.FormatInt(id, 10), "failure", err, nil)
 		writeStoreError(w, err)
 		return
 	}
-	h.audit.RecordRequest(r.Context(), r, "db_connection.update", "db_connection", strconv.FormatInt(id, 10), "success", nil, nil)
+	h.record(r, "db_connection.update", "db_connection", strconv.FormatInt(id, 10), "success", nil, nil)
 	server.WriteJSON(w, http.StatusOK, redactDB(updated))
 }
 
@@ -308,11 +324,11 @@ func (h *Handler) deleteDB(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := h.store.DeleteDB(r.Context(), id); err != nil {
-		h.audit.RecordRequest(r.Context(), r, "db_connection.delete", "db_connection", strconv.FormatInt(id, 10), "failure", err, nil)
+		h.record(r, "db_connection.delete", "db_connection", strconv.FormatInt(id, 10), "failure", err, nil)
 		writeStoreError(w, err)
 		return
 	}
-	h.audit.RecordRequest(r.Context(), r, "db_connection.delete", "db_connection", strconv.FormatInt(id, 10), "success", nil, nil)
+	h.record(r, "db_connection.delete", "db_connection", strconv.FormatInt(id, 10), "success", nil, nil)
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -323,7 +339,7 @@ func (h *Handler) dbDependents(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	h.audit.RecordRequest(r.Context(), r, "db_connection.dependents", "db_connection", strconv.FormatInt(id, 10), "success", nil, nil)
+	h.record(r, "db_connection.dependents", "db_connection", strconv.FormatInt(id, 10), "success", nil, nil)
 	server.WriteJSON(w, http.StatusOK, model.DependentsResponse{SSH: []model.DependentRef{}, DB: []model.DependentRef{}})
 }
 
@@ -334,11 +350,11 @@ func (h *Handler) transportSSH(w http.ResponseWriter, r *http.Request) {
 	}
 	bundle, err := h.resolver.ResolveSSHBundle(r.Context(), id)
 	if err != nil {
-		h.audit.RecordRequest(r.Context(), r, "transport.ssh.get", "ssh_connection", strconv.FormatInt(id, 10), "failure", err, nil)
+		h.record(r, "transport.ssh.get", "ssh_connection", strconv.FormatInt(id, 10), "failure", err, nil)
 		writeTransportError(w, err)
 		return
 	}
-	h.audit.RecordRequest(r.Context(), r, "transport.ssh.get", "ssh_connection", strconv.FormatInt(id, 10), "success", nil, nil)
+	h.record(r, "transport.ssh.get", "ssh_connection", strconv.FormatInt(id, 10), "success", nil, nil)
 	w.Header().Set("Cache-Control", "no-store")
 	server.WriteJSON(w, http.StatusOK, bundle)
 }
@@ -350,11 +366,11 @@ func (h *Handler) transportDB(w http.ResponseWriter, r *http.Request) {
 	}
 	bundle, err := h.resolver.ResolveDBBundle(r.Context(), id)
 	if err != nil {
-		h.audit.RecordRequest(r.Context(), r, "transport.db.get", "db_connection", strconv.FormatInt(id, 10), "failure", err, nil)
+		h.record(r, "transport.db.get", "db_connection", strconv.FormatInt(id, 10), "failure", err, nil)
 		writeTransportError(w, err)
 		return
 	}
-	h.audit.RecordRequest(r.Context(), r, "transport.db.get", "db_connection", strconv.FormatInt(id, 10), "success", nil, nil)
+	h.record(r, "transport.db.get", "db_connection", strconv.FormatInt(id, 10), "success", nil, nil)
 	w.Header().Set("Cache-Control", "no-store")
 	server.WriteJSON(w, http.StatusOK, bundle)
 }
