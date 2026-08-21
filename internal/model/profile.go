@@ -23,6 +23,11 @@ type SSHProfile struct {
 	// resolution (missing ids, self-reference, cycles) happens at
 	// transport-query time.
 	JumpConnectionIDs string
+	// DefaultDir is an optional absolute directory on the remote host
+	// that xssh prefixes to the remote shell command (`cd <dir> && exec ...`).
+	// Empty means no prefix. Validation lives in store/handlers: must be
+	// an absolute path with no path-traversal or control characters.
+	DefaultDir        string
 	CreatedAt         time.Time
 	UpdatedAt         time.Time
 }

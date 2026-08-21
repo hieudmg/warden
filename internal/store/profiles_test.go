@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"strconv"
+	"strings"
 	"testing"
 
 	"warden/internal/model"
@@ -432,6 +433,65 @@ func TestDBCreateGetUpdateListDelete(t *testing.T) {
 	}
 	if _, err := s.GetDB(ctx, created.ID); !errors.Is(err, ErrNotFound) {
 		t.Errorf("GetDB after delete error = %v, want ErrNotFound", err)
+	}
+}
+
+func TestSSHDefaultDirRoundTrip(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+
+	p := SSHProfileForTest("dir-host", "[]")
+	p.DefaultDir = "/srv/app"
+	created, err := s.CreateSSH(ctx, p)
+	if err != nil {
+		t.Fatalf("CreateSSH: %v", err)
+	}
+	got, err := s.GetSSH(ctx, created.ID)
+	if err != nil {
+		t.Fatalf("GetSSH: %v", err)
+	}
+	if got.DefaultDir != "/srv/app" {
+		t.Errorf("GetSSH default_dir = %q, want %q", got.DefaultDir, "/srv/app")
+	}
+
+	got.DefaultDir = "/srv/other"
+	if err := s.UpdateSSH(ctx, got); err != nil {
+		t.Fatalf("UpdateSSH: %v", err)
+	}
+	got2, err := s.GetSSH(ctx, created.ID)
+	if err != nil {
+		t.Fatalf("GetSSH after update: %v", err)
+	}
+	if got2.DefaultDir != "/srv/other" {
+		t.Errorf("GetSSH default_dir after update = %q, want %q", got2.DefaultDir, "/srv/other")
+	}
+}
+
+func TestSSHDefaultDirValidation(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	for _, bad := range []string{
+		"relative/path",
+		"/path/with/../escape",
+		"/path/\x00null",
+		"/path/\nnewline",
+		strings.Repeat("a", 5000),
+	} {
+		p := SSHProfileForTest("bad-"+bad, "[]")
+		p.DefaultDir = bad
+		if _, err := s.CreateSSH(ctx, p); err == nil {
+			t.Errorf("CreateSSH with default_dir=%q succeeded; want validation error", bad)
+		}
+	}
+}
+
+func TestSSHEmptyDefaultDirAllowed(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	p := SSHProfileForTest("no-dir", "[]")
+	p.DefaultDir = ""
+	if _, err := s.CreateSSH(ctx, p); err != nil {
+		t.Fatalf("CreateSSH with empty default_dir: %v", err)
 	}
 }
 

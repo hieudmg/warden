@@ -99,6 +99,7 @@ func (h *Handler) createSSH(w http.ResponseWriter, r *http.Request) {
 		ProxyPort:         req.ProxyPort,
 		ProxyUsername:     req.ProxyUsername,
 		JumpConnectionIDs: req.JumpConnectionIDs,
+		DefaultDir:        req.DefaultDir,
 	}
 	if req.Password != nil {
 		p.Password = []byte(*req.Password)
@@ -159,6 +160,7 @@ func (h *Handler) updateSSH(w http.ResponseWriter, r *http.Request) {
 		ProxyPort:         req.ProxyPort,
 		ProxyUsername:     req.ProxyUsername,
 		JumpConnectionIDs: req.JumpConnectionIDs,
+		DefaultDir:        req.DefaultDir,
 	}
 	if req.Password != nil {
 		p.Password = []byte(*req.Password)
@@ -460,6 +462,7 @@ func redactSSH(p model.SSHProfile) model.SSHConnection {
 		ProxyUsername:           p.ProxyUsername,
 		HasProxyPassword:        len(p.ProxyPassword) > 0,
 		JumpConnectionIDs:       p.JumpConnectionIDs,
+		DefaultDir:              p.DefaultDir,
 		CreatedAt:               p.CreatedAt,
 		UpdatedAt:               p.UpdatedAt,
 	}

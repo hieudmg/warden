@@ -19,6 +19,7 @@ type SSHConnection struct {
 	ProxyUsername           string    `json:"proxy_username,omitempty"`
 	HasProxyPassword        bool      `json:"has_proxy_password"`
 	JumpConnectionIDs       string    `json:"jump_connection_ids"`
+	DefaultDir              string    `json:"default_dir"`
 	CreatedAt               time.Time `json:"created_at"`
 	UpdatedAt               time.Time `json:"updated_at"`
 }
@@ -53,6 +54,7 @@ type SSHConnectionRequest struct {
 	ProxyUsername        string  `json:"proxy_username"`
 	ProxyPassword        *string `json:"proxy_password"`
 	JumpConnectionIDs    string  `json:"jump_connection_ids"`
+	DefaultDir           string  `json:"default_dir"`
 }
 
 // DBConnectionRequest is the write payload for a DB profile.

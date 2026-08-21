@@ -148,6 +148,43 @@ func TestAcceptNewRefused(t *testing.T) {
 	}
 }
 
+// TestConfirmHostAcceptsCRLineEnd verifies the CR-only confirmation
+// path used in raw terminal mode where `term.MakeRaw` disables ICRNL.
+// Without this, the prompt hangs because ReadString('\n') never sees LF.
+func TestConfirmHostAcceptsCRLineEnd(t *testing.T) {
+	t.Parallel()
+
+	srv := newTestSSHServer(t, "s3cret", nil)
+	path := filepath.Join(t.TempDir(), "known_hosts")
+
+	terminal := &fakeTerminal{in: bytes.NewBufferString("yes\r"), out: &bytes.Buffer{}}
+	cb, err := hostkey.Callback(path, true, terminal)
+	if err != nil {
+		t.Fatalf("Callback: %v", err)
+	}
+	if err := dialWithHostKey(t, srv, cb); err != nil {
+		t.Fatalf("dial with CR-terminated yes: %v", err)
+	}
+}
+
+// TestConfirmHostAcceptsLFLines (parity with CR case) confirms the LF
+// path still works for pasted input or piped sources.
+func TestConfirmHostAcceptsLFLineEnd(t *testing.T) {
+	t.Parallel()
+
+	srv := newTestSSHServer(t, "s3cret", nil)
+	path := filepath.Join(t.TempDir(), "known_hosts")
+
+	terminal := &fakeTerminal{in: bytes.NewBufferString("yes\n"), out: &bytes.Buffer{}}
+	cb, err := hostkey.Callback(path, true, terminal)
+	if err != nil {
+		t.Fatalf("Callback: %v", err)
+	}
+	if err := dialWithHostKey(t, srv, cb); err != nil {
+		t.Fatalf("dial with LF-terminated yes: %v", err)
+	}
+}
+
 func TestAcceptNewNonInteractiveRejected(t *testing.T) {
 	t.Parallel()
 

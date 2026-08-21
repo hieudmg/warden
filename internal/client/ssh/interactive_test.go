@@ -593,3 +593,18 @@ func TestInteractiveShellCommand(t *testing.T) {
 		t.Fatalf("interactiveShellCommand = %q, want %q", interactiveShellCommand, "exec ${SHELL:-sh} -l")
 	}
 }
+
+// TestBuildInteractiveShellCommand verifies DefaultDir is wrapped in
+// single quotes, embedded quotes are escaped, and an empty dir yields
+// the bare login-shell command.
+func TestBuildInteractiveShellCommand(t *testing.T) {
+	if got := buildInteractiveShellCommand(""); got != "exec ${SHELL:-sh} -l" {
+		t.Errorf("empty dir = %q, want bare login-shell", got)
+	}
+	if got := buildInteractiveShellCommand("/srv/app"); got != "cd '/srv/app' && exec ${SHELL:-sh} -l" {
+		t.Errorf("plain dir = %q, want single-quoted prefix", got)
+	}
+	if got := buildInteractiveShellCommand("/srv/it's"); got != `cd '/srv/it'"'"'s' && exec ${SHELL:-sh} -l` {
+		t.Errorf("quoted dir = %q, want embedded single quote escaped", got)
+	}
+}

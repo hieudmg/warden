@@ -147,6 +147,7 @@ func sshNode(p model.SSHProfile) model.SSHNode {
 		ProxyPort:            p.ProxyPort,
 		ProxyUsername:        p.ProxyUsername,
 		ProxyPassword:        p.ProxyPassword,
+		DefaultDir:           p.DefaultDir,
 	}
 }
 

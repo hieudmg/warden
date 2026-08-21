@@ -224,17 +224,31 @@ func handleUnknown(hostname string, key ssh.PublicKey, path string, acceptNew bo
 }
 
 // confirmHost prints the fingerprint and requires an explicit "yes".
+// Either CR (0x0D) or LF (0x0A) terminates the response: in raw mode
+// `term.MakeRaw` disables ICRNL, so the Enter key yields CR only, and
+// a paste of an LF-terminated response must also work.
 func confirmHost(terminal io.ReadWriter, hostname string, key ssh.PublicKey) bool {
 	fmt.Fprintf(terminal, "The authenticity of host %q can't be established.\n", hostname)
 	fmt.Fprintf(terminal, "%s key fingerprint is %s.\n", key.Type(), ssh.FingerprintSHA256(key))
 	fmt.Fprintf(terminal, "Are you sure you want to continue connecting (yes/no)? ")
 
 	reader := bufio.NewReader(terminal)
-	line, err := reader.ReadString('\n')
-	if err != nil && line == "" {
-		return false
+	for {
+		line, err := reader.ReadString('\n')
+		if err != nil && line == "" {
+			return false
+		}
+		// A trailing CR (from a raw terminal) is not stripped by
+		// ReadString('\n'); trim it before comparing.
+		line = strings.TrimRight(line, "\r\n")
+		if line != "" {
+			return line == "yes"
+		}
+		// Empty line: keep reading until we see a terminator or EOF.
+		if err != nil {
+			return false
+		}
 	}
-	return strings.TrimSpace(line) == "yes"
 }
 
 // persist appends the accepted key to the known_hosts file, creating the

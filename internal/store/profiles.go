@@ -120,10 +120,10 @@ func (s *Store) CreateSSH(ctx context.Context, p model.SSHProfile) (model.SSHPro
 	res, err := tx.ExecContext(ctx, `
 		INSERT INTO ssh_connections
 			(name, host, port, username, proxy_host, proxy_port, proxy_username,
-			 jump_connection_ids, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			 jump_connection_ids, default_dir, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		p.Name, p.Host, p.Port, p.Username, p.ProxyHost, p.ProxyPort, p.ProxyUsername,
-		p.JumpConnectionIDs, ts, ts)
+		p.JumpConnectionIDs, p.DefaultDir, ts, ts)
 	if err != nil {
 		if isUniqueViolation(err) {
 			return model.SSHProfile{}, ErrDuplicate
@@ -176,7 +176,7 @@ func (s *Store) GetSSH(ctx context.Context, id int64) (model.SSHProfile, error) 
 	row := s.db.QueryRowContext(ctx, `
 		SELECT id, name, host, port, username, password, private_key,
 		       private_key_passphrase, proxy_host, proxy_port, proxy_username,
-		       proxy_password, jump_connection_ids, created_at, updated_at
+		       proxy_password, jump_connection_ids, default_dir, created_at, updated_at
 		FROM ssh_connections WHERE id = ?`, id)
 
 	var p model.SSHProfile
@@ -184,7 +184,7 @@ func (s *Store) GetSSH(ctx context.Context, id int64) (model.SSHProfile, error) 
 	var createdAt, updatedAt string
 	err := row.Scan(&p.ID, &p.Name, &p.Host, &p.Port, &p.Username,
 		&password, &privateKey, &passphrase, &p.ProxyHost, &p.ProxyPort, &p.ProxyUsername,
-		&proxyPassword, &p.JumpConnectionIDs, &createdAt, &updatedAt)
+		&proxyPassword, &p.JumpConnectionIDs, &p.DefaultDir, &createdAt, &updatedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return model.SSHProfile{}, ErrNotFound
 	}
@@ -270,10 +270,10 @@ func (s *Store) UpdateSSH(ctx context.Context, p model.SSHProfile) error {
 	res, err := tx.ExecContext(ctx, `
 		UPDATE ssh_connections
 		SET name=?, host=?, port=?, username=?, proxy_host=?, proxy_port=?,
-		    proxy_username=?, jump_connection_ids=?, updated_at=?
+		    proxy_username=?, jump_connection_ids=?, default_dir=?, updated_at=?
 		WHERE id=?`,
 		p.Name, p.Host, p.Port, p.Username, p.ProxyHost, p.ProxyPort, p.ProxyUsername,
-		p.JumpConnectionIDs, ts, p.ID)
+		p.JumpConnectionIDs, p.DefaultDir, ts, p.ID)
 	if err != nil {
 		if isUniqueViolation(err) {
 			return ErrDuplicate
@@ -571,6 +571,37 @@ func validateSSHMetadata(p model.SSHProfile) error {
 	}
 	if p.ProxyHost != "" && (p.ProxyPort < 1 || p.ProxyPort > 65535) {
 		return fmt.Errorf("proxy port %d out of range 1-65535", p.ProxyPort)
+	}
+	if err := validateDefaultDir(p.DefaultDir); err != nil {
+		return err
+	}
+	return nil
+}
+
+// validateDefaultDir enforces an optional absolute remote working
+// directory. Empty is allowed (no cd prefix). Non-empty must be an
+// absolute path with no path-traversal segments, no control characters
+// or NUL bytes, and at most maxDefaultDirBytes (4 KiB).
+func validateDefaultDir(dir string) error {
+	if dir == "" {
+		return nil
+	}
+	const maxDefaultDirBytes = 4096
+	if len(dir) > maxDefaultDirBytes {
+		return fmt.Errorf("default_dir exceeds %d bytes", maxDefaultDirBytes)
+	}
+	if !strings.HasPrefix(dir, "/") {
+		return errors.New("default_dir must be an absolute path starting with '/'")
+	}
+	for _, r := range dir {
+		if r == 0 || r < 0x20 || r == 0x7f {
+			return errors.New("default_dir must not contain control characters or NUL")
+		}
+	}
+	for _, seg := range strings.Split(dir, "/") {
+		if seg == ".." {
+			return errors.New("default_dir must not contain '..' segments")
+		}
 	}
 	return nil
 }

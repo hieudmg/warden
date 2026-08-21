@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strings"
 
 	golangssh "golang.org/x/crypto/ssh"
 
@@ -14,13 +15,28 @@ import (
 )
 
 // interactiveShellCommand is the remote command started for interactive
-// sessions. It is interpreted by the user's shell on the remote host and
-// re-execs a fresh login shell so login rc files load. -l is the portable
-// login flag accepted by sh, bash, zsh, dash, and fish; ${SHELL:-sh}
-// guards the rare case where the remote environment does not set $SHELL.
-// A profile default directory can be prefixed as a cd once the profile
-// schema carries one.
+// sessions when the target profile has no DefaultDir. It is interpreted by
+// the user's shell on the remote host and re-execs a fresh login shell so
+// login rc files load. -l is the portable login flag accepted by sh, bash,
+// zsh, dash, and fish; ${SHELL:-sh} guards the rare case where the remote
+// environment does not set $SHELL. When DefaultDir is non-empty, the
+// remote command is prefixed with `cd '<dir>' && ` (see
+// buildInteractiveShellCommand).
 const interactiveShellCommand = "exec ${SHELL:-sh} -l"
+
+// buildInteractiveShellCommand returns the remote shell command string
+// for the given default working directory. An empty dir yields the bare
+// login-shell command (preserving prior behavior); a non-empty path is
+// prefixed with `cd '<dir>' && `, with the directory embedded inside
+// single quotes and any embedded single quotes escaped using the
+// standard `'"'"'` technique.
+func buildInteractiveShellCommand(defaultDir string) string {
+	if defaultDir == "" {
+		return interactiveShellCommand
+	}
+	cd := fmt.Sprintf("cd '%s' && ", strings.ReplaceAll(defaultDir, "'", `'"'"'`))
+	return cd + interactiveShellCommand
+}
 
 // termReadWriter adapts a terminal.Session to the io.ReadWriter used for
 // interactive host-key confirmation prompts.
@@ -89,7 +105,7 @@ func runInteractive(ctx context.Context, bundle model.SSHBundle, term terminal.S
 	session.Stdout = term.Stdout()
 	session.Stderr = term.Stderr()
 
-	if err := session.Start(interactiveShellCommand); err != nil {
+	if err := session.Start(buildInteractiveShellCommand(bundle.Target.DefaultDir)); err != nil {
 		return fmt.Errorf("start remote shell: %w", err)
 	}
 

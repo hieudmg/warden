@@ -17,6 +17,10 @@ type SSHNode struct {
 	ProxyPort            int    `json:"proxy_port,omitempty"`
 	ProxyUsername        string `json:"proxy_username,omitempty"`
 	ProxyPassword        []byte `json:"proxy_password,omitempty"`
+	// DefaultDir is the profile's optional default working directory on
+	// this hop. Empty means no cd prefix. xssh uses only the target's
+	// DefaultDir; jump hosts are not run as login shells.
+	DefaultDir          string `json:"default_dir,omitempty"`
 }
 
 // SSHBundle is the complete resolved transport bundle for one SSH target:
