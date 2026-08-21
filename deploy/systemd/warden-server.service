@@ -9,7 +9,6 @@
 # this file or in the environment file /etc/warden/warden-server.env.
 [Unit]
 Description=Warden Hub management server
-Documentation=file:///etc/warden/README.md
 After=network-online.target
 Wants=network-online.target
 

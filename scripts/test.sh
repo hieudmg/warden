@@ -92,7 +92,7 @@ start_healthy_server() {
       SERVER_PID=""
     fi
   done
-  fail "server never became healthy; last log:"; tail -20 "$WORK/server.log" >&2 || true
+  fail "server never became healthy; last log:" "$(tail -20 "$WORK/server.log" 2>/dev/null || true)"
 }
 
 stop_server() {
@@ -173,7 +173,7 @@ transport_secret="$(jq -r '.target.password' "$WORK/transport.json" | base64 -d)
 printf '%s' "$(cat "$WORK/transport.json")" | jq -e '.target.name == "e2e-host"' >/dev/null \
   || fail "transport bundle target mismatch: $(cat "$WORK/transport.json")"
 
-# --- Test: deleted jump reference fails at query time -----------------------
+# --- Test: reports persist (HTTP) -------------------------------------------
 log "deleted jump reference fails at query time"
 jump_json="$(curl -fsS -X POST "$API/api/v1/ssh-connections" \
   -H 'Content-Type: application/json' \
@@ -189,6 +189,39 @@ code="$(curl -s -o "$WORK/jump-fail.json" -w '%{http_code}' \
 [ "$code" = "422" ] || fail "transport after jump deletion = HTTP $code, want 422"
 grep -q "does not exist" "$WORK/jump-fail.json" \
   || fail "jump failure did not mention the missing reference: $(cat "$WORK/jump-fail.json")"
+
+# --- Test: db CRUD redaction + transport bundle -----------------------------
+log "create db connection with secret"
+db_create_json="$(
+  curl -fsS -X POST "$API/api/v1/db-connections" \
+    -H 'Content-Type: application/json' \
+    -d "{\"name\":\"e2e-db\",\"host\":\"db.invalid\",\"port\":3306,\"username\":\"app\",\"password\":\"$SECRET\",\"database\":\"appdb\",\"ssh_connection_id\":0}"
+)"
+DB_ID="$(printf '%s' "$db_create_json" | jq -r '.id')"
+[ "$DB_ID" -gt 0 ] 2>/dev/null || fail "db create returned no id: $db_create_json"
+
+log "db list redacts the secret"
+db_list_json="$(curl -fsS "$API/api/v1/db-connections")"
+printf '%s' "$db_list_json" | grep -q '"has_password":true' \
+  || fail "db list lacks has_password marker"
+if printf '%s' "$db_list_json" | grep -qF "$SECRET"; then
+  fail "db list response leaked the secret"
+fi
+
+log "db transport returns bundle with no-store"
+db_headers="$WORK/db-transport.headers"
+curl -fsS -D "$db_headers" -o "$WORK/db-transport.json" \
+  "$API/api/v1/transport/db/$DB_ID"
+grep -qi '^cache-control: no-store' "$db_headers" \
+  || fail "db transport response missing Cache-Control: no-store"
+db_transport_secret="$(jq -r '.password' "$WORK/db-transport.json" | base64 -d)"
+[ "$db_transport_secret" = "$SECRET" ] \
+  || fail "db transport bundle secret mismatch (got base64 $(jq -r '.password' "$WORK/db-transport.json"))"
+printf '%s' "$(cat "$WORK/db-transport.json")" | jq -e '.database == "appdb"' >/dev/null \
+  || fail "db transport bundle database mismatch: $(cat "$WORK/db-transport.json")"
+if grep -qF "$SECRET" "$WORK/db-transport.json" 2>/dev/null; then
+  fail "db transport response leaked the secret"
+fi
 
 # --- Test: reports persist (HTTP) -------------------------------------------
 log "projects and reports persist"
