@@ -93,6 +93,9 @@ $("modal-close").addEventListener("click", closeModal);
 $("modal-backdrop").addEventListener("click", (e) => {
   if (e.target === $("modal-backdrop")) closeModal();
 });
+document.addEventListener("keydown", (e) => {
+  if (e.key === "Escape" && !$("modal-backdrop").hidden) closeModal();
+});
 
 function field(labelText, name, value, opts) {
   opts = opts || {};

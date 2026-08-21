@@ -34,6 +34,8 @@ Environment overrides:
 - `WARDEN_SERVER_MASTER_KEY_PATH`
 - `WARDEN_SERVER_STATIC_FS`
 
+`static_fs` overrides the embedded management UI for development. The directory layout must mirror `internal/web/static/` and contain exactly `index.html`, `app.js`, and `styles.css`; missing files silently 404.
+
 ### Client config
 
 Default file:
