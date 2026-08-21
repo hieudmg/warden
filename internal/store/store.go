@@ -20,6 +20,14 @@ import (
 // not exist.
 var ErrNotFound = errors.New("store: not found")
 
+// ErrDuplicate is returned when a create/update would violate a unique name.
+var ErrDuplicate = errors.New("store: duplicate name")
+
+// ErrValidation is returned when profile fields fail validation. It wraps
+// the specific validation message so API handlers can map it to a stable
+// validation error code.
+var ErrValidation = errors.New("store: validation failed")
+
 const (
 	// dbBusyTimeoutMS is the per-connection SQLite busy timeout.
 	dbBusyTimeoutMS = 5000

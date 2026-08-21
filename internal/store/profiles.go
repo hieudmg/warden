@@ -104,10 +104,10 @@ func (s *Store) decryptSecret(aad []byte, blob []byte) ([]byte, error) {
 // `warden/ssh/<id>/<field>` location.
 func (s *Store) CreateSSH(ctx context.Context, p model.SSHProfile) (model.SSHProfile, error) {
 	if err := validateJumpIDs(p.JumpConnectionIDs); err != nil {
-		return model.SSHProfile{}, err
+		return model.SSHProfile{}, fmt.Errorf("%w: %v", ErrValidation, err)
 	}
 	if err := validateSSHMetadata(p); err != nil {
-		return model.SSHProfile{}, err
+		return model.SSHProfile{}, fmt.Errorf("%w: %v", ErrValidation, err)
 	}
 
 	tx, err := s.db.BeginTx(ctx, nil)
@@ -125,6 +125,9 @@ func (s *Store) CreateSSH(ctx context.Context, p model.SSHProfile) (model.SSHPro
 		p.Name, p.Host, p.Port, p.Username, p.ProxyHost, p.ProxyPort, p.ProxyUsername,
 		p.JumpConnectionIDs, ts, ts)
 	if err != nil {
+		if isUniqueViolation(err) {
+			return model.SSHProfile{}, ErrDuplicate
+		}
 		return model.SSHProfile{}, fmt.Errorf("insert ssh_connection: %w", err)
 	}
 	id, err := res.LastInsertId()
@@ -251,10 +254,10 @@ func (s *Store) UpdateSSH(ctx context.Context, p model.SSHProfile) error {
 		return errors.New("update ssh_connection requires id")
 	}
 	if err := validateJumpIDs(p.JumpConnectionIDs); err != nil {
-		return err
+		return fmt.Errorf("%w: %v", ErrValidation, err)
 	}
 	if err := validateSSHMetadata(p); err != nil {
-		return err
+		return fmt.Errorf("%w: %v", ErrValidation, err)
 	}
 
 	tx, err := s.db.BeginTx(ctx, nil)
@@ -272,6 +275,9 @@ func (s *Store) UpdateSSH(ctx context.Context, p model.SSHProfile) error {
 		p.Name, p.Host, p.Port, p.Username, p.ProxyHost, p.ProxyPort, p.ProxyUsername,
 		p.JumpConnectionIDs, ts, p.ID)
 	if err != nil {
+		if isUniqueViolation(err) {
+			return ErrDuplicate
+		}
 		return fmt.Errorf("update ssh_connection: %w", err)
 	}
 	if n, err := res.RowsAffected(); err != nil {
@@ -375,7 +381,7 @@ func (s *Store) SSHDependents(ctx context.Context, id int64) (model.SSHDependent
 
 func (s *Store) CreateDB(ctx context.Context, p model.DBProfile) (model.DBProfile, error) {
 	if err := validateDBMetadata(p); err != nil {
-		return model.DBProfile{}, err
+		return model.DBProfile{}, fmt.Errorf("%w: %v", ErrValidation, err)
 	}
 
 	tx, err := s.db.BeginTx(ctx, nil)
@@ -391,6 +397,9 @@ func (s *Store) CreateDB(ctx context.Context, p model.DBProfile) (model.DBProfil
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
 		p.Name, p.Host, p.Port, p.Username, p.Database, p.SSHConnectionID, ts, ts)
 	if err != nil {
+		if isUniqueViolation(err) {
+			return model.DBProfile{}, ErrDuplicate
+		}
 		return model.DBProfile{}, fmt.Errorf("insert db_connection: %w", err)
 	}
 	id, err := res.LastInsertId()
@@ -485,7 +494,7 @@ func (s *Store) UpdateDB(ctx context.Context, p model.DBProfile) error {
 		return errors.New("update db_connection requires id")
 	}
 	if err := validateDBMetadata(p); err != nil {
-		return err
+		return fmt.Errorf("%w: %v", ErrValidation, err)
 	}
 
 	tx, err := s.db.BeginTx(ctx, nil)
@@ -501,6 +510,9 @@ func (s *Store) UpdateDB(ctx context.Context, p model.DBProfile) error {
 		WHERE id=?`,
 		p.Name, p.Host, p.Port, p.Username, p.Database, p.SSHConnectionID, ts, p.ID)
 	if err != nil {
+		if isUniqueViolation(err) {
+			return ErrDuplicate
+		}
 		return fmt.Errorf("update db_connection: %w", err)
 	}
 	if n, err := res.RowsAffected(); err != nil {

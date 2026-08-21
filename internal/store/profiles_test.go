@@ -149,6 +149,25 @@ func TestSSHDuplicateNameRejected(t *testing.T) {
 	}
 }
 
+func TestSSHDuplicateNameReturnsErrDuplicate(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	if _, err := s.CreateSSH(ctx, SSHProfileForTest("dup", "[]")); err != nil {
+		t.Fatalf("first CreateSSH: %v", err)
+	}
+	if _, err := s.CreateSSH(ctx, SSHProfileForTest("dup", "[]")); !errors.Is(err, ErrDuplicate) {
+		t.Errorf("duplicate CreateSSH error = %v, want ErrDuplicate", err)
+	}
+}
+
+func TestSSHValidationReturnsErrValidation(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	if _, err := s.CreateSSH(ctx, SSHProfileForTest("bad name!", "[]")); !errors.Is(err, ErrValidation) {
+		t.Errorf("invalid name error = %v, want ErrValidation", err)
+	}
+}
+
 func TestSSHJumpJSONAcceptance(t *testing.T) {
 	s := newTestStore(t)
 	ctx := context.Background()

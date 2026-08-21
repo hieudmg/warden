@@ -1,13 +1,23 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"flag"
 	"fmt"
 	"io"
+	"net/http"
 	"os"
+	"os/signal"
+	"syscall"
+	"time"
 
 	"warden/internal/config"
+	"warden/internal/crypto"
+	"warden/internal/server"
+	"warden/internal/server/audit"
+	"warden/internal/server/profiles"
+	"warden/internal/store"
 )
 
 func main() {
@@ -59,8 +69,47 @@ func runServe(args []string, stdout, stderr io.Writer, lookupEnv func(string) (s
 		return 1
 	}
 
-	fmt.Fprintf(stdout, "server bootstrap ready on %s (db=%s static_fs=%s)\n", cfg.ListenAddr, cfg.DBPath, cfg.StaticFS)
-	return 0
+	key, err := crypto.LoadMasterKey(cfg.MasterKeyPath)
+	if err != nil {
+		fmt.Fprintf(stderr, "load master key: %v\n", err)
+		return 1
+	}
+	s, err := store.Open(context.Background(), cfg.DBPath, key)
+	if err != nil {
+		fmt.Fprintf(stderr, "open store: %v\n", err)
+		return 1
+	}
+	defer s.Close()
+
+	rec := audit.New(s)
+	mux := http.NewServeMux()
+	profiles.New(s, rec).Register(mux)
+
+	srv := server.New(cfg.ListenAddr, mux)
+	errCh := make(chan error, 1)
+	go func() { errCh <- srv.ListenAndServe() }()
+
+	fmt.Fprintf(stdout, "warden-server listening on %s\n", cfg.ListenAddr)
+
+	sigCh := make(chan os.Signal, 1)
+	signal.Notify(sigCh, os.Interrupt, syscall.SIGTERM)
+	select {
+	case err := <-errCh:
+		if err != nil && !errors.Is(err, http.ErrServerClosed) {
+			fmt.Fprintf(stderr, "server error: %v\n", err)
+			return 1
+		}
+		return 0
+	case sig := <-sigCh:
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		if err := srv.Shutdown(ctx); err != nil {
+			fmt.Fprintf(stderr, "shutdown: %v\n", err)
+			return 1
+		}
+		fmt.Fprintf(stdout, "received %s, shutting down\n", sig)
+		return 0
+	}
 }
 
 func printUsage(w io.Writer) {

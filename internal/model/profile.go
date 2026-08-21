@@ -47,8 +47,8 @@ type DBProfile struct {
 
 // DependentRef identifies a profile that references another connection id.
 type DependentRef struct {
-	ID   int64
-	Name string
+	ID   int64  `json:"id"`
+	Name string `json:"name"`
 }
 
 // SSHDependents lists profiles referencing an SSH connection id: SSH
