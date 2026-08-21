@@ -10,6 +10,7 @@ import (
 	"os"
 
 	"warden/internal/client/api"
+	clientdb "warden/internal/client/db"
 	clientssh "warden/internal/client/ssh"
 	"warden/internal/config"
 )
@@ -134,7 +135,37 @@ func runDB(args []string, configPath string, configPathSet bool, stdout, stderr 
 		return 1
 	}
 
-	fmt.Fprintf(stdout, "client bootstrap ready for db via %s\n", cfg.APIBaseURL)
+	cl := api.New(cfg.APIBaseURL, &http.Client{Timeout: cfg.Timeout})
+	ctx := context.Background()
+
+	conns, err := cl.ListDB(ctx)
+	if err != nil {
+		fmt.Fprintf(stderr, "db: %v\n", err)
+		return 1
+	}
+
+	id := int64(-1)
+	for _, c := range conns {
+		if c.Name == args[0] {
+			id = c.ID
+			break
+		}
+	}
+	if id < 0 {
+		fmt.Fprintf(stderr, "db: connection %q not found\n", args[0])
+		return 1
+	}
+
+	bundle, err := cl.GetDBBundle(ctx, id)
+	if err != nil {
+		fmt.Fprintf(stderr, "db: %v\n", err)
+		return 1
+	}
+
+	if err := clientdb.RunQuery(ctx, bundle, args[1], stdout); err != nil {
+		fmt.Fprintf(stderr, "db: %v\n", err)
+		return 1
+	}
 	return 0
 }
 

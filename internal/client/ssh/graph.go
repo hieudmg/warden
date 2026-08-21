@@ -45,9 +45,20 @@ func DefaultKnownHostsPath() string {
 // failure all intermediate connections are closed and no partial client is
 // returned.
 func DialTarget(ctx context.Context, bundle model.SSHBundle, opts DialOptions) (*ssh.Client, error) {
+	client, _, err := DialChain(ctx, bundle, opts)
+	return client, err
+}
+
+// DialChain connects through the bundle's ordered jump chain (first hop
+// first) and returns the established target client together with every
+// client in the chain (jump hosts first, target last). Callers that must
+// tear down the whole graph — such as long-lived tunnels — close every
+// returned client. On failure all partially established clients are
+// closed and nil is returned.
+func DialChain(ctx context.Context, bundle model.SSHBundle, opts DialOptions) (*ssh.Client, []*ssh.Client, error) {
 	cb, err := opts.hostKeyCallback()
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	var clients []*ssh.Client
@@ -62,7 +73,7 @@ func DialTarget(ctx context.Context, bundle model.SSHBundle, opts DialOptions) (
 		nc, err := dialNode(ctx, hop, via, cb)
 		if err != nil {
 			closeAll()
-			return nil, fmt.Errorf("connect jump %q: %w", hop.Name, err)
+			return nil, nil, fmt.Errorf("connect jump %q: %w", hop.Name, err)
 		}
 		clients = append(clients, nc.client)
 		via = nc.client
@@ -71,9 +82,10 @@ func DialTarget(ctx context.Context, bundle model.SSHBundle, opts DialOptions) (
 	nc, err := dialNode(ctx, bundle.Target, via, cb)
 	if err != nil {
 		closeAll()
-		return nil, fmt.Errorf("connect target %q: %w", bundle.Target.Name, err)
+		return nil, nil, fmt.Errorf("connect target %q: %w", bundle.Target.Name, err)
 	}
-	return nc.client, nil
+	clients = append(clients, nc.client)
+	return nc.client, clients, nil
 }
 
 // hostKeyCallback resolves the verification callback from DialOptions,

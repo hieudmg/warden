@@ -241,6 +241,40 @@ func TestRunSSHUnknownConnection(t *testing.T) {
 	}
 }
 
+// TestRunDBUnknownConnection verifies a missing DB connection name fails
+// cleanly before any transport is attempted.
+func TestRunDBUnknownConnection(t *testing.T) {
+	apiSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/v1/db-connections" {
+			io.WriteString(w, `[]`)
+			return
+		}
+		http.NotFound(w, r)
+	}))
+	defer apiSrv.Close()
+
+	lookupEnv := func(key string) (string, bool) {
+		switch key {
+		case "HOME":
+			return t.TempDir(), true
+		case "WARDEN_CLIENT_API_BASE_URL":
+			return apiSrv.URL, true
+		case "WARDEN_CLIENT_TIMEOUT":
+			return "10s", true
+		}
+		return "", false
+	}
+
+	var stdout, stderr bytes.Buffer
+	exitCode := run([]string{"db", "nope", "SELECT 1"}, &stdout, &stderr, lookupEnv)
+	if exitCode != 1 {
+		t.Fatalf("run() exitCode = %d, want 1", exitCode)
+	}
+	if !strings.Contains(stderr.String(), "not found") {
+		t.Fatalf("stderr = %q, want not-found message", stderr.String())
+	}
+}
+
 // cliTestSSHServer is a minimal in-process SSH server for CLI tests.
 type cliTestSSHServer struct {
 	addr    string
