@@ -25,6 +25,11 @@ import (
 // server sending unbounded data.
 const maxResponseBytes = 4 << 20 // 4 MiB
 
+// maxErrorMessageBytes bounds server-provided error message text. The CLI
+// prints APIError messages to stderr, so a compromised or buggy server
+// must not be able to push unbounded body text into process output.
+const maxErrorMessageBytes = 1024
+
 // APIError is the client-side representation of a non-2xx API response.
 // Code is the stable machine-readable error code from the server.
 type APIError struct {
@@ -129,7 +134,7 @@ func (c *Client) getJSON(ctx context.Context, path string, dst any) error {
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return parseErrError(path, resp)
+		return parseErrError(resp)
 	}
 
 	body, err := io.ReadAll(io.LimitReader(resp.Body, maxResponseBytes+1))
@@ -158,13 +163,22 @@ type errorEnvelope struct {
 }
 
 // parseErrError converts a non-200 response into an *APIError. The
-// server's JSON error envelope is decoded when present; otherwise the raw
-// text is kept as the message.
-func parseErrError(path string, resp *http.Response) error {
+// server's JSON error envelope is decoded when present (message text
+// bounded); otherwise the message is the HTTP status text only, never the
+// raw body.
+func parseErrError(resp *http.Response) error {
 	body, _ := io.ReadAll(io.LimitReader(resp.Body, 64<<10))
 	var envelope errorEnvelope
 	if json.Unmarshal(body, &envelope) == nil && envelope.Code != "" {
-		return &APIError{StatusCode: resp.StatusCode, Code: envelope.Code, Message: envelope.Message}
+		msg := strings.TrimSpace(envelope.Message)
+		if len(msg) > maxErrorMessageBytes {
+			msg = msg[:maxErrorMessageBytes]
+		}
+		return &APIError{StatusCode: resp.StatusCode, Code: envelope.Code, Message: msg}
 	}
-	return &APIError{StatusCode: resp.StatusCode, Message: strings.TrimSpace(string(body))}
+	msg := http.StatusText(resp.StatusCode)
+	if msg == "" {
+		msg = fmt.Sprintf("HTTP status %d", resp.StatusCode)
+	}
+	return &APIError{StatusCode: resp.StatusCode, Message: msg}
 }

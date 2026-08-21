@@ -204,12 +204,20 @@ type bufferedConn struct {
 
 func (c *bufferedConn) Read(p []byte) (int, error) { return c.r.Read(p) }
 
-// dialProxy establishes a TCP connection to the node's HTTP CONNECT proxy
-// and negotiates a tunnel to targetAddr. When via is non-nil the proxy is
-// reached through the previous hop. The returned connection preserves any
-// bytes the proxy forwarded immediately after its 200 response, so the
-// upstream protocol (SSH banner) is never truncated.
+// dialProxy negotiates an HTTP CONNECT tunnel to targetAddr through the
+// node's proxy, bounded by the handshake deadline.
 func dialProxy(ctx context.Context, via *ssh.Client, node model.SSHNode, targetAddr string) (net.Conn, error) {
+	return proxyConnect(ctx, via, node, targetAddr, handshakeTimeout)
+}
+
+// proxyConnect establishes a TCP connection to the node's HTTP CONNECT
+// proxy and negotiates a tunnel to targetAddr. When via is non-nil the
+// proxy is reached through the previous hop. The whole negotiation is
+// bounded by timeout so a proxy that accepts but never answers cannot hang
+// the client forever. The returned connection preserves any bytes the
+// proxy forwarded immediately after its 200 response, so the upstream
+// protocol (SSH banner) is never truncated.
+func proxyConnect(ctx context.Context, via *ssh.Client, node model.SSHNode, targetAddr string, timeout time.Duration) (net.Conn, error) {
 	proxyAddr := net.JoinHostPort(node.ProxyHost, strconv.Itoa(node.ProxyPort))
 
 	var conn net.Conn
@@ -221,6 +229,16 @@ func dialProxy(ctx context.Context, via *ssh.Client, node model.SSHNode, targetA
 	}
 	if err != nil {
 		return nil, fmt.Errorf("connect proxy %s: %w", proxyAddr, err)
+	}
+
+	// Bound the CONNECT exchange before writing the request so a proxy
+	// that accepts but never answers fails instead of hanging. The
+	// interface assertion fails silently for transports without
+	// deadlines (e.g. an SSH channel); those are bounded by the hop's
+	// own handshake rules.
+	setDeadline, ok := conn.(interface{ SetDeadline(time.Time) error })
+	if ok {
+		setDeadline.SetDeadline(time.Now().Add(timeout))
 	}
 
 	established := false
@@ -236,6 +254,11 @@ func dialProxy(ctx context.Context, via *ssh.Client, node model.SSHNode, targetA
 	}
 	if err := expectProxyResponse(br); err != nil {
 		return nil, err
+	}
+	// Tunnel established: clear the negotiation deadline; the SSH
+	// handshake applies its own.
+	if ok {
+		setDeadline.SetDeadline(time.Time{})
 	}
 	established = true
 	return &bufferedConn{Conn: conn, r: br}, nil
@@ -254,8 +277,12 @@ func writeConnectRequest(w io.Writer, targetAddr string, node model.SSHNode) err
 	return nil
 }
 
-func expectProxyResponse(r io.Reader) error {
-	br := bufio.NewReader(r)
+// expectProxyResponse parses the proxy's HTTP response from br directly
+// (no wrapping reader) so bytes the proxy forwarded after its 200
+// response — such as an upstream SSH banner coalesced into the same
+// segment — stay buffered in br and reach the SSH handshake via the
+// returned bufferedConn.
+func expectProxyResponse(br *bufio.Reader) error {
 	statusLine, err := br.ReadString('\n')
 	if err != nil {
 		return fmt.Errorf("read proxy response: %w", err)

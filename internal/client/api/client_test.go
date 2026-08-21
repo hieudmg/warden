@@ -268,8 +268,35 @@ func TestNonJSONErrorBodySurfacesAPIError(t *testing.T) {
 	if !errors.As(err, &apiErr) {
 		t.Fatalf("ListSSH err = %v, want *APIError", err)
 	}
-	if apiErr.Code != "" || apiErr.Message != "boom" {
-		t.Fatalf("APIError = %+v, want plain text message", apiErr)
+	if apiErr.Code != "" || apiErr.Message != http.StatusText(http.StatusInternalServerError) {
+		t.Fatalf("APIError = %+v, want status-text-only message (no raw body)", apiErr)
+	}
+	if strings.Contains(apiErr.Error(), "boom") {
+		t.Fatalf("APIError leaks raw body text: %v", apiErr.Error())
+	}
+}
+
+func TestJSONErrorMessageTruncated(t *testing.T) {
+	t.Parallel()
+
+	long := strings.Repeat("x", 10*maxErrorMessageBytes)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusConflict)
+		io.WriteString(w, `{"code":"conflict","message":"`+long+`"}`)
+	}))
+	defer srv.Close()
+
+	_, err := New(srv.URL, nil).GetSSH(context.Background(), 1)
+	var apiErr *APIError
+	if !errors.As(err, &apiErr) {
+		t.Fatalf("GetSSH err = %v, want *APIError", err)
+	}
+	if apiErr.Code != "conflict" {
+		t.Fatalf("APIError = %+v, want conflict code", apiErr)
+	}
+	if len(apiErr.Message) > maxErrorMessageBytes {
+		t.Fatalf("message length = %d, want cap %d", len(apiErr.Message), maxErrorMessageBytes)
 	}
 }
 

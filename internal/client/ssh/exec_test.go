@@ -265,6 +265,78 @@ func TestDialTargetFailsWhenJumpUnreachable(t *testing.T) {
 	}
 }
 
+// TestRunCommandThroughHTTPProxyCoalescedBanner reproduces the coalesced
+// TCP segment where the proxy's 200 response and the SSH server's banner
+// arrive in one read before the client sends its version. The handshake
+// must not lose the banner bytes read ahead by the proxy response parser.
+func TestRunCommandThroughHTTPProxyCoalescedBanner(t *testing.T) {
+	t.Parallel()
+
+	srv := newTestSSHServer(t, "s3cret", nil)
+	proxy := startCoalescingProxy(t)
+
+	target := targetNode("s", srv.addr)
+	target.Username = "user"
+	target.Password = []byte("s3cret")
+	target.ProxyHost = proxy.host
+	target.ProxyPort = proxy.port
+
+	var stdout bytes.Buffer
+	err := runCommand(context.Background(), model.SSHBundle{Target: target}, "echo proxied-coalesced",
+		Streams{Stdout: &stdout}, testOptions())
+	if err != nil {
+		t.Fatalf("runCommand: %v", err)
+	}
+	if strings.TrimSpace(stdout.String()) != "proxied-coalesced" {
+		t.Fatalf("stdout = %q, want proxied-coalesced", stdout.String())
+	}
+	if got := proxy.sawConnect(); got != srv.addr {
+		t.Fatalf("proxy CONNECT target = %q, want %q", got, srv.addr)
+	}
+}
+
+// TestProxyConnectStuckProxyBoundedByDeadline verifies the CONNECT
+// negotiation is bounded by the handshake deadline so a proxy that
+// accepts but never answers cannot hang the client forever.
+func TestProxyConnectStuckProxyBoundedByDeadline(t *testing.T) {
+	t.Parallel()
+
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	defer ln.Close()
+	go func() {
+		for {
+			conn, err := ln.Accept()
+			if err != nil {
+				return
+			}
+			// Hold the connection open without ever replying.
+			go func(c net.Conn) {
+				time.Sleep(30 * time.Second)
+				c.Close()
+			}(conn)
+		}
+	}()
+
+	host, portStr, _ := net.SplitHostPort(ln.Addr().String())
+	node := model.SSHNode{Name: "stuck", ProxyHost: host, ProxyPort: mustAtoi(portStr)}
+
+	start := time.Now()
+	conn, err := proxyConnect(context.Background(), nil, node, "10.255.255.1:22", 300*time.Millisecond)
+	elapsed := time.Since(start)
+	if err == nil {
+		if conn != nil {
+			conn.Close()
+		}
+		t.Fatal("proxyConnect succeeded through a stalled proxy, want deadline error")
+	}
+	if elapsed > 5*time.Second {
+		t.Fatalf("stuck proxy took %v to fail, want deadline-bound failure", elapsed)
+	}
+}
+
 // testProxy is a minimal HTTP CONNECT proxy.
 type testProxy struct {
 	host string
@@ -353,6 +425,87 @@ func (p *testProxy) sawConnect() string {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	return p.connectAddr
+}
+
+// startCoalescingProxy starts an HTTP CONNECT proxy that answers the
+// client with the 200 response and the upstream SSH banner in a single
+// write, reproducing a coalesced TCP segment.
+func startCoalescingProxy(t *testing.T) *testProxy {
+	t.Helper()
+
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("proxy listen: %v", err)
+	}
+	p := &testProxy{}
+	host, portStr, _ := net.SplitHostPort(ln.Addr().String())
+	p.host, p.port = host, mustAtoi(portStr)
+
+	go func() {
+		for {
+			conn, err := ln.Accept()
+			if err != nil {
+				return
+			}
+			go p.handleCoalesced(conn)
+		}
+	}()
+	t.Cleanup(func() { ln.Close() })
+	return p
+}
+
+func (p *testProxy) handleCoalesced(conn net.Conn) {
+	defer conn.Close()
+
+	br := bufio.NewReader(conn)
+	reqLine, err := br.ReadString('\n')
+	if err != nil {
+		return
+	}
+	parts := strings.Fields(reqLine)
+	if len(parts) < 2 || parts[0] != "CONNECT" {
+		return
+	}
+	for {
+		line, err := br.ReadString('\n')
+		if err != nil {
+			return
+		}
+		if strings.TrimRight(line, "\r\n") == "" {
+			break
+		}
+	}
+
+	p.mu.Lock()
+	p.connectAddr = parts[1]
+	p.mu.Unlock()
+
+	upstream, err := net.Dial("tcp", parts[1])
+	if err != nil {
+		io.WriteString(conn, "HTTP/1.1 502 Bad Gateway\r\n\r\n")
+		return
+	}
+	defer upstream.Close()
+
+	// The SSH server writes its banner immediately on accept, before
+	// reading the client version. Capture it so the 200 response and
+	// the banner reach the client in one write.
+	banner := make([]byte, 256)
+	n, err := upstream.Read(banner)
+	if err != nil && n == 0 {
+		return
+	}
+
+	resp := append([]byte("HTTP/1.1 200 Connection Established\r\n\r\n"), banner[:n]...)
+	if _, err := conn.Write(resp); err != nil {
+		return
+	}
+
+	var wg sync.WaitGroup
+	wg.Add(2)
+	go func() { defer wg.Done(); io.Copy(conn, upstream) }()
+	go func() { defer wg.Done(); io.Copy(upstream, conn) }()
+	wg.Wait()
 }
 
 func mustAtoi(s string) int {

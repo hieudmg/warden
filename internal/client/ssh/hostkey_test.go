@@ -173,6 +173,46 @@ func TestCallbackMissingFileDoesNotError(t *testing.T) {
 	}
 }
 
+// TestMalformedKnownHostsLinesSkipped verifies OpenSSH-compatible
+// tolerance: malformed lines are skipped instead of failing every
+// connection, while valid plain and hashed entries still verify.
+func TestMalformedKnownHostsLinesSkipped(t *testing.T) {
+	t.Parallel()
+
+	srv := newTestSSHServer(t, "s3cret", nil)
+	path := filepath.Join(t.TempDir(), "known_hosts")
+
+	valid := knownhosts.Line([]string{srv.addr}, srv.hostKey)
+	fields := strings.Fields(valid)
+	keyType, blob := fields[len(fields)-2], fields[len(fields)-1]
+
+	// A malformed entry for the same host with a wrong key type: the
+	// blob parses as an ed25519 key but claims to be ssh-rsa.
+	wrongType := srv.addr + " ssh-rsa " + blob
+
+	// A valid hashed entry for the same host.
+	hashedHost := knownhosts.HashHostname(knownhosts.Normalize(srv.addr))
+	hashedLine := hashedHost + " " + keyType + " " + blob
+
+	content := strings.Join([]string{
+		"this line is not a valid known_hosts entry",
+		valid,
+		hashedLine,
+		wrongType,
+	}, "\n") + "\n"
+	if err := os.WriteFile(path, []byte(content), 0600); err != nil {
+		t.Fatalf("write known_hosts: %v", err)
+	}
+
+	cb, err := hostkey.Callback(path, false, nil)
+	if err != nil {
+		t.Fatalf("Callback with malformed lines: %v", err)
+	}
+	if err := dialWithHostKey(t, srv, cb); err != nil {
+		t.Fatalf("dial with tolerated known_hosts: %v", err)
+	}
+}
+
 func writeKnownHosts(t *testing.T, addr string, key ssh.PublicKey) string {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "known_hosts")
