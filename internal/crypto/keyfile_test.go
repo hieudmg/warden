@@ -11,7 +11,7 @@ import (
 )
 
 func TestLoadMasterKeyValid(t *testing.T) {
-	requireUnixKeyfileValidation(t)
+	requireLinuxKeyfileValidation(t)
 
 	path := filepath.Join(t.TempDir(), "master.key")
 	want := bytes.Repeat([]byte{0x7a}, 32)
@@ -27,7 +27,7 @@ func TestLoadMasterKeyValid(t *testing.T) {
 }
 
 func TestLoadMasterKeyMissing(t *testing.T) {
-	requireUnixKeyfileValidation(t)
+	requireLinuxKeyfileValidation(t)
 
 	_, err := LoadMasterKey(filepath.Join(t.TempDir(), "missing.key"))
 	if err == nil {
@@ -39,7 +39,7 @@ func TestLoadMasterKeyMissing(t *testing.T) {
 }
 
 func TestLoadMasterKeyRejectsWrongLength(t *testing.T) {
-	requireUnixKeyfileValidation(t)
+	requireLinuxKeyfileValidation(t)
 
 	for _, tc := range []struct {
 		name string
@@ -64,25 +64,35 @@ func TestLoadMasterKeyRejectsWrongLength(t *testing.T) {
 }
 
 func TestLoadMasterKeyRejectsUnsafePermissions(t *testing.T) {
-	requireUnixKeyfileValidation(t)
+	requireLinuxKeyfileValidation(t)
 
-	path := filepath.Join(t.TempDir(), "master.key")
-	writeKeyFile(t, path, bytes.Repeat([]byte{0x24}, 32), 0o640)
+	for _, tc := range []struct {
+		name string
+		mode os.FileMode
+	}{
+		{name: "group-readable", mode: 0o640},
+		{name: "other-readable", mode: 0o604},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "master.key")
+			writeKeyFile(t, path, bytes.Repeat([]byte{0x24}, 32), tc.mode)
 
-	_, err := LoadMasterKey(path)
-	if err == nil {
-		t.Fatal("LoadMasterKey() error = nil, want error")
-	}
-	if !strings.Contains(strings.ToLower(err.Error()), "permission") {
-		t.Fatalf("LoadMasterKey() error = %v, want permission error", err)
+			_, err := LoadMasterKey(path)
+			if err == nil {
+				t.Fatal("LoadMasterKey() error = nil, want error")
+			}
+			if !strings.Contains(strings.ToLower(err.Error()), "permission") {
+				t.Fatalf("LoadMasterKey() error = %v, want permission error", err)
+			}
+		})
 	}
 }
 
-func requireUnixKeyfileValidation(t *testing.T) {
+func requireLinuxKeyfileValidation(t *testing.T) {
 	t.Helper()
 
-	if runtime.GOOS == "windows" {
-		t.Skip("LoadMasterKey is only supported for Unix-like server platforms")
+	if runtime.GOOS != "linux" {
+		t.Skip("LoadMasterKey is only supported on Linux server platforms")
 	}
 }
 
