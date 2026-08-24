@@ -212,8 +212,9 @@ func Select(session terminal.Session, conns []model.SSHConnection) (conn model.S
 	// All input reads stay in this goroutine: a blocked stdin reader must
 	// never outlive selection and consume keys from the SSH session. A
 	// lone ESC is resolved by waiting a bounded escGrace for a
-	// continuation byte; the wait reads at most one byte and only while an
-	// ESC is pending, so no reader outlives a successful selection.
+	// continuation byte; the wait is fd-level readiness polling with no
+	// background reader, so no goroutine can survive Select and consume
+	// input meant for the subsequent SSH session.
 	reader := bufio.NewReader(session.Stdin())
 	var dec StreamDecoder
 	for {
@@ -231,7 +232,9 @@ func Select(session terminal.Session, conns []model.SSHConnection) (conn model.S
 		// A leading ESC is normally the start of an arrow sequence. Never
 		// flush it just because the bufio buffer is momentarily empty:
 		// with byte-at-a-time delivery the continuation may simply not
-		// have arrived yet. Wait a bounded grace for the next byte instead.
+		// have arrived yet. Wait a bounded grace for the next byte instead
+		// via the session's readiness poll; the poll spawns no reader, so
+		// a timed-out bare ESC cancels with nothing left blocked on stdin.
 		if len(keys) == 0 && len(dec.Pending()) > 0 && dec.Pending()[0] == 0x1b {
 			var nb byte
 			var ok bool
@@ -239,7 +242,13 @@ func Select(session terminal.Session, conns []model.SSHConnection) (conn model.S
 				nb, err = reader.ReadByte()
 				ok = err == nil
 			} else {
-				nb, ok, err = readByteWithin(reader, escGrace)
+				ok, err = session.StdinReadyWithin(escGrace)
+				if err != nil {
+					return model.SSHConnection{}, fmt.Errorf("read picker input: %w", err)
+				}
+				if ok {
+					nb, err = reader.ReadByte()
+				}
 			}
 			if err != nil {
 				if err == io.EOF {
@@ -280,31 +289,6 @@ func Select(session terminal.Session, conns []model.SSHConnection) (conn model.S
 				}
 			}
 		}
-	}
-}
-
-// byteResult is the outcome of one timed byte read.
-type byteResult struct {
-	b   byte
-	err error
-}
-
-// readByteWithin reads one byte from r, waiting at most d. It reports
-// whether a byte (or error) arrived within the window; on timeout it
-// returns (0, false, nil). The read runs in a short-lived goroutine that
-// consumes at most one byte, so it cannot keep reading from the terminal
-// after Select finishes.
-func readByteWithin(r *bufio.Reader, d time.Duration) (byte, bool, error) {
-	ch := make(chan byteResult, 1)
-	go func() {
-		b, err := r.ReadByte()
-		ch <- byteResult{b: b, err: err}
-	}()
-	select {
-	case res := <-ch:
-		return res.b, true, res.err
-	case <-time.After(d):
-		return 0, false, nil
 	}
 }
 

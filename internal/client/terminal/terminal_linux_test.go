@@ -160,6 +160,43 @@ func TestRawModeDeliversCtrlCAsByte(t *testing.T) {
 	}
 }
 
+// TestUnixStdinReadyWithin verifies the timed stdin readiness wait
+// reports false after the grace window with no input and true as soon as
+// a byte arrives, without ever blocking past the window or leaving a
+// reader goroutine behind on the pty. It runs in raw mode, matching the
+// picker's use: canonical mode would hold a partial line unreadable.
+func TestUnixStdinReadyWithin(t *testing.T) {
+	master, slave := newPtyPair(t)
+	s := &unixSession{in: slave}
+	if err := s.EnterRaw(); err != nil {
+		t.Fatalf("EnterRaw: %v", err)
+	}
+	defer s.Restore()
+
+	start := time.Now()
+	ok, err := s.StdinReadyWithin(30 * time.Millisecond)
+	if err != nil {
+		t.Fatalf("StdinReadyWithin with no input: %v", err)
+	}
+	if ok {
+		t.Fatal("StdinReadyWithin = true with no input, want false")
+	}
+	if elapsed := time.Since(start); elapsed < 20*time.Millisecond {
+		t.Fatalf("StdinReadyWithin returned after %v, want ~30ms wait", elapsed)
+	}
+
+	if _, err := master.Write([]byte{'x'}); err != nil {
+		t.Fatalf("write to master: %v", err)
+	}
+	ok, err = s.StdinReadyWithin(2 * time.Second)
+	if err != nil {
+		t.Fatalf("StdinReadyWithin with pending input: %v", err)
+	}
+	if !ok {
+		t.Fatal("StdinReadyWithin = false with pending input, want true")
+	}
+}
+
 // TestResizeEventsPropagate verifies a SIGWINCH while raw is active is
 // delivered on the ResizeEvents channel.
 func TestResizeEventsPropagate(t *testing.T) {

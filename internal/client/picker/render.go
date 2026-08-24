@@ -72,12 +72,15 @@ func Render(w io.Writer, state State, width, height int) error {
 	// the last row and scroll the alternate screen.
 	var lines []string
 
-	// Two fixed header rows (title, search prompt); the remaining rows
-	// (bodyRows) are shared between the list and the preview so the
+	// Three fixed rows (title, search prompt, focus hint); the remaining
+	// rows (bodyRows) are shared between the list and the preview so the
 	// render never emits more rows than height and the query, list, and
-	// preview all stay visible when the viewport has room.
-	bodyRows := height - 2
-	if bodyRows < 0 {
+	// preview all stay visible when the viewport has room. The focus hint
+	// exposes the Tab control and names the pane that owns Up/Down; it is
+	// omitted on a two-row terminal where the title and prompt already
+	// fill the viewport.
+	bodyRows := height - 3
+	if height < 3 {
 		bodyRows = 0
 	}
 
@@ -134,6 +137,10 @@ func Render(w io.Writer, state State, width, height int) error {
 		}
 	}
 
+	if height >= 3 {
+		lines = append(lines, yellow+clamp(focusHint(state.focus), width)+reset)
+	}
+
 	var b strings.Builder
 	b.WriteString("\x1b[2J\x1b[H")
 	b.WriteString(strings.Join(lines, "\r\n"))
@@ -156,6 +163,16 @@ func listWindowStart(sel, rows, total int) int {
 		start = total - rows
 	}
 	return start
+}
+
+// focusHint names the pane that currently owns Up/Down navigation and the
+// key that toggles it, so the Tab control is visible in the picker UI
+// itself rather than only in the README.
+func focusHint(f Focus) string {
+	if f == FocusDetail {
+		return "detail focused — Tab switches to list"
+	}
+	return "list focused — Tab switches to detail"
 }
 
 // padVisible appends spaces so the line occupies exactly width visible

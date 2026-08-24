@@ -121,6 +121,10 @@ func (f *fakeTerminalSession) ResizeEvents() <-chan struct{} { return f.events }
 
 func (f *fakeTerminalSession) SupportsANSI() bool { return true }
 
+// StdinReadyWithin reports readiness immediately: the SSH transport feeds
+// in-memory readers that never block, so the timed wait is never needed.
+func (f *fakeTerminalSession) StdinReadyWithin(time.Duration) (bool, error) { return true, nil }
+
 // interactiveTestServer is an in-process SSH server that records PTY,
 // window-change, and signal requests and runs exec commands behind a real
 // Linux pty, mirroring sshd's pty handling so remote output is delivered

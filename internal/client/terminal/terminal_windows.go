@@ -220,3 +220,26 @@ func (s *windowsSession) Stderr() io.Writer             { return os.Stderr }
 // SupportsANSI reports whether VT output processing was successfully
 // enabled on the console during EnterRaw.
 func (s *windowsSession) SupportsANSI() bool { return s.ansi }
+
+// StdinReadyWithin waits up to d for console input using
+// WaitForSingleObject on the console input handle, which is signaled
+// whenever input events are pending. The wait is pure readiness polling,
+// so a timed-out wait leaves no reader blocked on stdin and cannot
+// consume bytes meant for a later session.
+func (s *windowsSession) StdinReadyWithin(d time.Duration) (bool, error) {
+	ms := uint32(d / time.Millisecond)
+	if d > 0 && ms == 0 {
+		ms = 1
+	}
+	ev, err := windows.WaitForSingleObject(windows.Handle(s.in.Fd()), ms)
+	if err != nil {
+		return false, err
+	}
+	switch ev {
+	case windows.WAIT_OBJECT_0:
+		return true, nil
+	case uint32(windows.WAIT_TIMEOUT):
+		return false, nil
+	}
+	return false, nil
+}

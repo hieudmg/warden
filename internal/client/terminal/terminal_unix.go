@@ -10,6 +10,7 @@ import (
 	"os/signal"
 	"sync"
 	"syscall"
+	"time"
 
 	"golang.org/x/sys/unix"
 	"golang.org/x/term"
@@ -136,3 +137,25 @@ func (s *unixSession) Stderr() io.Writer             { return os.Stderr }
 // SupportsANSI reports true: Unix terminals accept ANSI/VT escape
 // sequences.
 func (s *unixSession) SupportsANSI() bool { return true }
+
+// StdinReadyWithin waits up to d for stdin input using poll(2). The wait
+// is pure readiness polling, so a timed-out wait leaves no reader blocked
+// on the pty and cannot consume bytes meant for a later session. EINTR
+// (e.g. from SIGWINCH) is retried rather than treated as "no input".
+func (s *unixSession) StdinReadyWithin(d time.Duration) (bool, error) {
+	fds := []unix.PollFd{{Fd: int32(s.in.Fd()), Events: unix.POLLIN}}
+	ms := int(d / time.Millisecond)
+	if d > 0 && ms == 0 {
+		ms = 1
+	}
+	for {
+		n, err := unix.Poll(fds, ms)
+		if err == unix.EINTR {
+			continue
+		}
+		if err != nil {
+			return false, err
+		}
+		return n > 0, nil
+	}
+}

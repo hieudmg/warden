@@ -178,11 +178,13 @@ warden xssh [--accept-new] [connection]
 
 When invoked without `<connection>`, `xssh` opens a colorized native
 terminal picker. Type to filter profile names and hostnames; use Up/Down
-to move, Enter to connect, and Esc or Ctrl-C to cancel. The right pane
-shows the selected profile; password, private-key, passphrase, and
-proxy-password values are never shown and instead display whether they
-are configured. Terminals narrower than 80 columns use a stacked layout.
-Use a modern ANSI/VT-capable terminal on Windows.
+to move, Tab to switch focus between the connection list and the profile
+preview (the bottom line shows which pane is focused), Enter to connect,
+and Esc or Ctrl-C to cancel. The right pane shows the selected profile;
+password, private-key, passphrase, and proxy-password values are never
+shown and instead display whether they are configured. Terminals
+narrower than 80 columns use a stacked layout. Use a modern
+ANSI/VT-capable terminal on Windows.
 
 Exit status mirrors the remote command/query: 0 on success, nonzero on
 failure (remote exit status is propagated for `ssh`).

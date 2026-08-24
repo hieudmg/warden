@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"reflect"
+	"runtime"
 	"strings"
 	"sync"
 	"testing"
@@ -144,6 +145,11 @@ type fakeSession struct {
 	rawCalls      int
 	restoreCalls  int
 	restoreErr    error
+	// stdinReady overrides StdinReadyWithin. When nil, the fake reports
+	// stdin always ready, matching its non-blocking in-memory readers;
+	// tests that exercise the escape grace timeout inject a blocking
+	// reader and a readiness function that reports not ready.
+	stdinReady func(time.Duration) (bool, error)
 }
 
 func newFakeSession(input string, width, height int, ansi bool) *fakeSession {
@@ -165,6 +171,16 @@ func (f *fakeSession) Stdin() io.Reader              { return f.input }
 func (f *fakeSession) Stdout() io.Writer             { return f.output }
 func (f *fakeSession) Stderr() io.Writer             { return io.Discard }
 func (f *fakeSession) SupportsANSI() bool            { return f.ansi }
+
+// StdinReadyWithin reports whether stdin has data available within d.
+// The fake's default readers never block, so the default reports ready
+// immediately; the escape-grace timeout tests inject a custom function.
+func (f *fakeSession) StdinReadyWithin(d time.Duration) (bool, error) {
+	if f.stdinReady != nil {
+		return f.stdinReady(d)
+	}
+	return true, nil
+}
 
 // fieldsText joins each field's label and value for preview assertions.
 func fieldsText(fields []Field) string {
@@ -223,7 +239,7 @@ func TestRenderNarrowLayoutStaysWithinViewport(t *testing.T) {
 func TestRenderNarrowLayoutKeepsListAndPreviewVisible(t *testing.T) {
 	state := NewState([]model.SSHConnection{{ID: 1, Name: "prod"}, {ID: 2, Name: "staging"}})
 	var out bytes.Buffer
-	Render(&out, state, 79, 6)
+	Render(&out, state, 79, 8)
 	s := out.String()
 	for _, want := range []string{"Search: ", "prod", "staging", "ID", ": 1"} {
 		if !strings.Contains(s, want) {
@@ -492,6 +508,58 @@ func TestSelectBareESCBeforeEnterCancels(t *testing.T) {
 	}
 }
 
+// TestSelectBareESCTimeoutLeavesNoReaderGoroutine proves the bounded
+// escape wait cannot strand a stdin reader: when the grace elapses with
+// no continuation byte, the bare ESC cancels and no goroutine remains
+// blocked on stdin to consume input meant for the subsequent SSH session.
+// The input is a pipe that delivers ESC and then stays silent, so any
+// background reader spawned by the wait would stay blocked forever and
+// keep the goroutine count elevated.
+func TestSelectBareESCTimeoutLeavesNoReaderGoroutine(t *testing.T) {
+	pr, pw := io.Pipe()
+	session := &fakeSession{
+		input:  pr,
+		output: &lockedBuffer{},
+		width:  100,
+		height: 24,
+		resize: make(chan struct{}),
+		ansi:   true,
+		stdinReady: func(time.Duration) (bool, error) {
+			return false, nil // the grace elapses with no continuation
+		},
+	}
+
+	before := runtime.NumGoroutine()
+	done := make(chan struct{})
+	var err error
+	go func() {
+		_, err = Select(session, []model.SSHConnection{{ID: 1, Name: "one"}})
+		close(done)
+	}()
+	waitFor(t, func() bool { return session.output.Count("\x1b[2J") >= 1 })
+	if _, err := pw.Write([]byte{0x1b}); err != nil {
+		t.Fatalf("write esc: %v", err)
+	}
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("Select did not return after bare ESC timeout")
+	}
+	if err == nil || !strings.Contains(err.Error(), "selection aborted") {
+		t.Fatalf("Select() err = %v, want 'selection aborted'", err)
+	}
+	if session.restoreCalls != 1 {
+		t.Fatalf("Restore called %d times, want 1", session.restoreCalls)
+	}
+	deadline := time.Now().Add(2 * time.Second)
+	for runtime.NumGoroutine() > before && time.Now().Before(deadline) {
+		time.Sleep(10 * time.Millisecond)
+	}
+	if runtime.NumGoroutine() > before {
+		t.Fatalf("Select left %d goroutines behind (baseline %d): the ESC wait must not strand a stdin reader", runtime.NumGoroutine(), before)
+	}
+}
+
 func TestDecodeBytesRecognizesTab(t *testing.T) {
 	got := DecodeBytes([]byte("\t"))
 	want := []DecodedKey{{Kind: KeyTab}}
@@ -538,10 +606,42 @@ func TestRenderWideSeparatorPosition(t *testing.T) {
 	if len(lines) != 20 {
 		t.Fatalf("render emitted %d rows, want 20", len(lines))
 	}
-	for i := 2; i < len(lines); i++ { // skip title and search rows
+	// Body rows run from the search prompt down to, but excluding, the
+	// final focus-hint row.
+	for i := 2; i < len(lines)-1; i++ {
 		if col := visibleColumnOf(lines[i], '│'); col != leftWidth {
 			t.Fatalf("body row %d: separator at visible column %d, want %d: %q", i, col, leftWidth, lines[i])
 		}
+	}
+}
+
+// TestRenderShowsFocusedPaneHint proves the picker UI exposes the Tab
+// control: the bottom hint names the pane that currently owns Up/Down and
+// changes when Tab toggles focus, in both the wide and narrow layouts.
+func TestRenderShowsFocusedPaneHint(t *testing.T) {
+	state := NewState([]model.SSHConnection{{ID: 1, Name: "prod", Host: "db"}})
+	for _, tc := range []struct{ width, height int }{
+		{100, 10}, // wide layout
+		{79, 10},  // narrow layout
+	} {
+		var listFocused bytes.Buffer
+		Render(&listFocused, state, tc.width, tc.height)
+		if !strings.Contains(listFocused.String(), "list focused") {
+			t.Fatalf("width %d: list-focus render lacks the focus hint: %q", tc.width, listFocused.String())
+		}
+		if strings.Contains(listFocused.String(), "detail focused") {
+			t.Fatalf("width %d: list-focus render claims detail focus: %q", tc.width, listFocused.String())
+		}
+		state = state.Apply(DecodedKey{Kind: KeyTab})
+		var detailFocused bytes.Buffer
+		Render(&detailFocused, state, tc.width, tc.height)
+		if !strings.Contains(detailFocused.String(), "detail focused") {
+			t.Fatalf("width %d: detail-focus render lacks the focus hint: %q", tc.width, detailFocused.String())
+		}
+		if strings.Contains(detailFocused.String(), "list focused") {
+			t.Fatalf("width %d: detail-focus render claims list focus: %q", tc.width, detailFocused.String())
+		}
+		state = state.Apply(DecodedKey{Kind: KeyTab}) // back to list for the next case
 	}
 }
 
