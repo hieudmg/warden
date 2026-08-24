@@ -118,7 +118,7 @@ export function SSHForm({ connection, profiles, pending, error, onSubmit, onCanc
   }
 
   return (
-    <form onSubmit={handleSubmit} className="grid gap-3">
+    <form onSubmit={handleSubmit} autoComplete="off" className="grid gap-3">
       <div className="grid gap-1.5">
         <Label htmlFor="ssh-name">Name</Label>
         <Input
@@ -193,8 +193,6 @@ export function SSHForm({ connection, profiles, pending, error, onSubmit, onCanc
           <Label htmlFor="ssh-password">Password</Label>
           <Input
             id="ssh-password"
-            type="password"
-            autoComplete="new-password"
             placeholder="Leave blank to keep the stored value"
             value={form.password}
             onChange={event => set("password", event.target.value)}
@@ -215,8 +213,6 @@ export function SSHForm({ connection, profiles, pending, error, onSubmit, onCanc
             <Label htmlFor="ssh-private-key-passphrase">Private key passphrase</Label>
             <Input
               id="ssh-private-key-passphrase"
-              type="password"
-              autoComplete="new-password"
               placeholder="Leave blank to keep the stored value"
               value={form.privateKeyPassphrase}
               onChange={event => set("privateKeyPassphrase", event.target.value)}
@@ -260,8 +256,6 @@ export function SSHForm({ connection, profiles, pending, error, onSubmit, onCanc
         <Label htmlFor="ssh-proxy-password">Proxy password</Label>
         <Input
           id="ssh-proxy-password"
-          type="password"
-          autoComplete="new-password"
           placeholder="Leave blank to keep the stored value"
           value={form.proxyPassword}
           onChange={event => set("proxyPassword", event.target.value)}

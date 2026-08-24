@@ -226,4 +226,12 @@ describe("DBForm", () => {
     const alert = screen.getByRole("alert")
     expect(alert).toHaveTextContent("a connection with that name already exists")
   })
+
+  test("uses plain text inputs for credentials and disables browser autoComplete", () => {
+    renderForm()
+    const form = screen.getByRole("button", { name: "Save" }).closest("form")
+    expect(form).not.toBeNull()
+    expect(form!.getAttribute("autocomplete")).toBe("off")
+    expect(document.getElementById("db-password")!.getAttribute("type")).toBeNull()
+  })
 })

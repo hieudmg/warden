@@ -113,7 +113,7 @@ export function DBForm({ connection, sshProfiles, pending, error, onSubmit, onCa
   const options = sshOptions(sshProfiles, Number(form.sshConnectionID))
 
   return (
-    <form onSubmit={handleSubmit} className="grid gap-3">
+    <form onSubmit={handleSubmit} autoComplete="off" className="grid gap-3">
       <div className="grid gap-1.5">
         <Label htmlFor="db-name">Name</Label>
         <Input
@@ -160,8 +160,6 @@ export function DBForm({ connection, sshProfiles, pending, error, onSubmit, onCa
         <Label htmlFor="db-password">Password</Label>
         <Input
           id="db-password"
-          type="password"
-          autoComplete="new-password"
           placeholder="Leave blank to keep the stored value"
           value={form.password}
           onChange={event => set("password", event.target.value)}

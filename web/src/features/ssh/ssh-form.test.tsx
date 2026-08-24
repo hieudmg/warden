@@ -274,6 +274,19 @@ describe("SSHForm", () => {
     expect(screen.getAllByRole("separator").length).toBeGreaterThanOrEqual(4)
   })
 
+  test("uses plain text inputs for credentials and disables browser autoComplete", async () => {
+    const user = userEvent.setup()
+    renderForm()
+    const form = screen.getByRole("button", { name: "Save" }).closest("form")
+    expect(form).not.toBeNull()
+    expect(form!.getAttribute("autocomplete")).toBe("off")
+    expect(document.getElementById("ssh-password")!.getAttribute("type")).toBeNull()
+    // The passphrase input only mounts once the user picks private-key auth.
+    await user.click(screen.getByRole("radio", { name: "Private key" }))
+    expect(document.getElementById("ssh-private-key-passphrase")!.getAttribute("type")).toBeNull()
+    expect(document.getElementById("ssh-proxy-password")!.getAttribute("type")).toBeNull()
+  })
+
   test("renders form errors with role alert", () => {
     render(
       <SSHForm
