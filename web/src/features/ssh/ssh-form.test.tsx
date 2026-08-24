@@ -240,21 +240,16 @@ describe("SSHForm", () => {
     expect(within(row as HTMLElement).getByText(":")).toBeInTheDocument()
   })
 
-  test("renders password and private-key auth as mutually exclusive tabs", () => {
+  test("renders password and private-key auth as mutually exclusive radios", () => {
     renderForm()
-    expect(screen.getByRole("tab", { name: "Password" })).toHaveAttribute(
-      "aria-selected",
-      "true",
-    )
-    expect(screen.getByRole("tab", { name: "Private key" })).toHaveAttribute(
-      "aria-selected",
-      "false",
-    )
+    expect(screen.getByText("Authentication mode")).toBeInTheDocument()
+    expect(screen.getByRole("radio", { name: "Password" })).toBeChecked()
+    expect(screen.getByRole("radio", { name: "Private key" })).not.toBeChecked()
     expect(screen.getByLabelText("Password", { selector: "input" })).toBeInTheDocument()
     expect(screen.queryByLabelText("Private key", { selector: "textarea" })).not.toBeInTheDocument()
   })
 
-  test("switching auth tabs clears the inactive mode's secret", async () => {
+  test("switching auth radios clears the inactive mode's secret", async () => {
     const user = userEvent.setup()
     renderForm()
 
@@ -262,16 +257,21 @@ describe("SSHForm", () => {
     await user.type(passwordInput, "hunter2")
     expect(passwordInput).toHaveValue("hunter2")
 
-    await user.click(screen.getByRole("tab", { name: "Private key" }))
+    await user.click(screen.getByRole("radio", { name: "Private key" }))
     expect(screen.getByLabelText("Private key", { selector: "textarea" })).toHaveValue("")
     expect(
       screen.getByLabelText("Private key passphrase", { selector: "input" }),
     ).toHaveValue("")
     expect(screen.queryByLabelText("Password", { selector: "input" })).not.toBeInTheDocument()
 
-    await user.click(screen.getByRole("tab", { name: "Password" }))
+    await user.click(screen.getByRole("radio", { name: "Password" }))
     expect(screen.getByLabelText("Password", { selector: "input" })).toHaveValue("")
     expect(screen.queryByLabelText("Private key", { selector: "textarea" })).not.toBeInTheDocument()
+  })
+
+  test("separates form sections with dividers", () => {
+    renderForm()
+    expect(screen.getAllByRole("separator").length).toBeGreaterThanOrEqual(4)
   })
 
   test("renders form errors with role alert", () => {

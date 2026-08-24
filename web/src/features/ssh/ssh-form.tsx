@@ -4,7 +4,8 @@ import { Button } from "@/components/ui/button"
 import { DialogFooter } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
+import { Separator } from "@/components/ui/separator"
 import { Textarea } from "@/components/ui/textarea"
 import { parseJumpRoute, serializeJumpRoute } from "./jump-route"
 import { JumpRouteField } from "./jump-route-field"
@@ -12,7 +13,7 @@ import { JumpRouteField } from "./jump-route-field"
 /** Controlled SSH form state. Secrets are always blank on open because
  * list/get responses are redacted; only literal empty strings serialize
  * as null so stored values are retained on edit. Password and private
- * key are mutually exclusive auth modes selected by tabs: switching
+ * key are mutually exclusive auth modes selected by radio: switching
  * modes clears the inactive mode's secret client-side. */
 export interface SSHFormState {
   name: string
@@ -160,38 +161,47 @@ export function SSHForm({ connection, profiles, pending, error, onSubmit, onCanc
           />
         </div>
       </div>
-      <Tabs
-        value={form.authMode}
-        onValueChange={value => {
-          const authMode = value as "password" | "privateKey"
-          setForm(current => ({
-            ...current,
-            authMode,
-            password: authMode === "password" ? current.password : "",
-            privateKey: authMode === "privateKey" ? current.privateKey : "",
-            privateKeyPassphrase:
-              authMode === "privateKey" ? current.privateKeyPassphrase : "",
-          }))
-        }}
-      >
-        <TabsList className="grid w-full grid-cols-2">
-          <TabsTrigger value="password">Password</TabsTrigger>
-          <TabsTrigger value="privateKey">Private key</TabsTrigger>
-        </TabsList>
-        <TabsContent value="password" className="grid gap-3 pt-3">
-          <div className="grid gap-1.5">
-            <Label htmlFor="ssh-password">Password</Label>
-            <Input
-              id="ssh-password"
-              type="password"
-              autoComplete="new-password"
-              placeholder="Leave blank to keep the stored value"
-              value={form.password}
-              onChange={event => set("password", event.target.value)}
-            />
+      <Separator decorative={false} />
+      <div className="grid gap-2">
+        <Label>Authentication mode</Label>
+        <RadioGroup
+          value={form.authMode}
+          onValueChange={value => {
+            const authMode = value as "password" | "privateKey"
+            setForm(current => ({
+              ...current,
+              authMode,
+              password: authMode === "password" ? current.password : "",
+              privateKey: authMode === "privateKey" ? current.privateKey : "",
+              privateKeyPassphrase:
+                authMode === "privateKey" ? current.privateKeyPassphrase : "",
+            }))
+          }}
+        >
+          <div className="flex items-center gap-2">
+            <RadioGroupItem value="password" id="ssh-auth-password" />
+            <Label htmlFor="ssh-auth-password">Password</Label>
           </div>
-        </TabsContent>
-        <TabsContent value="privateKey" className="grid gap-3 pt-3">
+          <div className="flex items-center gap-2">
+            <RadioGroupItem value="privateKey" id="ssh-auth-private-key" />
+            <Label htmlFor="ssh-auth-private-key">Private key</Label>
+          </div>
+        </RadioGroup>
+      </div>
+      {form.authMode === "password" ? (
+        <div className="grid gap-1.5">
+          <Label htmlFor="ssh-password">Password</Label>
+          <Input
+            id="ssh-password"
+            type="password"
+            autoComplete="new-password"
+            placeholder="Leave blank to keep the stored value"
+            value={form.password}
+            onChange={event => set("password", event.target.value)}
+          />
+        </div>
+      ) : (
+        <div className="grid gap-3">
           <div className="grid gap-1.5">
             <Label htmlFor="ssh-private-key">Private key</Label>
             <Textarea
@@ -212,8 +222,9 @@ export function SSHForm({ connection, profiles, pending, error, onSubmit, onCanc
               onChange={event => set("privateKeyPassphrase", event.target.value)}
             />
           </div>
-        </TabsContent>
-      </Tabs>
+        </div>
+      )}
+      <Separator decorative={false} />
       <div className="flex items-end gap-2">
         <div className="grid gap-1.5 flex-[3] min-w-0">
           <Label htmlFor="ssh-proxy-username">Proxy username</Label>
@@ -256,6 +267,7 @@ export function SSHForm({ connection, profiles, pending, error, onSubmit, onCanc
           onChange={event => set("proxyPassword", event.target.value)}
         />
       </div>
+      <Separator decorative={false} />
       <div className="grid gap-1.5">
         <Label>Jump route</Label>
         <JumpRouteField
@@ -265,6 +277,7 @@ export function SSHForm({ connection, profiles, pending, error, onSubmit, onCanc
           editingID={connection?.id}
         />
       </div>
+      <Separator decorative={false} />
       <div className="grid gap-1.5">
         <Label htmlFor="ssh-default-dir">Default directory</Label>
         <Input
