@@ -235,4 +235,52 @@ describe("ProjectsReportsTab", () => {
     expect(screen.queryByRole("button", { name: /edit/i })).not.toBeInTheDocument()
     expect(screen.queryByRole("button", { name: /delete/i })).not.toBeInTheDocument()
   })
+
+  test("shows a report load error with role alert and a Retry action", async () => {
+    const user = userEvent.setup()
+    mockedAPI.listReports.mockRejectedValue(new Error("reports unavailable"))
+    render(
+      <ProjectsReportsTab resource={projectsResource([project(1, "warden")])} notify={notify} />,
+    )
+
+    await user.click(screen.getByRole("button", { name: "warden" }))
+    const alert = await screen.findByRole("alert")
+    expect(alert).toHaveTextContent("Unable to load reports for warden")
+    expect(alert).toHaveTextContent("reports unavailable")
+    expect(screen.getByRole("button", { name: "Retry" })).toBeInTheDocument()
+  })
+
+  test("shows project creation errors with role alert", async () => {
+    const user = userEvent.setup()
+    mockedAPI.createProject.mockRejectedValue(new Error("project exists"))
+    render(
+      <ProjectsReportsTab resource={projectsResource([project(1, "warden")])} notify={notify} />,
+    )
+
+    await user.click(screen.getByRole("button", { name: "New project" }))
+    await user.type(screen.getByLabelText("Name"), "storefront")
+    await user.click(screen.getByRole("button", { name: "Create project" }))
+
+    const alert = await screen.findByRole("alert")
+    expect(alert).toHaveTextContent("project exists")
+  })
+
+  test("shows report creation errors with role alert", async () => {
+    const user = userEvent.setup()
+    mockedAPI.listReports.mockResolvedValue([])
+    mockedAPI.createReport.mockRejectedValue(new Error("report failed"))
+    render(
+      <ProjectsReportsTab resource={projectsResource([project(1, "warden")])} notify={notify} />,
+    )
+
+    await user.click(screen.getByRole("button", { name: "warden" }))
+    await user.click(screen.getByRole("button", { name: "Add report" }))
+    await user.type(screen.getByLabelText("Title"), "t")
+    await user.type(screen.getByLabelText("Summary"), "s")
+    await user.type(screen.getByLabelText("Agent model"), "gpt-4o")
+    await user.click(screen.getByRole("button", { name: "Create report" }))
+
+    const alert = await screen.findByRole("alert")
+    expect(alert).toHaveTextContent("report failed")
+  })
 })

@@ -269,6 +269,56 @@ describe("SSHTab", () => {
     expect(within(dialog).getByRole("button", { name: "Cancel" })).toBeInTheDocument()
   })
 
+  test("focuses the first meaningful control when the create dialog opens", async () => {
+    const user = userEvent.setup()
+    render(<SSHTab resource={resource({ data: [] })} notify={notify} />)
+
+    await user.click(screen.getByRole("button", { name: "New connection" }))
+    const dialog = await screen.findByRole("dialog")
+    expect(within(dialog).getByLabelText("Name")).toHaveFocus()
+  })
+
+  test("closes the dialog on Escape and returns focus to the trigger", async () => {
+    const user = userEvent.setup()
+    render(<SSHTab resource={resource({ data: [] })} notify={notify} />)
+
+    const trigger = screen.getByRole("button", { name: "New connection" })
+    await user.click(trigger)
+    const dialog = await screen.findByRole("dialog")
+    expect(within(dialog).getByLabelText("Name")).toHaveFocus()
+
+    await user.keyboard("{Escape}")
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument())
+    expect(trigger).toHaveFocus()
+  })
+
+  test("names the target connection in the delete confirmation", async () => {
+    const user = userEvent.setup()
+    mockedAPI.sshDependents.mockResolvedValue({ ssh: [], db: [] })
+    render(<SSHTab resource={resource({ data: [ssh(1, "bastion")] })} notify={notify} />)
+
+    await user.click(screen.getByRole("button", { name: "Delete bastion" }))
+    const dialog = await screen.findByRole("dialog")
+    expect(
+      await within(dialog).findByText('This will permanently delete "bastion".'),
+    ).toBeInTheDocument()
+  })
+
+  test("shows Deleting and disables the button while the delete request is pending", async () => {
+    const user = userEvent.setup()
+    mockedAPI.sshDependents.mockResolvedValue({ ssh: [], db: [] })
+    mockedAPI.deleteSSH.mockReturnValue(new Promise(() => {}))
+    render(<SSHTab resource={resource({ data: [ssh(1, "bastion")] })} notify={notify} />)
+
+    await user.click(screen.getByRole("button", { name: "Delete bastion" }))
+    const dialog = await screen.findByRole("dialog")
+    await user.click(within(dialog).getByRole("button", { name: "Delete" }))
+
+    expect(mockedAPI.deleteSSH).toHaveBeenCalledTimes(1)
+    const deleting = within(dialog).getByRole("button", { name: "Deleting" })
+    expect(deleting).toBeDisabled()
+  })
+
   test("never renders secret values, only presence badges", () => {
     render(
       <SSHTab

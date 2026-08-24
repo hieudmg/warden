@@ -1,6 +1,8 @@
-import { describe, expect, test } from "vitest"
+import { render, screen } from "@testing-library/react"
+import { describe, expect, test, vi } from "vitest"
 import type { SSHConnection } from "@/api/types"
 import { emptySSHForm, sshFormFromConnection, toSSHRequest, type SSHFormState } from "./ssh-form"
+import { SSHForm } from "./ssh-form"
 
 function connection(overrides: Partial<SSHConnection> = {}): SSHConnection {
   return {
@@ -138,5 +140,22 @@ describe("toSSHRequest", () => {
     expect(request.port).toBe(2222)
     expect(request.proxy_port).toBe(1080)
     expect(request.jump_connection_ids).toBe("[2,7,2,0,-4,99]")
+  })
+})
+
+describe("SSHForm", () => {
+  test("renders form errors with role alert", () => {
+    render(
+      <SSHForm
+        connection={null}
+        profiles={[]}
+        pending={false}
+        error="a connection with that name already exists"
+        onSubmit={vi.fn()}
+        onCancel={vi.fn()}
+      />,
+    )
+    const alert = screen.getByRole("alert")
+    expect(alert).toHaveTextContent("a connection with that name already exists")
   })
 })

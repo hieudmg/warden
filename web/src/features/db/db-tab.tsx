@@ -1,4 +1,4 @@
-import { useState } from "react"
+import { useRef, useState } from "react"
 import { api } from "@/api/client"
 import type { DBConnection, DBConnectionRequest, DependentsResponse, SSHConnection } from "@/api/types"
 import { Badge } from "@/components/ui/badge"
@@ -58,12 +58,20 @@ export function DBTab({ resource, sshProfiles, notify }: DBTabProps) {
   const [deletePending, setDeletePending] = useState(false)
   const [deleteError, setDeleteError] = useState<string | null>(null)
 
-  const openCreate = () => {
+  // Controlled dialogs have no DialogTrigger, so Radix cannot restore focus
+  // to the opener on close; capture the trigger element and restore it via
+  // the Dialog primitive's onCloseAutoFocus hook (spec: focus returns to the
+  // trigger on close).
+  const lastTriggerRef = useRef<HTMLElement | null>(null)
+
+  const openCreate = (trigger: HTMLElement) => {
+    lastTriggerRef.current = trigger
     setFormError(null)
     setFormDialog({ mode: "create" })
   }
 
-  const openEdit = (connection: DBConnection) => {
+  const openEdit = (connection: DBConnection, trigger: HTMLElement) => {
+    lastTriggerRef.current = trigger
     setFormError(null)
     setFormDialog({ mode: "edit", connection })
   }
@@ -92,7 +100,8 @@ export function DBTab({ resource, sshProfiles, notify }: DBTabProps) {
     }
   }
 
-  const requestDelete = async (connection: DBConnection) => {
+  const requestDelete = async (connection: DBConnection, trigger: HTMLElement) => {
+    lastTriggerRef.current = trigger
     setDeleteError(null)
     setDeleteDialog({ target: connection, dependents: null, loading: true, error: null })
     try {
@@ -128,7 +137,7 @@ export function DBTab({ resource, sshProfiles, notify }: DBTabProps) {
     <div className="p-4">
       <div className="mb-3 flex items-center justify-between">
         <h2 className="text-lg font-semibold">Database connections</h2>
-        <Button type="button" onClick={openCreate}>
+        <Button type="button" onClick={event => openCreate(event.currentTarget)}>
           New database
         </Button>
       </div>
@@ -181,7 +190,7 @@ export function DBTab({ resource, sshProfiles, notify }: DBTabProps) {
                       variant="outline"
                       size="sm"
                       aria-label={`Edit ${connection.name}`}
-                      onClick={() => openEdit(connection)}
+                      onClick={event => openEdit(connection, event.currentTarget)}
                     >
                       Edit
                     </Button>
@@ -190,7 +199,7 @@ export function DBTab({ resource, sshProfiles, notify }: DBTabProps) {
                       variant="destructive"
                       size="sm"
                       aria-label={`Delete ${connection.name}`}
-                      onClick={() => void requestDelete(connection)}
+                      onClick={event => void requestDelete(connection, event.currentTarget)}
                     >
                       Delete
                     </Button>
@@ -208,7 +217,12 @@ export function DBTab({ resource, sshProfiles, notify }: DBTabProps) {
           if (!open && !pending) setFormDialog(null)
         }}
       >
-        <DialogContent>
+        <DialogContent
+          onCloseAutoFocus={event => {
+            event.preventDefault()
+            lastTriggerRef.current?.focus()
+          }}
+        >
           <DialogHeader>
             <DialogTitle>
               {formDialog?.mode === "edit" ? `Edit ${formDialog.connection.name}` : "New database connection"}
@@ -237,7 +251,12 @@ export function DBTab({ resource, sshProfiles, notify }: DBTabProps) {
           if (!open && !deletePending) setDeleteDialog(null)
         }}
       >
-        <DialogContent>
+        <DialogContent
+          onCloseAutoFocus={event => {
+            event.preventDefault()
+            lastTriggerRef.current?.focus()
+          }}
+        >
           <DialogHeader>
             <DialogTitle>Delete database connection</DialogTitle>
             <DialogDescription>

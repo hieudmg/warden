@@ -122,6 +122,28 @@ describe("App", () => {
     expect(projectsTab).toHaveAttribute("aria-selected", "true")
     expect(dbTab).toHaveAttribute("aria-selected", "false")
   })
+
+  test("switches tabs with arrow keys following Radix behavior", async () => {
+    const user = userEvent.setup()
+    render(<App />)
+
+    const sshTab = screen.getByRole("tab", { name: "SSH" })
+    const dbTab = screen.getByRole("tab", { name: "Databases" })
+    const projectsTab = screen.getByRole("tab", { name: "Projects & Reports" })
+
+    sshTab.focus()
+    await user.keyboard("{ArrowRight}")
+    expect(dbTab).toHaveAttribute("aria-selected", "true")
+    expect(sshTab).toHaveAttribute("aria-selected", "false")
+
+    await user.keyboard("{ArrowRight}")
+    expect(projectsTab).toHaveAttribute("aria-selected", "true")
+    expect(dbTab).toHaveAttribute("aria-selected", "false")
+
+    await user.keyboard("{ArrowLeft}")
+    expect(dbTab).toHaveAttribute("aria-selected", "true")
+    expect(projectsTab).toHaveAttribute("aria-selected", "false")
+  })
 })
 
 describe("Notifications", () => {

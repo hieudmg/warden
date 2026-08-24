@@ -188,4 +188,19 @@ describe("DBForm", () => {
     await user.click(screen.getByRole("button", { name: "Save" }))
     expect(onSubmit).toHaveBeenCalledWith(expect.objectContaining({ ssh_connection_id: 2 }))
   })
+
+  test("renders form errors with role alert", () => {
+    render(
+      <DBForm
+        connection={null}
+        sshProfiles={[]}
+        pending={false}
+        error="a connection with that name already exists"
+        onSubmit={vi.fn()}
+        onCancel={vi.fn()}
+      />,
+    )
+    const alert = screen.getByRole("alert")
+    expect(alert).toHaveTextContent("a connection with that name already exists")
+  })
 })

@@ -140,6 +140,12 @@ export function ProjectsReportsTab({ resource, notify }: ProjectsReportsTabProps
   const [reportPending, setReportPending] = useState(false)
   const [reportError, setReportError] = useState<string | null>(null)
 
+  // Controlled dialogs have no DialogTrigger, so Radix cannot restore focus
+  // to the opener on close; capture the trigger element and restore it via
+  // the Dialog primitive's onCloseAutoFocus hook (spec: focus returns to the
+  // trigger on close).
+  const lastTriggerRef = useRef<HTMLElement | null>(null)
+
   // Abortable report loading per project, mirroring useListResource:
   // each request aborts the previous and stamps a monotonic id so stale
   // responses never overwrite the current project's reports.
@@ -230,7 +236,8 @@ export function ProjectsReportsTab({ resource, notify }: ProjectsReportsTabProps
             </h2>
             <Button
               type="button"
-              onClick={() => {
+              onClick={event => {
+                lastTriggerRef.current = event.currentTarget
                 setProjectError(null)
                 setProjectDialog(true)
               }}
@@ -258,7 +265,8 @@ export function ProjectsReportsTab({ resource, notify }: ProjectsReportsTabProps
             </h2>
             <Button
               type="button"
-              onClick={() => {
+              onClick={event => {
+                lastTriggerRef.current = event.currentTarget
                 setReportError(null)
                 setReportDialog(true)
               }}
@@ -295,7 +303,12 @@ export function ProjectsReportsTab({ resource, notify }: ProjectsReportsTabProps
           if (!open && !projectPending) setProjectDialog(false)
         }}
       >
-        <DialogContent>
+        <DialogContent
+          onCloseAutoFocus={event => {
+            event.preventDefault()
+            lastTriggerRef.current?.focus()
+          }}
+        >
           <DialogHeader>
             <DialogTitle>Create project</DialogTitle>
             <DialogDescription>Projects group immutable reports.</DialogDescription>
@@ -315,7 +328,12 @@ export function ProjectsReportsTab({ resource, notify }: ProjectsReportsTabProps
           if (!open && !reportPending) setReportDialog(false)
         }}
       >
-        <DialogContent>
+        <DialogContent
+          onCloseAutoFocus={event => {
+            event.preventDefault()
+            lastTriggerRef.current?.focus()
+          }}
+        >
           <DialogHeader>
             <DialogTitle>Create report</DialogTitle>
             <DialogDescription>Reports are immutable once created.</DialogDescription>

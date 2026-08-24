@@ -1,4 +1,4 @@
-import { useState } from "react"
+import { useRef, useState } from "react"
 import { api } from "@/api/client"
 import type { DependentsResponse, SSHConnection, SSHConnectionRequest } from "@/api/types"
 import { Badge } from "@/components/ui/badge"
@@ -57,12 +57,20 @@ export function SSHTab({ resource, notify }: SSHTabProps) {
   const [deletePending, setDeletePending] = useState(false)
   const [deleteError, setDeleteError] = useState<string | null>(null)
 
-  const openCreate = () => {
+  // Controlled dialogs have no DialogTrigger, so Radix cannot restore focus
+  // to the opener on close; capture the trigger element and restore it via
+  // the Dialog primitive's onCloseAutoFocus hook (spec: focus returns to the
+  // trigger on close).
+  const lastTriggerRef = useRef<HTMLElement | null>(null)
+
+  const openCreate = (trigger: HTMLElement) => {
+    lastTriggerRef.current = trigger
     setFormError(null)
     setFormDialog({ mode: "create" })
   }
 
-  const openEdit = (connection: SSHConnection) => {
+  const openEdit = (connection: SSHConnection, trigger: HTMLElement) => {
+    lastTriggerRef.current = trigger
     setFormError(null)
     setFormDialog({ mode: "edit", connection })
   }
@@ -91,7 +99,8 @@ export function SSHTab({ resource, notify }: SSHTabProps) {
     }
   }
 
-  const requestDelete = async (connection: SSHConnection) => {
+  const requestDelete = async (connection: SSHConnection, trigger: HTMLElement) => {
+    lastTriggerRef.current = trigger
     setDeleteError(null)
     setDeleteDialog({ target: connection, dependents: null, loading: true, error: null })
     try {
@@ -127,7 +136,7 @@ export function SSHTab({ resource, notify }: SSHTabProps) {
     <div className="p-4">
       <div className="mb-3 flex items-center justify-between">
         <h2 className="text-lg font-semibold">SSH connections</h2>
-        <Button type="button" onClick={openCreate}>
+        <Button type="button" onClick={event => openCreate(event.currentTarget)}>
           New connection
         </Button>
       </div>
@@ -195,7 +204,7 @@ export function SSHTab({ resource, notify }: SSHTabProps) {
                       variant="outline"
                       size="sm"
                       aria-label={`Edit ${connection.name}`}
-                      onClick={() => openEdit(connection)}
+                      onClick={event => openEdit(connection, event.currentTarget)}
                     >
                       Edit
                     </Button>
@@ -204,7 +213,7 @@ export function SSHTab({ resource, notify }: SSHTabProps) {
                       variant="destructive"
                       size="sm"
                       aria-label={`Delete ${connection.name}`}
-                      onClick={() => void requestDelete(connection)}
+                      onClick={event => void requestDelete(connection, event.currentTarget)}
                     >
                       Delete
                     </Button>
@@ -222,7 +231,12 @@ export function SSHTab({ resource, notify }: SSHTabProps) {
           if (!open && !pending) setFormDialog(null)
         }}
       >
-        <DialogContent>
+        <DialogContent
+          onCloseAutoFocus={event => {
+            event.preventDefault()
+            lastTriggerRef.current?.focus()
+          }}
+        >
           <DialogHeader>
             <DialogTitle>
               {formDialog?.mode === "edit" ? `Edit ${formDialog.connection.name}` : "New SSH connection"}
@@ -251,7 +265,12 @@ export function SSHTab({ resource, notify }: SSHTabProps) {
           if (!open && !deletePending) setDeleteDialog(null)
         }}
       >
-        <DialogContent>
+        <DialogContent
+          onCloseAutoFocus={event => {
+            event.preventDefault()
+            lastTriggerRef.current?.focus()
+          }}
+        >
           <DialogHeader>
             <DialogTitle>Delete SSH connection</DialogTitle>
             <DialogDescription>
