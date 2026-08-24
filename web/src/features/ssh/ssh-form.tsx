@@ -1,0 +1,253 @@
+import { useState, type FormEvent } from "react"
+import type { SSHConnection, SSHConnectionRequest } from "@/api/types"
+import { Button } from "@/components/ui/button"
+import { DialogFooter } from "@/components/ui/dialog"
+import { Input } from "@/components/ui/input"
+import { Label } from "@/components/ui/label"
+import { Textarea } from "@/components/ui/textarea"
+import { parseJumpRoute, serializeJumpRoute } from "./jump-route"
+import { JumpRouteField } from "./jump-route-field"
+
+/** Controlled SSH form state. Secrets are always blank on open because
+ * list/get responses are redacted; only literal empty strings serialize
+ * as null so stored values are retained on edit. */
+export interface SSHFormState {
+  name: string
+  host: string
+  port: string
+  username: string
+  password: string
+  privateKey: string
+  privateKeyPassphrase: string
+  proxyHost: string
+  proxyPort: string
+  proxyUsername: string
+  proxyPassword: string
+  jumpIDs: number[]
+  defaultDir: string
+}
+
+export function emptySSHForm(): SSHFormState {
+  return {
+    name: "",
+    host: "",
+    port: "22",
+    username: "",
+    password: "",
+    privateKey: "",
+    privateKeyPassphrase: "",
+    proxyHost: "",
+    proxyPort: "0",
+    proxyUsername: "",
+    proxyPassword: "",
+    jumpIDs: [],
+    defaultDir: "",
+  }
+}
+
+export function sshFormFromConnection(connection: SSHConnection): SSHFormState {
+  return {
+    name: connection.name,
+    host: connection.host,
+    port: String(connection.port),
+    username: connection.username,
+    password: "",
+    privateKey: "",
+    privateKeyPassphrase: "",
+    proxyHost: connection.proxy_host,
+    proxyPort: String(connection.proxy_port),
+    proxyUsername: connection.proxy_username,
+    proxyPassword: "",
+    jumpIDs: parseJumpRoute(connection.jump_connection_ids),
+    defaultDir: connection.default_dir,
+  }
+}
+
+/** Blank secrets serialize as null (retain on edit, store nothing on
+ * create); nonblank secrets are preserved verbatim, never trimmed. */
+const nullableSecret = (value: string): string | null => (value === "" ? null : value)
+
+export function toSSHRequest(form: SSHFormState): SSHConnectionRequest {
+  return {
+    name: form.name,
+    host: form.host,
+    port: Number(form.port),
+    username: form.username,
+    password: nullableSecret(form.password),
+    private_key: nullableSecret(form.privateKey),
+    private_key_passphrase: nullableSecret(form.privateKeyPassphrase),
+    proxy_host: form.proxyHost,
+    proxy_port: Number(form.proxyPort),
+    proxy_username: form.proxyUsername,
+    proxy_password: nullableSecret(form.proxyPassword),
+    jump_connection_ids: serializeJumpRoute(form.jumpIDs),
+    default_dir: form.defaultDir,
+  }
+}
+
+export interface SSHFormProps {
+  /** The connection being edited, or null for create. */
+  connection: SSHConnection | null
+  /** Existing SSH profiles backing the jump-route Add options and labels. */
+  profiles: readonly SSHConnection[]
+  pending: boolean
+  error: string | null
+  onSubmit: (request: SSHConnectionRequest) => void
+  onCancel: () => void
+}
+
+export function SSHForm({ connection, profiles, pending, error, onSubmit, onCancel }: SSHFormProps) {
+  const [form, setForm] = useState<SSHFormState>(() =>
+    connection ? sshFormFromConnection(connection) : emptySSHForm(),
+  )
+  const set = <K extends keyof SSHFormState>(key: K, value: SSHFormState[K]) =>
+    setForm(current => ({ ...current, [key]: value }))
+
+  const handleSubmit = (event: FormEvent) => {
+    event.preventDefault()
+    onSubmit(toSSHRequest(form))
+  }
+
+  return (
+    <form onSubmit={handleSubmit} className="grid gap-3">
+      <div className="grid gap-1.5">
+        <Label htmlFor="ssh-name">Name</Label>
+        <Input
+          id="ssh-name"
+          value={form.name}
+          onChange={event => set("name", event.target.value)}
+          required
+        />
+      </div>
+      <div className="grid gap-1.5">
+        <Label htmlFor="ssh-host">Host</Label>
+        <Input
+          id="ssh-host"
+          value={form.host}
+          onChange={event => set("host", event.target.value)}
+          required
+        />
+      </div>
+      <div className="grid gap-1.5">
+        <Label htmlFor="ssh-port">Port</Label>
+        <Input
+          id="ssh-port"
+          type="number"
+          min={1}
+          max={65535}
+          value={form.port}
+          onChange={event => set("port", event.target.value)}
+        />
+      </div>
+      <div className="grid gap-1.5">
+        <Label htmlFor="ssh-username">Username</Label>
+        <Input
+          id="ssh-username"
+          value={form.username}
+          onChange={event => set("username", event.target.value)}
+          required
+        />
+      </div>
+      <div className="grid gap-1.5">
+        <Label htmlFor="ssh-password">Password</Label>
+        <Input
+          id="ssh-password"
+          type="password"
+          autoComplete="new-password"
+          placeholder="Leave blank to keep the stored value"
+          value={form.password}
+          onChange={event => set("password", event.target.value)}
+        />
+      </div>
+      <div className="grid gap-1.5">
+        <Label htmlFor="ssh-private-key">Private key</Label>
+        <Textarea
+          id="ssh-private-key"
+          placeholder="Leave blank to keep the stored value"
+          value={form.privateKey}
+          onChange={event => set("privateKey", event.target.value)}
+        />
+      </div>
+      <div className="grid gap-1.5">
+        <Label htmlFor="ssh-private-key-passphrase">Private key passphrase</Label>
+        <Input
+          id="ssh-private-key-passphrase"
+          type="password"
+          autoComplete="new-password"
+          placeholder="Leave blank to keep the stored value"
+          value={form.privateKeyPassphrase}
+          onChange={event => set("privateKeyPassphrase", event.target.value)}
+        />
+      </div>
+      <div className="grid gap-1.5">
+        <Label htmlFor="ssh-proxy-host">Proxy host</Label>
+        <Input
+          id="ssh-proxy-host"
+          value={form.proxyHost}
+          onChange={event => set("proxyHost", event.target.value)}
+        />
+      </div>
+      <div className="grid gap-1.5">
+        <Label htmlFor="ssh-proxy-port">Proxy port</Label>
+        <Input
+          id="ssh-proxy-port"
+          type="number"
+          min={0}
+          max={65535}
+          value={form.proxyPort}
+          onChange={event => set("proxyPort", event.target.value)}
+        />
+      </div>
+      <div className="grid gap-1.5">
+        <Label htmlFor="ssh-proxy-username">Proxy username</Label>
+        <Input
+          id="ssh-proxy-username"
+          value={form.proxyUsername}
+          onChange={event => set("proxyUsername", event.target.value)}
+        />
+      </div>
+      <div className="grid gap-1.5">
+        <Label htmlFor="ssh-proxy-password">Proxy password</Label>
+        <Input
+          id="ssh-proxy-password"
+          type="password"
+          autoComplete="new-password"
+          placeholder="Leave blank to keep the stored value"
+          value={form.proxyPassword}
+          onChange={event => set("proxyPassword", event.target.value)}
+        />
+      </div>
+      <div className="grid gap-1.5">
+        <Label>Jump route</Label>
+        <JumpRouteField
+          value={form.jumpIDs}
+          onChange={jumpIDs => set("jumpIDs", jumpIDs)}
+          profiles={profiles}
+          editingID={connection?.id}
+        />
+      </div>
+      <div className="grid gap-1.5">
+        <Label htmlFor="ssh-default-dir">Default directory</Label>
+        <Input
+          id="ssh-default-dir"
+          placeholder="/srv"
+          value={form.defaultDir}
+          onChange={event => set("defaultDir", event.target.value)}
+        />
+      </div>
+      {error && (
+        <p role="alert" className="text-sm text-destructive">
+          {error}
+        </p>
+      )}
+      <DialogFooter>
+        <Button type="button" variant="outline" onClick={onCancel} disabled={pending}>
+          Cancel
+        </Button>
+        <Button type="submit" disabled={pending}>
+          {pending ? "Saving" : "Save"}
+        </Button>
+      </DialogFooter>
+    </form>
+  )
+}
