@@ -21,8 +21,6 @@ import (
 	"golang.org/x/crypto/ssh"
 	"golang.org/x/crypto/ssh/knownhosts"
 	"golang.org/x/term"
-
-	"warden/internal/model"
 )
 
 func TestRunHelpCommandsSkipArgAndConfigValidation(t *testing.T) {
@@ -278,75 +276,6 @@ func TestRunDBUnknownConnection(t *testing.T) {
 	}
 }
 
-// TestPickConnectionSelectsByNumber verifies the built-in picker accepts
-// a list number and prints the connection list (no fzf dependency).
-func TestPickConnectionSelectsByNumber(t *testing.T) {
-	conns := []model.SSHConnection{
-		{ID: 1, Name: "prod-web", Host: "10.0.0.1", Port: 22, Username: "deploy"},
-		{ID: 2, Name: "prod-db", Host: "10.0.0.2", Port: 22, Username: "dba"},
-		{ID: 3, Name: "bastion", Host: "bastion.corp", Port: 2222, Username: "ops"},
-	}
-	var stdout bytes.Buffer
-	got, err := pickConnection(strings.NewReader("2\n"), &stdout, conns)
-	if err != nil {
-		t.Fatalf("pickConnection() err = %v", err)
-	}
-	if got.ID != 2 || got.Name != "prod-db" {
-		t.Fatalf("picked %+v, want prod-db", got)
-	}
-	if !strings.Contains(stdout.String(), "prod-web") || !strings.Contains(stdout.String(), "bastion.corp") {
-		t.Fatalf("stdout = %q, want connection list", stdout.String())
-	}
-}
-
-// TestPickConnectionExactName verifies an exact name selects directly.
-func TestPickConnectionExactName(t *testing.T) {
-	conns := []model.SSHConnection{
-		{ID: 1, Name: "prod-web", Host: "10.0.0.1"},
-		{ID: 2, Name: "prod-db", Host: "10.0.0.2"},
-	}
-	got, err := pickConnection(strings.NewReader("prod-db\n"), io.Discard, conns)
-	if err != nil {
-		t.Fatalf("pickConnection() err = %v", err)
-	}
-	if got.ID != 2 {
-		t.Fatalf("picked ID %d, want 2", got.ID)
-	}
-}
-
-// TestPickConnectionFilterNarrowsAndSelects verifies a substring filter
-// narrows the list and a follow-up number selects from the filtered set.
-func TestPickConnectionFilterNarrowsAndSelects(t *testing.T) {
-	conns := []model.SSHConnection{
-		{ID: 1, Name: "prod-web", Host: "10.0.0.1"},
-		{ID: 2, Name: "prod-db", Host: "10.0.0.2"},
-		{ID: 3, Name: "dev-db", Host: "10.0.1.2"},
-	}
-	var stdout bytes.Buffer
-	got, err := pickConnection(strings.NewReader("db\n1\n"), &stdout, conns)
-	if err != nil {
-		t.Fatalf("pickConnection() err = %v", err)
-	}
-	if got.ID != 2 || got.Name != "prod-db" {
-		t.Fatalf("picked %+v, want prod-db (first of filtered [prod-db, dev-db])", got)
-	}
-}
-
-// TestPickConnectionAbort verifies q quits without selecting.
-func TestPickConnectionAbort(t *testing.T) {
-	conns := []model.SSHConnection{{ID: 1, Name: "prod"}}
-	if _, err := pickConnection(strings.NewReader("q\n"), io.Discard, conns); err == nil {
-		t.Fatal("pickConnection() err = nil, want abort error")
-	}
-}
-
-// TestPickConnectionEmptyList verifies an empty list fails fast.
-func TestPickConnectionEmptyList(t *testing.T) {
-	if _, err := pickConnection(strings.NewReader("1\n"), io.Discard, nil); err == nil {
-		t.Fatal("pickConnection() err = nil, want error for empty list")
-	}
-}
-
 // TestRunXSSHUnknownConnection verifies a missing connection name fails
 // cleanly before any transport or terminal setup.
 func TestRunXSSHUnknownConnection(t *testing.T) {
@@ -419,6 +348,45 @@ func TestRunXSSHRequiresInteractiveTerminal(t *testing.T) {
 	}
 	if !strings.Contains(stderr.String(), "not a terminal") {
 		t.Fatalf("stderr = %q, want interactive-terminal error", stderr.String())
+	}
+}
+
+// TestRunXSSHWithoutNameRequiresInteractiveTerminal verifies xssh without
+// an explicit connection reports the picker terminal creation error when
+// test stdin is not interactive, instead of falling back to buffered
+// input.
+func TestRunXSSHWithoutNameRequiresInteractiveTerminal(t *testing.T) {
+	if term.IsTerminal(int(os.Stdin.Fd())) {
+		t.Skip("stdin is a terminal; non-terminal requirement not exercisable")
+	}
+	apiSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/v1/ssh-connections":
+			io.WriteString(w, `[{"id":1,"name":"prod","host":"127.0.0.1","port":22,"username":"user","has_password":true,"has_private_key":false,"has_private_key_passphrase":false,"proxy_host":"","proxy_port":0,"proxy_username":"","has_proxy_password":false,"jump_connection_ids":"[]"}]`)
+		case "/api/v1/transport/ssh/1":
+			t.Errorf("transport bundle requested; picker must fail before bundle fetch")
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer apiSrv.Close()
+
+	lookupEnv := func(key string) (string, bool) {
+		switch key {
+		case "HOME":
+			return t.TempDir(), true
+		case "WARDEN_CLIENT_API_BASE_URL":
+			return apiSrv.URL, true
+		case "WARDEN_CLIENT_TIMEOUT":
+			return "10s", true
+		}
+		return "", false
+	}
+
+	var stdout, stderr bytes.Buffer
+	exitCode := run([]string{"xssh"}, &stdout, &stderr, lookupEnv)
+	if exitCode != 1 || !strings.Contains(stderr.String(), "interactive mode requires one") {
+		t.Fatalf("xssh picker error = %d, %q", exitCode, stderr.String())
 	}
 }
 
