@@ -74,13 +74,16 @@ export function SSHTab({ resource, notify }: SSHTabProps) {
     try {
       if (formDialog.mode === "edit") {
         await api.updateSSH(formDialog.connection.id, request)
-        notify(`Updated SSH connection "${request.name}".`, "success")
       } else {
         await api.createSSH(request)
+      }
+      await resource.reload()
+      setFormDialog(null)
+      if (formDialog.mode === "edit") {
+        notify(`Updated SSH connection "${request.name}".`, "success")
+      } else {
         notify(`Created SSH connection "${request.name}".`, "success")
       }
-      setFormDialog(null)
-      await resource.reload()
     } catch (error) {
       setFormError(errorMessage(error))
     } finally {
@@ -105,8 +108,8 @@ export function SSHTab({ resource, notify }: SSHTabProps) {
     setDeleteError(null)
     try {
       await api.deleteSSH(deleteDialog.target.id)
-      setDeleteDialog(null)
       await resource.reload()
+      setDeleteDialog(null)
       notify(`Deleted SSH connection "${deleteDialog.target.name}".`, "success")
     } catch (error) {
       setDeleteError(errorMessage(error))

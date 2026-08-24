@@ -256,6 +256,19 @@ describe("SSHTab", () => {
     await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument())
   })
 
+  test("withholds Delete when the dependents lookup fails", async () => {
+    const user = userEvent.setup()
+    mockedAPI.sshDependents.mockRejectedValue(new Error("dependents unavailable"))
+    render(<SSHTab resource={resource({ data: [ssh(1, "bastion")] })} notify={notify} />)
+
+    await user.click(screen.getByRole("button", { name: "Delete bastion" }))
+    const dialog = await screen.findByRole("dialog")
+    expect(mockedAPI.sshDependents).toHaveBeenCalledWith(1)
+    expect(await within(dialog).findByText("Unable to check for dependents.")).toBeInTheDocument()
+    expect(within(dialog).queryByRole("button", { name: "Delete" })).not.toBeInTheDocument()
+    expect(within(dialog).getByRole("button", { name: "Cancel" })).toBeInTheDocument()
+  })
+
   test("never renders secret values, only presence badges", () => {
     render(
       <SSHTab
