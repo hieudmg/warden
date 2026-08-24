@@ -123,34 +123,38 @@ export function DBForm({ connection, sshProfiles, pending, error, onSubmit, onCa
           required
         />
       </div>
-      <div className="grid gap-1.5">
-        <Label htmlFor="db-host">Host</Label>
-        <Input
-          id="db-host"
-          value={form.host}
-          onChange={event => set("host", event.target.value)}
-          required
-        />
-      </div>
-      <div className="grid gap-1.5">
-        <Label htmlFor="db-port">Port</Label>
-        <Input
-          id="db-port"
-          type="number"
-          min={0}
-          max={65535}
-          value={form.port}
-          onChange={event => set("port", event.target.value)}
-        />
-      </div>
-      <div className="grid gap-1.5">
-        <Label htmlFor="db-username">Username</Label>
-        <Input
-          id="db-username"
-          value={form.username}
-          onChange={event => set("username", event.target.value)}
-          required
-        />
+      <div className="flex items-end gap-2">
+        <div className="grid gap-1.5 flex-[3] min-w-0">
+          <Label htmlFor="db-username">Username</Label>
+          <Input
+            id="db-username"
+            value={form.username}
+            onChange={event => set("username", event.target.value)}
+            required
+          />
+        </div>
+        <span className="text-sm text-muted-foreground pb-2">@</span>
+        <div className="grid gap-1.5 flex-[5] min-w-0">
+          <Label htmlFor="db-host">Host</Label>
+          <Input
+            id="db-host"
+            value={form.host}
+            onChange={event => set("host", event.target.value)}
+            required
+          />
+        </div>
+        <span className="text-sm text-muted-foreground pb-2">:</span>
+        <div className="grid gap-1.5 w-24">
+          <Label htmlFor="db-port">Port</Label>
+          <Input
+            id="db-port"
+            type="number"
+            min={0}
+            max={65535}
+            value={form.port}
+            onChange={event => set("port", event.target.value)}
+          />
+        </div>
       </div>
       <div className="grid gap-1.5">
         <Label htmlFor="db-password">Password</Label>

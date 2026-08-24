@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react"
+import { render, screen, within } from "@testing-library/react"
 import { describe, expect, test, vi } from "vitest"
 import type { SSHConnection } from "@/api/types"
 import { emptySSHForm, sshFormFromConnection, toSSHRequest, type SSHFormState } from "./ssh-form"
@@ -144,6 +144,47 @@ describe("toSSHRequest", () => {
 })
 
 describe("SSHForm", () => {
+  function renderForm() {
+    render(
+      <SSHForm
+        connection={null}
+        profiles={[]}
+        pending={false}
+        error={null}
+        onSubmit={vi.fn()}
+        onCancel={vi.fn()}
+      />,
+    )
+  }
+
+  test("renders username @ host : port as one inline address row", () => {
+    renderForm()
+    const username = screen.getByLabelText("Username")
+    const host = screen.getByLabelText("Host")
+    const port = screen.getByLabelText("Port")
+
+    const row = username.closest(".flex.items-end.gap-2")
+    expect(row).not.toBeNull()
+    expect(host.closest("div.flex.items-end.gap-2")).toBe(row)
+    expect(port.closest("div.flex.items-end.gap-2")).toBe(row)
+    expect(within(row as HTMLElement).getByText("@")).toBeInTheDocument()
+    expect(within(row as HTMLElement).getByText(":")).toBeInTheDocument()
+  })
+
+  test("renders proxy-username @ proxy-host : proxy-port as one inline address row", () => {
+    renderForm()
+    const proxyUsername = screen.getByLabelText("Proxy username")
+    const proxyHost = screen.getByLabelText("Proxy host")
+    const proxyPort = screen.getByLabelText("Proxy port")
+
+    const row = proxyUsername.closest("div.flex.items-end.gap-2")
+    expect(row).not.toBeNull()
+    expect(proxyHost.closest("div.flex.items-end.gap-2")).toBe(row)
+    expect(proxyPort.closest("div.flex.items-end.gap-2")).toBe(row)
+    expect(within(row as HTMLElement).getByText("@")).toBeInTheDocument()
+    expect(within(row as HTMLElement).getByText(":")).toBeInTheDocument()
+  })
+
   test("renders form errors with role alert", () => {
     render(
       <SSHForm

@@ -119,34 +119,38 @@ export function SSHForm({ connection, profiles, pending, error, onSubmit, onCanc
           required
         />
       </div>
-      <div className="grid gap-1.5">
-        <Label htmlFor="ssh-host">Host</Label>
-        <Input
-          id="ssh-host"
-          value={form.host}
-          onChange={event => set("host", event.target.value)}
-          required
-        />
-      </div>
-      <div className="grid gap-1.5">
-        <Label htmlFor="ssh-port">Port</Label>
-        <Input
-          id="ssh-port"
-          type="number"
-          min={1}
-          max={65535}
-          value={form.port}
-          onChange={event => set("port", event.target.value)}
-        />
-      </div>
-      <div className="grid gap-1.5">
-        <Label htmlFor="ssh-username">Username</Label>
-        <Input
-          id="ssh-username"
-          value={form.username}
-          onChange={event => set("username", event.target.value)}
-          required
-        />
+      <div className="flex items-end gap-2">
+        <div className="grid gap-1.5 flex-[3] min-w-0">
+          <Label htmlFor="ssh-username">Username</Label>
+          <Input
+            id="ssh-username"
+            value={form.username}
+            onChange={event => set("username", event.target.value)}
+            required
+          />
+        </div>
+        <span className="text-sm text-muted-foreground pb-2">@</span>
+        <div className="grid gap-1.5 flex-[5] min-w-0">
+          <Label htmlFor="ssh-host">Host</Label>
+          <Input
+            id="ssh-host"
+            value={form.host}
+            onChange={event => set("host", event.target.value)}
+            required
+          />
+        </div>
+        <span className="text-sm text-muted-foreground pb-2">:</span>
+        <div className="grid gap-1.5 w-24">
+          <Label htmlFor="ssh-port">Port</Label>
+          <Input
+            id="ssh-port"
+            type="number"
+            min={1}
+            max={65535}
+            value={form.port}
+            onChange={event => set("port", event.target.value)}
+          />
+        </div>
       </div>
       <div className="grid gap-1.5">
         <Label htmlFor="ssh-password">Password</Label>
@@ -179,32 +183,36 @@ export function SSHForm({ connection, profiles, pending, error, onSubmit, onCanc
           onChange={event => set("privateKeyPassphrase", event.target.value)}
         />
       </div>
-      <div className="grid gap-1.5">
-        <Label htmlFor="ssh-proxy-host">Proxy host</Label>
-        <Input
-          id="ssh-proxy-host"
-          value={form.proxyHost}
-          onChange={event => set("proxyHost", event.target.value)}
-        />
-      </div>
-      <div className="grid gap-1.5">
-        <Label htmlFor="ssh-proxy-port">Proxy port</Label>
-        <Input
-          id="ssh-proxy-port"
-          type="number"
-          min={0}
-          max={65535}
-          value={form.proxyPort}
-          onChange={event => set("proxyPort", event.target.value)}
-        />
-      </div>
-      <div className="grid gap-1.5">
-        <Label htmlFor="ssh-proxy-username">Proxy username</Label>
-        <Input
-          id="ssh-proxy-username"
-          value={form.proxyUsername}
-          onChange={event => set("proxyUsername", event.target.value)}
-        />
+      <div className="flex items-end gap-2">
+        <div className="grid gap-1.5 flex-[3] min-w-0">
+          <Label htmlFor="ssh-proxy-username">Proxy username</Label>
+          <Input
+            id="ssh-proxy-username"
+            value={form.proxyUsername}
+            onChange={event => set("proxyUsername", event.target.value)}
+          />
+        </div>
+        <span className="text-sm text-muted-foreground pb-2">@</span>
+        <div className="grid gap-1.5 flex-[5] min-w-0">
+          <Label htmlFor="ssh-proxy-host">Proxy host</Label>
+          <Input
+            id="ssh-proxy-host"
+            value={form.proxyHost}
+            onChange={event => set("proxyHost", event.target.value)}
+          />
+        </div>
+        <span className="text-sm text-muted-foreground pb-2">:</span>
+        <div className="grid gap-1.5 w-24">
+          <Label htmlFor="ssh-proxy-port">Proxy port</Label>
+          <Input
+            id="ssh-proxy-port"
+            type="number"
+            min={0}
+            max={65535}
+            value={form.proxyPort}
+            onChange={event => set("proxyPort", event.target.value)}
+          />
+        </div>
       </div>
       <div className="grid gap-1.5">
         <Label htmlFor="ssh-proxy-password">Proxy password</Label>

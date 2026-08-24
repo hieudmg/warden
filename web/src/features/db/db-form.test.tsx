@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react"
+import { render, screen, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { describe, expect, test, vi } from "vitest"
 import type { DBConnection, SSHConnection } from "@/api/types"
@@ -187,6 +187,29 @@ describe("DBForm", () => {
     await user.click(await screen.findByRole("option", { name: "jump-a — jump-a.example:22" }))
     await user.click(screen.getByRole("button", { name: "Save" }))
     expect(onSubmit).toHaveBeenCalledWith(expect.objectContaining({ ssh_connection_id: 2 }))
+  })
+
+  test("renders username @ host : port as one inline address row", () => {
+    render(
+      <DBForm
+        connection={null}
+        sshProfiles={[]}
+        pending={false}
+        error={null}
+        onSubmit={vi.fn()}
+        onCancel={vi.fn()}
+      />,
+    )
+    const username = screen.getByLabelText("Username")
+    const host = screen.getByLabelText("Host")
+    const port = screen.getByLabelText("Port")
+
+    const row = username.closest("div.flex.items-end.gap-2")
+    expect(row).not.toBeNull()
+    expect(host.closest("div.flex.items-end.gap-2")).toBe(row)
+    expect(port.closest("div.flex.items-end.gap-2")).toBe(row)
+    expect(within(row as HTMLElement).getByText("@")).toBeInTheDocument()
+    expect(within(row as HTMLElement).getByText(":")).toBeInTheDocument()
   })
 
   test("renders form errors with role alert", () => {
