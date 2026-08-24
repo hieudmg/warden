@@ -8,6 +8,7 @@ import (
 	"sync"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"warden/internal/model"
 )
@@ -176,6 +177,71 @@ func TestRenderUsesWideAndStackedLayouts(t *testing.T) {
 	if !strings.Contains(wide.String(), "\x1b[") {
 		t.Fatalf("wide render lacks ANSI color: %q", wide.String())
 	}
+}
+
+func TestRenderNarrowLayoutStaysWithinViewport(t *testing.T) {
+	state := NewState([]model.SSHConnection{{ID: 1, Name: "prod"}, {ID: 2, Name: "staging"}})
+	for _, height := range []int{3, 4, 6, 8} {
+		var out bytes.Buffer
+		Render(&out, state, 79, height)
+		if rows := strings.Count(out.String(), "\r\n"); rows > height {
+			t.Fatalf("height %d: render emitted %d rows, exceeds viewport: %q", height, rows, out.String())
+		}
+	}
+}
+
+func TestRenderNarrowLayoutKeepsListAndPreviewVisible(t *testing.T) {
+	state := NewState([]model.SSHConnection{{ID: 1, Name: "prod"}, {ID: 2, Name: "staging"}})
+	var out bytes.Buffer
+	Render(&out, state, 79, 6)
+	s := out.String()
+	for _, want := range []string{"Search: ", "prod", "staging", "ID", ": 1"} {
+		if !strings.Contains(s, want) {
+			t.Fatalf("narrow render missing %q: %q", want, s)
+		}
+	}
+}
+
+func TestRenderClampsTitleAndQueryToWidth(t *testing.T) {
+	state := NewState([]model.SSHConnection{{ID: 1, Name: "prod"}})
+	for _, r := range strings.Repeat("q", 200) {
+		state = state.Apply(DecodedKey{Kind: KeyRune, Rune: r})
+	}
+	for _, width := range []int{20, 100} {
+		var out bytes.Buffer
+		Render(&out, state, width, 20)
+		for i, line := range strings.Split(strings.TrimSuffix(out.String(), "\r\n"), "\r\n") {
+			if n := visibleLength(line); n > width {
+				t.Fatalf("width %d: line %d has %d visible runes, would wrap: %q", width, i, n, line)
+			}
+		}
+		if !strings.Contains(out.String(), "Search: ") || !strings.Contains(out.String(), "qqq") {
+			t.Fatalf("width %d: clamped render lost the query prompt: %q", width, out.String())
+		}
+		if width == 20 && strings.Contains(out.String(), "pick a connection") {
+			t.Fatalf("width 20: full title not clamped: %q", out.String())
+		}
+	}
+}
+
+// visibleLength counts the visible runes in a rendered line, ignoring
+// ANSI escape sequences.
+func visibleLength(line string) int {
+	n := 0
+	for i := 0; i < len(line); {
+		if line[i] == 0x1b {
+			i++
+			for i < len(line) && line[i] != 'm' {
+				i++
+			}
+			i++
+			continue
+		}
+		_, size := utf8.DecodeRuneInString(line[i:])
+		n++
+		i += size
+	}
+	return n
 }
 
 func TestSelectRestoresTerminalAndReturnsHighlightedConnection(t *testing.T) {

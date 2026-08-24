@@ -63,23 +63,29 @@ func Render(w io.Writer, state State, width, height int) {
 	var b strings.Builder
 	b.WriteString("\x1b[2J\x1b[H")
 
+	// Two fixed header rows (title, search prompt); the remaining rows
+	// (bodyRows) are shared between the list and the preview so the
+	// render never emits more rows than height and the query, list, and
+	// preview all stay visible when the viewport has room.
+	bodyRows := height - 2
+	if bodyRows < 0 {
+		bodyRows = 0
+	}
+
 	b.WriteString(cyan)
-	b.WriteString("warden xssh — pick a connection")
+	b.WriteString(clamp("warden xssh — pick a connection", width))
 	b.WriteString(reset)
 	b.WriteString("\r\n")
 
-	b.WriteString(yellow)
-	b.WriteString("Search: ")
-	b.WriteString(sanitize(state.query))
-	b.WriteString(reset)
-	b.WriteString("\r\n")
+	if height >= 2 {
+		b.WriteString(yellow)
+		b.WriteString(clamp("Search: "+sanitize(state.query), width))
+		b.WriteString(reset)
+		b.WriteString("\r\n")
+	}
 
 	filtered := state.Filtered()
 	selectedConn, hasSelected := state.Selected()
-	bodyRows := height - 3
-	if bodyRows < 1 {
-		bodyRows = 1
-	}
 
 	if width >= 80 {
 		leftWidth := width * 45 / 100
@@ -102,13 +108,22 @@ func Render(w io.Writer, state State, width, height int) {
 			b.WriteString("\r\n")
 		}
 	} else {
-		for i := 0; i < bodyRows; i++ {
+		// Narrow layout: split the body rows between the list and the
+		// preview (up to 16 fields) so the preview cannot push the render
+		// past the viewport. A single body row goes to the list.
+		listRows := bodyRows / 2
+		previewRows := bodyRows - listRows
+		if bodyRows == 1 {
+			listRows, previewRows = 1, 0
+		}
+		for i := 0; i < listRows; i++ {
 			b.WriteString(listLine(filtered, state.selected, i, width))
 			b.WriteString("\r\n")
 		}
 		if hasSelected {
-			for _, f := range FormatConnection(selectedConn) {
-				b.WriteString(fieldLine(f, width))
+			fields := FormatConnection(selectedConn)
+			for i := 0; i < previewRows && i < len(fields); i++ {
+				b.WriteString(fieldLine(fields[i], width))
 				b.WriteString("\r\n")
 			}
 		}
