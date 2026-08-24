@@ -36,6 +36,20 @@ func TestStateNavigationAndQueryReset(t *testing.T) {
 	}
 }
 
+func TestNewStateCopiesCallerOwnedSource(t *testing.T) {
+	conns := []model.SSHConnection{{ID: 1, Name: "prod-web", Host: "10.0.0.1"}}
+	state := NewState(conns)
+	conns[0] = model.SSHConnection{ID: 9, Name: "renamed", Host: "9.9.9.9"}
+	state = state.Apply(DecodedKey{Kind: KeyRune, Rune: 'p'})
+	if got := state.Filtered(); len(got) != 1 || got[0].ID != 1 {
+		t.Fatalf("Filtered() after caller mutation = %#v, want original conn ID 1", got)
+	}
+	selected, ok := state.Selected()
+	if !ok || selected.ID != 1 {
+		t.Fatalf("Selected() after caller mutation = %#v, %t; want original conn ID 1", selected, ok)
+	}
+}
+
 func TestDecodeBytesRecognizesNavigationAndCancel(t *testing.T) {
 	got := DecodeBytes([]byte("a\x7f\x1b[A\x1b[B\r\x03\x1b"))
 	want := []DecodedKey{

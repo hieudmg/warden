@@ -22,9 +22,13 @@ type State struct {
 }
 
 // NewState returns a State over conns with all connections matching the
-// empty query and the first one selected.
+// empty query and the first one selected. The caller-owned slice is copied
+// so the State's source stays immutable even if the caller mutates it
+// afterwards.
 func NewState(conns []model.SSHConnection) State {
-	return State{conns: conns}.rebuild()
+	src := make([]model.SSHConnection, len(conns))
+	copy(src, conns)
+	return State{conns: src}.rebuild()
 }
 
 // Filtered returns the connections matching the current query in source
