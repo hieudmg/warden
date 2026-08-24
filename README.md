@@ -24,9 +24,8 @@ run client operations.
 ## Quick start (development)
 
 ```bash
-# 1. Build both binaries.
-go build ./cmd/warden-server
-go build ./cmd/warden
+# 1. Build the server (compiles the frontend first) and the client.
+make build
 
 # 2. Generate the master key (32 raw random bytes, mode 0600, your uid).
 openssl rand -out /tmp/warden-master.key 32
@@ -85,9 +84,10 @@ Environment overrides:
 - `WARDEN_SERVER_MASTER_KEY_PATH`
 - `WARDEN_SERVER_STATIC_FS`
 
-`static_fs` overrides the embedded management UI for development. The
-directory layout must mirror `internal/web/static/` and contain exactly
-`index.html`, `app.js`, and `styles.css`; missing files silently 404.
+`static_fs` overrides the embedded management UI for development. It must
+point directly at a built Vite distribution directory — one containing
+`index.html` and the generated `assets/` files, exactly the layout the
+embedded `internal/web/dist/` uses. Missing files silently 404.
 
 ### Client config
 
@@ -205,26 +205,44 @@ verified against `%USERPROFILE%\.ssh\known_hosts`.
 
 ## Build
 
+The web UI is a React/Vite project in `web/`. Building the server requires
+Node `^20.19.0 || >=22.12.0` and npm `>=10`; they are build-time-only
+dependencies and are never required by a released server binary. Every
+supported command that compiles the server package installs the locked
+frontend dependencies and runs the production build first:
+
 ```bash
-go build ./cmd/warden-server
-go build ./cmd/warden
+make build
+make test
+make test-race
+make vet
+bash scripts/test.sh                      # end-to-end: server + API + CLI on an ephemeral port
+bash scripts/build-release.sh             # reproducible release artifacts into dist/
+```
+
+The generated frontend distribution (`internal/web/dist/`) is gitignored
+and never committed. Raw `go build ./cmd/warden-server`, `go test ./...`,
+`go test -race ./...`, and `go vet ./...` are unsupported from a clean
+checkout because the embedded assets are intentionally absent.
+
+The Windows client is a client-only build: it does not import the
+embedded web package, so it can be built directly without the frontend
+toolchain:
+
+```bash
 GOOS=windows GOARCH=amd64 go build ./cmd/warden
 ```
 
-Or use `make build`, `make build-client-windows`, `make test`, and
-`make vet`. For reproducible release artifacts (all three targets plus
-SHA-256 checksums into `dist/`):
-
-```bash
-bash scripts/build-release.sh
-```
+`make build-client-windows` produces the same `bin/warden.exe` client-only
+build. For reproducible release artifacts (all three targets plus SHA-256
+checksums into `dist/`) use `bash scripts/build-release.sh`.
 
 ## Tests
 
 ```bash
-go test ./...
-go test -race ./...
-go vet ./...
+make test        # frontend tests + Go tests
+make test-race   # frontend tests + Go race tests
+make vet
 bash scripts/test.sh   # end-to-end: server + API + CLI on an ephemeral port
 ```
 

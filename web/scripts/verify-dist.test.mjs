@@ -39,12 +39,44 @@ test("complete local graph passes", async () => {
   await rm(root, { recursive: true, force: true })
 })
 
+test("cyclic manifest import graph does not loop forever", async () => {
+  const root = await fixture({
+    ".vite/manifest.json": JSON.stringify({
+      "index.html": { file: "index.html", isEntry: true, imports: ["src/a.tsx"] },
+      "src/a.tsx": { file: "assets/a.js", imports: ["src/b.tsx"] },
+      "src/b.tsx": { file: "assets/b.js", imports: ["src/a.tsx"] },
+    }),
+    "index.html": '<html><script type="module" src="/assets/a.js"></script></html>',
+    "assets/a.js": 'console.log("a")',
+    "assets/b.js": 'console.log("b")',
+  })
+  await verifyDist(root)
+  await rm(root, { recursive: true, force: true })
+})
+
 test("rejects external https script in index.html", async () => {
   const root = await fixture({
     ".vite/manifest.json": JSON.stringify({ "index.html": { file: "index.html" } }),
     "index.html": '<html><script type="module" src="https://cdn.example/app.js"></script></html>',
   })
-  await assert.rejects(() => verifyDist(root), /cdn\.example/)
+  await assert.rejects(() => verifyDist(root), (error) => {
+    assert.match(error.message, /external reference in index\.html: https:\/\/cdn\.example/)
+    assert.doesNotMatch(error.message, /<html/)
+    return true
+  })
+  await rm(root, { recursive: true, force: true })
+})
+
+test("rejects external https stylesheet in index.html", async () => {
+  const root = await fixture({
+    ".vite/manifest.json": JSON.stringify({ "index.html": { file: "index.html" } }),
+    "index.html": '<html><link rel="stylesheet" href="https://cdn.example/app.css"></html>',
+  })
+  await assert.rejects(() => verifyDist(root), (error) => {
+    assert.match(error.message, /external reference in index\.html: https:\/\/cdn\.example/)
+    assert.doesNotMatch(error.message, /<html/)
+    return true
+  })
   await rm(root, { recursive: true, force: true })
 })
 
@@ -53,7 +85,11 @@ test("rejects protocol-relative stylesheet in index.html", async () => {
     ".vite/manifest.json": JSON.stringify({ "index.html": { file: "index.html" } }),
     "index.html": '<html><link rel="stylesheet" href="//cdn.example/app.css"></html>',
   })
-  await assert.rejects(() => verifyDist(root), /cdn\.example/)
+  await assert.rejects(() => verifyDist(root), (error) => {
+    assert.match(error.message, /external reference in index\.html: \/\/cdn\.example/)
+    assert.doesNotMatch(error.message, /<html/)
+    return true
+  })
   await rm(root, { recursive: true, force: true })
 })
 
@@ -66,16 +102,41 @@ test("rejects manifest import that is not in the manifest", async () => {
     "index.html": '<html><script type="module" src="/assets/app-a1.js"></script></html>',
     "assets/app-a1.js": 'console.log("warden")',
   })
-  await assert.rejects(() => verifyDist(root), /manifest import missing/)
+  await assert.rejects(
+    () => verifyDist(root),
+    /manifest import missing: src\/main\.tsx -> src\/missing\.tsx/,
+  )
   await rm(root, { recursive: true, force: true })
 })
 
-test("rejects emitted file that is missing on disk", async () => {
+test("rejects emitted js file that is missing on disk", async () => {
   const root = await fixture({
     ".vite/manifest.json": JSON.stringify({ "src/main.tsx": { file: "assets/app-a1.js" } }),
     "index.html": '<html><script type="module" src="/assets/app-a1.js"></script></html>',
   })
-  await assert.rejects(() => verifyDist(root), /app-a1\.js/)
+  await assert.rejects(() => verifyDist(root), /missing emitted file: assets\/app-a1\.js/)
+  await rm(root, { recursive: true, force: true })
+})
+
+test("rejects css file that is missing on disk", async () => {
+  const root = await fixture({
+    ".vite/manifest.json": JSON.stringify({
+      "index.html": { file: "index.html", isEntry: true, css: ["assets/app-a1.css"] },
+    }),
+    "index.html": '<html><link rel="stylesheet" href="/assets/app-a1.css"></html>',
+  })
+  await assert.rejects(() => verifyDist(root), /missing emitted file: assets\/app-a1\.css/)
+  await rm(root, { recursive: true, force: true })
+})
+
+test("rejects static asset that is missing on disk", async () => {
+  const root = await fixture({
+    ".vite/manifest.json": JSON.stringify({
+      "index.html": { file: "index.html", isEntry: true, assets: ["assets/font.woff2"] },
+    }),
+    "index.html": '<html><script type="module" src="/assets/index.js"></script></html>',
+  })
+  await assert.rejects(() => verifyDist(root), /missing emitted file: assets\/font\.woff2/)
   await rm(root, { recursive: true, force: true })
 })
 
@@ -88,7 +149,11 @@ test("rejects external url() reference in css", async () => {
     "assets/app-a1.css":
       "@font-face{font-family:X;src:url(https://fonts.example/x.woff2) format('woff2')}",
   })
-  await assert.rejects(() => verifyDist(root), /fonts\.example/)
+  await assert.rejects(() => verifyDist(root), (error) => {
+    assert.match(error.message, /external reference in assets\/app-a1\.css: https:\/\/fonts\.example/)
+    assert.doesNotMatch(error.message, /font-family/)
+    return true
+  })
   await rm(root, { recursive: true, force: true })
 })
 
@@ -101,6 +166,21 @@ test("allows data: and relative url() references in css", async () => {
     "assets/app-a1.css":
       ".a{background:url(data:image/png;base64,AAAA)}" +
       ".b{src:url(./font.woff2) format('woff2')}",
+  })
+  await verifyDist(root)
+  await rm(root, { recursive: true, force: true })
+})
+
+test("allows root-relative and data references in index.html", async () => {
+  const root = await fixture({
+    ".vite/manifest.json": JSON.stringify({
+      "index.html": { file: "index.html", isEntry: true, css: ["assets/app-a1.css"] },
+    }),
+    "index.html":
+      '<html><script type="module" src="/assets/app-a1.js"></script>' +
+      '<link rel="stylesheet" href="/assets/app-a1.css"></html>',
+    "assets/app-a1.js": "console.log('warden')",
+    "assets/app-a1.css": ".a{background:url(data:image/svg+xml;base64,AAAA)}",
   })
   await verifyDist(root)
   await rm(root, { recursive: true, force: true })

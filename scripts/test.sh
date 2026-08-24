@@ -145,6 +145,28 @@ log "starting server"
 start_healthy_server
 API="$(base)"
 
+# --- Test: every emitted UI asset is served ---------------------------------
+log "every embedded UI asset is served"
+while IFS= read -r -d '' asset; do
+  rel="${asset#"$ROOT/internal/web/dist/"}"
+  case "$rel" in .vite/manifest.json) continue ;; esac
+  curl -fsS -o /dev/null "$(base)/$rel" \
+    || fail "embedded UI asset unavailable: /$rel"
+done < <(find "$ROOT/internal/web/dist" -type f -print0)
+
+log "index.html is served with only local references"
+index_html="$(curl -fsS "$(base)/")"
+printf '%s' "$index_html" | grep -q '<div id="root">' \
+  || fail "index.html missing the app root mount"
+printf '%s' "$index_html" | grep -q '/assets/' \
+  || fail "index.html has no local asset reference"
+if printf '%s' "$index_html" | grep -Eq 'https?://'; then
+  fail "index.html references an external http(s) URL"
+fi
+if printf '%s' "$index_html" | grep -Eq '//[A-Za-z0-9]'; then
+  fail "index.html references a protocol-relative URL"
+fi
+
 # --- Test: profile CRUD redaction ------------------------------------------
 log "list starts empty"
 body="$(curl -fsS "$API/api/v1/ssh-connections")"

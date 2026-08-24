@@ -2,14 +2,20 @@
 //
 // Verifies a Vite production distribution before it is embedded into the
 // Go binary:
-//   - every manifest entry (file, css, assets) exists on disk
-//   - every manifest import/dynamicImport key resolves to another entry
+//   - the import/dynamicImport graph is walked recursively from the entry
+//     points with a visited set (cyclic graphs cannot loop forever) and
+//     every edge must resolve to a manifest entry
+//   - every manifest entry's file, css, and assets exist on disk
 //   - index.html and css files reference no external (http/https or
 //     protocol-relative) URLs, so the served UI is fully self-contained
 //
+// Error messages name the offending manifest key or emitted file but never
+// print source contents. Exit codes: 0 ok, 1 verification failure,
+// 2 usage error.
+//
 // Usage: node scripts/verify-dist.mjs <dist-root>
 
-import { access, readFile } from "node:fs/promises"
+import { readFile, stat } from "node:fs/promises"
 import path from "node:path"
 import { fileURLToPath } from "node:url"
 
@@ -19,13 +25,43 @@ export async function verifyDist(root) {
 
   const emitted = new Set()
   const cssFiles = new Set()
-  for (const [key, entry] of Object.entries(manifest)) {
+  const visited = new Set()
+
+  const collect = (entry) => {
     if (entry.file) emitted.add(entry.file)
     for (const file of entry.css ?? []) {
       emitted.add(file)
       cssFiles.add(file)
     }
     for (const file of entry.assets ?? []) emitted.add(file)
+  }
+
+  // Recursive walk from the declared entry points. A manifest without
+  // isEntry markers (older Vite output or minimal test fixtures) is walked
+  // in full.
+  const queue = Object.keys(manifest).filter((key) => manifest[key].isEntry === true)
+  if (queue.length === 0) queue.push(...Object.keys(manifest))
+
+  while (queue.length > 0) {
+    const key = queue.pop()
+    if (visited.has(key)) continue
+    visited.add(key)
+    const entry = manifest[key]
+    collect(entry)
+    for (const imported of [...(entry.imports ?? []), ...(entry.dynamicImports ?? [])]) {
+      if (!manifest[imported]) {
+        throw new Error(`manifest import missing: ${key} -> ${imported}`)
+      }
+      queue.push(imported)
+    }
+  }
+
+  // Entries the graph never reaches (Vite can emit unused chunks) are
+  // still part of the distribution and must exist.
+  for (const key of Object.keys(manifest)) {
+    if (visited.has(key)) continue
+    const entry = manifest[key]
+    collect(entry)
     for (const imported of [...(entry.imports ?? []), ...(entry.dynamicImports ?? [])]) {
       if (!manifest[imported]) {
         throw new Error(`manifest import missing: ${key} -> ${imported}`)
@@ -34,10 +70,19 @@ export async function verifyDist(root) {
   }
 
   for (const file of emitted) {
-    await access(path.join(root, file))
+    await assertFileExists(root, file)
   }
 
   await rejectExternalReferences(root, cssFiles)
+}
+
+async function assertFileExists(root, file) {
+  try {
+    const info = await stat(path.join(root, file))
+    if (!info.isFile()) throw new Error("not a file")
+  } catch {
+    throw new Error(`missing emitted file: ${file}`)
+  }
 }
 
 async function rejectExternalReferences(root, cssFiles) {
