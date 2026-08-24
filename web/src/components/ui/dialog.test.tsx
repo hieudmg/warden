@@ -54,3 +54,59 @@ test("dialog keeps its close button outside the scroll area", () => {
   expect(closeButton).toHaveClass("top-2", "right-2")
   expect(closeButton.closest(".overflow-y-auto")).toBeNull()
 })
+
+test("header is pinned and does not scroll with the body", () => {
+  render(<TallDialog />)
+  const header = document.querySelector('[data-slot="dialog-header"]')
+  const body = document.querySelector('[data-slot="dialog-body"]')
+  const footer = document.querySelector('[data-slot="dialog-footer"]')
+  expect(header).not.toBeNull()
+  expect(header!.className).toContain("flex-none")
+  expect(header!.className).toContain("border-b")
+  // DOM order: header before body before footer.
+  const slots = Array.from(
+    document.querySelectorAll(
+      '[data-slot="dialog-header"], [data-slot="dialog-body"], [data-slot="dialog-footer"]',
+    ),
+  )
+  expect(slots.indexOf(header!)).toBeLessThan(slots.indexOf(body!))
+  expect(slots.indexOf(footer!)).toBeGreaterThan(slots.indexOf(body!))
+})
+
+test("footer is pinned and does not scroll with the body", () => {
+  render(<TallDialog />)
+  const footer = document.querySelector('[data-slot="dialog-footer"]')
+  expect(footer).not.toBeNull()
+  expect(footer!.className).toContain("flex-none")
+  expect(footer!.className).toContain("border-t")
+})
+
+test("body is the only scrollable region", () => {
+  render(<TallDialog />)
+  const body = document.querySelector('[data-slot="dialog-body"]')
+  const headerRegion = document.querySelector('[data-slot="dialog-header-region"]')
+  const footerRegion = document.querySelector('[data-slot="dialog-footer-region"]')
+  expect(body).not.toBeNull()
+  expect(body!.className).toContain("flex-1")
+  expect(body!.className).toContain("overflow-y-auto")
+  expect(headerRegion).not.toBeNull()
+  expect(footerRegion).not.toBeNull()
+  expect(headerRegion!.className).not.toContain("overflow-y-auto")
+  expect(footerRegion!.className).not.toContain("overflow-y-auto")
+})
+
+test("content without header or footer still wraps children in a scrollable body", () => {
+  render(
+    <Dialog open>
+      <DialogContent>
+        <div data-testid="plain-child">Just content</div>
+      </DialogContent>
+    </Dialog>,
+  )
+  const body = document.querySelector('[data-slot="dialog-body"]')
+  expect(body).not.toBeNull()
+  expect(body!.className).toContain("overflow-y-auto")
+  expect(screen.getByTestId("plain-child").closest('[data-slot="dialog-body"]')).not.toBeNull()
+  expect(document.querySelector('[data-slot="dialog-header-region"]')).toBeNull()
+  expect(document.querySelector('[data-slot="dialog-footer-region"]')).toBeNull()
+})

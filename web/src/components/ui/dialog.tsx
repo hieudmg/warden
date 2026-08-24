@@ -55,6 +55,19 @@ function DialogContent({
 }: React.ComponentProps<typeof DialogPrimitive.Content> & {
   showCloseButton?: boolean
 }) {
+  const childrenArray = React.Children.toArray(children)
+  const isHeader = (child: React.ReactNode) =>
+    React.isValidElement(child) &&
+    (child.type === DialogHeader ||
+      (child.props as Record<string, unknown>)["data-slot"] === "dialog-header")
+  const isFooter = (child: React.ReactNode) =>
+    React.isValidElement(child) &&
+    (child.type === DialogFooter ||
+      (child.props as Record<string, unknown>)["data-slot"] === "dialog-footer")
+  const header = childrenArray.find(isHeader)
+  const footer = childrenArray.find(isFooter)
+  const body = childrenArray.filter(child => !isHeader(child) && !isFooter(child))
+
   return (
     <DialogPortal>
       <DialogOverlay />
@@ -66,12 +79,22 @@ function DialogContent({
         )}
         {...props}
       >
+        {header && (
+          <div data-slot="dialog-header-region" className="flex-none">
+            {header}
+          </div>
+        )}
         <div
           data-slot="dialog-body"
           className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto p-4"
         >
-          {children}
+          {body}
         </div>
+        {footer && (
+          <div data-slot="dialog-footer-region" className="flex-none">
+            {footer}
+          </div>
+        )}
         {showCloseButton && (
           <DialogPrimitive.Close data-slot="dialog-close" asChild>
             <Button
@@ -94,7 +117,7 @@ function DialogHeader({ className, ...props }: React.ComponentProps<"div">) {
   return (
     <div
       data-slot="dialog-header"
-      className={cn("flex flex-col gap-2", className)}
+      className={cn("flex flex-none flex-col gap-2 border-b p-4", className)}
       {...props}
     />
   )
@@ -112,7 +135,7 @@ function DialogFooter({
     <div
       data-slot="dialog-footer"
       className={cn(
-        "-mx-4 -mb-4 flex flex-col-reverse gap-2 rounded-b-xl border-t bg-muted/50 p-4 sm:flex-row sm:justify-end",
+        "flex flex-none flex-col-reverse gap-2 border-t bg-muted/50 p-4 sm:flex-row sm:justify-end",
         className
       )}
       {...props}
