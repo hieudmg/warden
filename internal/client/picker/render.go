@@ -53,12 +53,17 @@ func FormatConnection(c model.SSHConnection) []Field {
 // Render draws the picker to w: a title, the search prompt, the filtered
 // connection list, and the selected connection's redacted fields. At
 // width >= 80 the list and fields sit side by side separated by a │
-// column; below that the fields stack beneath the list. Every line is
-// clamped to its pane width and model values pass through sanitize so a
-// profile cannot inject terminal control sequences.
-func Render(w io.Writer, state State, width, height int) {
+// column (always at the leftWidth column); below that the fields stack
+// beneath the list. Every line is clamped to its pane width and model
+// values pass through sanitize so a profile cannot inject terminal
+// control sequences. The list viewport follows the selection so the
+// selected row is always visible, and the detail viewport shows a window
+// of the selected connection's fields starting at state.detailOffset so
+// every field stays reachable by paging. A failed write is returned so
+// Select never reports a successful selection on a broken terminal.
+func Render(w io.Writer, state State, width, height int) error {
 	if width < 1 || height < 1 {
-		return
+		return nil
 	}
 
 	// Build every row as a separate line, then join them with CRLF so the
@@ -91,33 +96,40 @@ func Render(w io.Writer, state State, width, height int) {
 		if rightWidth < 1 {
 			rightWidth = 1
 		}
-		var fields []Field
+		listStart := listWindowStart(state.selected, bodyRows, len(filtered))
+		fields := []Field{}
 		if hasSelected {
 			fields = FormatConnection(selectedConn)
 		}
 		for i := 0; i < bodyRows; i++ {
-			line := listLine(filtered, state.selected, i, leftWidth) + cyan + "│" + reset
-			if i < len(fields) {
-				line += fieldLine(fields[i], rightWidth)
+			row := listLine(filtered, state.selected, listStart+i, leftWidth)
+			// Pad the visible row to leftWidth so the │ separator always
+			// sits at the same column no matter how short the name is.
+			line := padVisible(row, leftWidth) + cyan + "│" + reset
+			if idx := state.detailOffset + i; idx < len(fields) {
+				line += fieldLine(fields[idx], rightWidth)
 			}
 			lines = append(lines, line)
 		}
 	} else {
 		// Narrow layout: split the body rows between the list and the
-		// preview (up to 16 fields) so the preview cannot push the render
-		// past the viewport. A single body row goes to the list.
+		// preview so the preview cannot push the render past the
+		// viewport. A single body row goes to the list.
 		listRows := bodyRows / 2
 		previewRows := bodyRows - listRows
 		if bodyRows == 1 {
 			listRows, previewRows = 1, 0
 		}
+		listStart := listWindowStart(state.selected, listRows, len(filtered))
 		for i := 0; i < listRows; i++ {
-			lines = append(lines, listLine(filtered, state.selected, i, width))
+			lines = append(lines, listLine(filtered, state.selected, listStart+i, width))
 		}
 		if hasSelected {
 			fields := FormatConnection(selectedConn)
-			for i := 0; i < previewRows && i < len(fields); i++ {
-				lines = append(lines, fieldLine(fields[i], width))
+			for i := 0; i < previewRows; i++ {
+				if idx := state.detailOffset + i; idx < len(fields) {
+					lines = append(lines, fieldLine(fields[idx], width))
+				}
 			}
 		}
 	}
@@ -125,16 +137,67 @@ func Render(w io.Writer, state State, width, height int) {
 	var b strings.Builder
 	b.WriteString("\x1b[2J\x1b[H")
 	b.WriteString(strings.Join(lines, "\r\n"))
-	w.Write([]byte(b.String()))
+	_, err := w.Write([]byte(b.String()))
+	return err
+}
+
+// listWindowStart returns the first visible list row so the selected row
+// stays on screen: the window scrolls down once the selection moves past
+// the last visible row, and clamps at the end of the filtered list.
+func listWindowStart(sel, rows, total int) int {
+	if total <= rows {
+		return 0
+	}
+	start := sel - rows + 1
+	if start < 0 {
+		start = 0
+	}
+	if start+rows > total {
+		start = total - rows
+	}
+	return start
+}
+
+// padVisible appends spaces so the line occupies exactly width visible
+// columns, counting only non-ANSI runes. It keeps the wide layout's │
+// separator anchored at the reserved column no matter how short a list
+// row is.
+func padVisible(line string, width int) string {
+	if fill := width - visibleWidth(line); fill > 0 {
+		return line + strings.Repeat(" ", fill)
+	}
+	return line
+}
+
+// visibleWidth counts the visible runes in a line, ignoring ANSI escape
+// sequences.
+func visibleWidth(line string) int {
+	n := 0
+	for i := 0; i < len(line); {
+		if line[i] == 0x1b {
+			i++
+			for i < len(line) && line[i] != 'm' {
+				i++
+			}
+			i++
+			continue
+		}
+		_, size := utf8.DecodeRuneInString(line[i:])
+		n++
+		i += size
+	}
+	return n
 }
 
 // listLine renders one connection row, highlighting the selected row.
-func listLine(filtered []model.SSHConnection, selIdx, i, width int) string {
-	if i >= len(filtered) {
+// rowIdx is the index into filtered; the row is only rendered when it
+// falls inside the visible window.
+func listLine(filtered []model.SSHConnection, selIdx, rowIdx, width int) string {
+	if rowIdx < 0 || rowIdx >= len(filtered) {
 		return ""
 	}
-	name := sanitize(filtered[i].Name)
-	if i == selIdx {
+	name := sanitize(filtered[rowIdx].Name)
+	if rowIdx == selIdx {
 		return selected + "> " + clamp(name, width-2) + reset
 	}
 	return "  " + clamp(name, width-2)

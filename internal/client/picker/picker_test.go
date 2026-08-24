@@ -2,6 +2,8 @@ package picker
 
 import (
 	"bytes"
+	"errors"
+	"fmt"
 	"io"
 	"reflect"
 	"strings"
@@ -77,6 +79,14 @@ func TestStreamDecoderBuffersPartialArrow(t *testing.T) {
 	}
 }
 
+// outBuffer is the subset of the lockedBuffer surface the picker tests
+// inspect: writes are recorded, and the rendered text can be read back.
+type outBuffer interface {
+	Write(p []byte) (int, error)
+	String() string
+	Count(sub string) int
+}
+
 // lockedBuffer is a mutex-protected output buffer so the resize goroutine
 // and the Select caller can write concurrently without racing the test's
 // assertions.
@@ -103,17 +113,37 @@ func (l *lockedBuffer) Count(sub string) int {
 	return strings.Count(l.b.String(), sub)
 }
 
+// failingBuffer fails the failAfter-th write (and every write after it)
+// with err, letting tests prove Select propagates terminal failures
+// instead of reporting a successful selection.
+type failingBuffer struct {
+	*lockedBuffer
+	failAfter int
+	err       error
+}
+
+func (f *failingBuffer) Write(p []byte) (int, error) {
+	if f.failAfter > 0 {
+		f.failAfter--
+		if f.failAfter == 0 {
+			return 0, f.err
+		}
+	}
+	return f.lockedBuffer.Write(p)
+}
+
 // fakeSession implements terminal.Session for picker interaction tests:
 // a bytes.Reader (or pipe) input, a locked output buffer, fixed size,
 // a resize channel, an ANSI capability flag, and raw/restore counters.
 type fakeSession struct {
 	input         io.Reader
-	output        *lockedBuffer
+	output        outBuffer
 	width, height int
 	resize        chan struct{}
 	ansi          bool
 	rawCalls      int
 	restoreCalls  int
+	restoreErr    error
 }
 
 func newFakeSession(input string, width, height int, ansi bool) *fakeSession {
@@ -128,7 +158,7 @@ func newFakeSession(input string, width, height int, ansi bool) *fakeSession {
 }
 
 func (f *fakeSession) EnterRaw() error               { f.rawCalls++; return nil }
-func (f *fakeSession) Restore() error                { f.restoreCalls++; return nil }
+func (f *fakeSession) Restore() error                { f.restoreCalls++; return f.restoreErr }
 func (f *fakeSession) Size() (int, int)              { return f.width, f.height }
 func (f *fakeSession) ResizeEvents() <-chan struct{} { return f.resize }
 func (f *fakeSession) Stdin() io.Reader              { return f.input }
@@ -211,7 +241,7 @@ func TestRenderClampsTitleAndQueryToWidth(t *testing.T) {
 		var out bytes.Buffer
 		Render(&out, state, width, 20)
 		for i, line := range strings.Split(strings.TrimSuffix(out.String(), "\r\n"), "\r\n") {
-			if n := visibleLength(line); n > width {
+			if n := visibleWidth(line); n > width {
 				t.Fatalf("width %d: line %d has %d visible runes, would wrap: %q", width, i, n, line)
 			}
 		}
@@ -249,10 +279,10 @@ func TestRenderFinalRowHasNoTrailingNewline(t *testing.T) {
 	}
 }
 
-// visibleLength counts the visible runes in a rendered line, ignoring
-// ANSI escape sequences.
-func visibleLength(line string) int {
-	n := 0
+// visibleColumnOf returns the visible-column index (ANSI sequences
+// ignored) of the first occurrence of target, or -1.
+func visibleColumnOf(line string, target rune) int {
+	col := 0
 	for i := 0; i < len(line); {
 		if line[i] == 0x1b {
 			i++
@@ -262,11 +292,31 @@ func visibleLength(line string) int {
 			i++
 			continue
 		}
-		_, size := utf8.DecodeRuneInString(line[i:])
-		n++
+		r, size := utf8.DecodeRuneInString(line[i:])
+		if r == target {
+			return col
+		}
+		col++
 		i += size
 	}
-	return n
+	return -1
+}
+
+// oneByteReader returns exactly one byte per Read call so the bufio
+// buffer never holds more than one byte, reproducing terminal input that
+// delivers an escape sequence one byte at a time.
+type oneByteReader struct {
+	data []byte
+	pos  int
+}
+
+func (r *oneByteReader) Read(p []byte) (int, error) {
+	if r.pos >= len(r.data) {
+		return 0, io.EOF
+	}
+	p[0] = r.data[r.pos]
+	r.pos++
+	return 1, nil
 }
 
 func TestSelectRestoresTerminalAndReturnsHighlightedConnection(t *testing.T) {
@@ -382,4 +432,253 @@ func waitFor(t *testing.T, cond func() bool) {
 		time.Sleep(10 * time.Millisecond)
 	}
 	t.Fatal("condition not met within 5s")
+}
+
+// TestSelectDecodesSplitArrowSequence proves a raw arrow sequence split
+// across reads (ESC, then [, then B) still navigates instead of
+// canceling: the pending ESC must never be flushed just because the bufio
+// buffer is momentarily empty.
+func TestSelectDecodesSplitArrowSequence(t *testing.T) {
+	session := &fakeSession{
+		input:  &oneByteReader{data: []byte("\x1b[B\r")},
+		output: &lockedBuffer{},
+		width:  100,
+		height: 24,
+		resize: make(chan struct{}),
+		ansi:   true,
+	}
+	got, err := Select(session, []model.SSHConnection{{ID: 1, Name: "one"}, {ID: 2, Name: "two"}})
+	if err != nil || got.ID != 2 {
+		t.Fatalf("Select() = %#v, %v; want ID 2, nil", got, err)
+	}
+	if session.restoreCalls != 1 {
+		t.Fatalf("Restore called %d times, want 1", session.restoreCalls)
+	}
+}
+
+// TestSelectDecodesSplitUpArrow is the Up variant of the split-sequence
+// regression: ESC, [, A arriving one byte at a time must select the first
+// connection on Enter, never cancel.
+func TestSelectDecodesSplitUpArrow(t *testing.T) {
+	session := &fakeSession{
+		input:  &oneByteReader{data: []byte("\x1b[A\r")},
+		output: &lockedBuffer{},
+		width:  100,
+		height: 24,
+		resize: make(chan struct{}),
+		ansi:   true,
+	}
+	got, err := Select(session, []model.SSHConnection{{ID: 1, Name: "one"}, {ID: 2, Name: "two"}})
+	if err != nil || got.ID != 1 {
+		t.Fatalf("Select() = %#v, %v; want ID 1, nil", got, err)
+	}
+}
+
+// TestSelectBareESCSplitFromArrow: a lone ESC followed by a non-arrow byte
+// (here the Enter after a split) must cancel rather than feed the byte
+// into the query.
+func TestSelectBareESCBeforeEnterCancels(t *testing.T) {
+	session := &fakeSession{
+		input:  &oneByteReader{data: []byte("\x1b\r")},
+		output: &lockedBuffer{},
+		width:  100,
+		height: 24,
+		resize: make(chan struct{}),
+		ansi:   true,
+	}
+	_, err := Select(session, []model.SSHConnection{{ID: 1, Name: "one"}})
+	if err == nil || !strings.Contains(err.Error(), "selection aborted") {
+		t.Fatalf("Select() err = %v, want 'selection aborted'", err)
+	}
+}
+
+func TestDecodeBytesRecognizesTab(t *testing.T) {
+	got := DecodeBytes([]byte("\t"))
+	want := []DecodedKey{{Kind: KeyTab}}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("DecodeBytes() = %#v, want %#v", got, want)
+	}
+}
+
+func TestStateTabFocusTogglesAndArrowsMoveDetail(t *testing.T) {
+	state := NewState([]model.SSHConnection{{ID: 1, Name: "alpha"}, {ID: 2, Name: "beta"}, {ID: 3, Name: "gamma"}})
+	state = state.Apply(DecodedKey{Kind: KeyDown})
+	selected, ok := state.Selected()
+	if !ok || selected.ID != 2 {
+		t.Fatalf("selected = %#v, %t; want beta, true", selected, ok)
+	}
+	state = state.Apply(DecodedKey{Kind: KeyTab}) // focus the detail pane
+	state = state.Apply(DecodedKey{Kind: KeyDown})
+	selected, ok = state.Selected()
+	if !ok || selected.ID != 2 {
+		t.Fatalf("selection moved while detail focused: %#v, %t; want beta", selected, ok)
+	}
+	if state.detailOffset != 1 {
+		t.Fatalf("detailOffset = %d, want 1", state.detailOffset)
+	}
+	state = state.Apply(DecodedKey{Kind: KeyTab}) // focus the list again
+	state = state.Apply(DecodedKey{Kind: KeyDown})
+	selected, ok = state.Selected()
+	if !ok || selected.ID != 3 {
+		t.Fatalf("selected = %#v, %t; want gamma, true", selected, ok)
+	}
+}
+
+// TestRenderWideSeparatorPosition proves every body row of the wide layout
+// pads to leftWidth visible columns so the │ separator always sits at the
+// leftWidth column, even for short or empty rows.
+func TestRenderWideSeparatorPosition(t *testing.T) {
+	state := NewState([]model.SSHConnection{
+		{ID: 1, Name: "prod"}, {ID: 2, Name: "a very long connection profile name here"},
+	})
+	var out bytes.Buffer
+	Render(&out, state, 100, 20)
+	leftWidth := 100 * 45 / 100
+	lines := strings.Split(strings.TrimSuffix(out.String(), "\r\n"), "\r\n")
+	if len(lines) != 20 {
+		t.Fatalf("render emitted %d rows, want 20", len(lines))
+	}
+	for i := 2; i < len(lines); i++ { // skip title and search rows
+		if col := visibleColumnOf(lines[i], '│'); col != leftWidth {
+			t.Fatalf("body row %d: separator at visible column %d, want %d: %q", i, col, leftWidth, lines[i])
+		}
+	}
+}
+
+// TestRenderNarrowListScrollsToSelected proves a selection past the
+// visible window scrolls the list so the selected row is always on screen.
+func TestRenderNarrowListScrollsToSelected(t *testing.T) {
+	conns := make([]model.SSHConnection, 20)
+	for i := range conns {
+		conns[i] = model.SSHConnection{ID: int64(i + 1), Name: fmt.Sprintf("conn-%02d", i+1)}
+	}
+	state := NewState(conns)
+	for i := 0; i < 19; i++ {
+		state = state.Apply(DecodedKey{Kind: KeyDown})
+	}
+	var out bytes.Buffer
+	Render(&out, state, 79, 8)
+	s := out.String()
+	if !strings.Contains(s, "> conn-20") {
+		t.Fatalf("selected row off screen: %q", s)
+	}
+	if strings.Contains(s, "conn-01") {
+		t.Fatalf("list window did not scroll past the top: %q", s)
+	}
+}
+
+// TestRenderDetailPagingReachesAllFields proves the wide detail viewport
+// pages through every field of the selected connection.
+func TestRenderDetailPagingReachesAllFields(t *testing.T) {
+	state := NewState([]model.SSHConnection{{ID: 1, Name: "prod", Host: "db.example.test"}})
+	var first bytes.Buffer
+	Render(&first, state, 100, 8)
+	if !strings.Contains(first.String(), "ID") {
+		t.Fatalf("wide render missing first field: %q", first.String())
+	}
+	state = state.Apply(DecodedKey{Kind: KeyTab})
+	for i := 0; i < 20; i++ {
+		state = state.Apply(DecodedKey{Kind: KeyDown})
+	}
+	var out bytes.Buffer
+	Render(&out, state, 100, 8)
+	if !strings.Contains(out.String(), "Updated at") {
+		t.Fatalf("wide render cannot reach the last field: %q", out.String())
+	}
+	if !strings.Contains(out.String(), "(not set)") {
+		t.Fatalf("wide render lost the timestamp marker: %q", out.String())
+	}
+}
+
+// TestRenderNarrowDetailPagingReachesAllFields proves the stacked layout
+// also pages through every field of the selected connection.
+func TestRenderNarrowDetailPagingReachesAllFields(t *testing.T) {
+	state := NewState([]model.SSHConnection{{ID: 1, Name: "prod", Host: "db"}})
+	state = state.Apply(DecodedKey{Kind: KeyTab})
+	for i := 0; i < 20; i++ {
+		state = state.Apply(DecodedKey{Kind: KeyDown})
+	}
+	var out bytes.Buffer
+	Render(&out, state, 79, 8)
+	if !strings.Contains(out.String(), "Updated at") {
+		t.Fatalf("narrow render detail not paged to the last field: %q", out.String())
+	}
+}
+
+// TestSelectReturnsRenderErrorOnFailingWriter proves a broken output
+// stream during the initial render is propagated instead of returning a
+// successful selection.
+func TestSelectReturnsRenderErrorOnFailingWriter(t *testing.T) {
+	session := &fakeSession{
+		input:  bytes.NewReader([]byte("\r")),
+		output: &failingBuffer{lockedBuffer: &lockedBuffer{}, failAfter: 2, err: errors.New("disk full")},
+		width:  100,
+		height: 24,
+		resize: make(chan struct{}),
+		ansi:   true,
+	}
+	got, err := Select(session, []model.SSHConnection{{ID: 1, Name: "one"}})
+	if err == nil || !strings.Contains(err.Error(), "render picker") {
+		t.Fatalf("Select() err = %v, want render failure", err)
+	}
+	if got.ID != 0 {
+		t.Fatalf("Select() returned a selection %#v despite render failure", got)
+	}
+	if session.restoreCalls != 1 {
+		t.Fatalf("Restore called %d times, want 1", session.restoreCalls)
+	}
+}
+
+// TestSelectReturnsRenderErrorOnKeyHandling proves a render failure while
+// applying a key is also propagated instead of a successful selection.
+func TestSelectReturnsRenderErrorOnKeyRender(t *testing.T) {
+	session := &fakeSession{
+		input:  bytes.NewReader([]byte("\x1b[B\r")),
+		output: &failingBuffer{lockedBuffer: &lockedBuffer{}, failAfter: 3, err: errors.New("tty gone")},
+		width:  100,
+		height: 24,
+		resize: make(chan struct{}),
+		ansi:   true,
+	}
+	_, err := Select(session, []model.SSHConnection{{ID: 1, Name: "one"}, {ID: 2, Name: "two"}})
+	if err == nil || !strings.Contains(err.Error(), "render picker") {
+		t.Fatalf("Select() err = %v, want render failure during key handling", err)
+	}
+}
+
+// TestSelectReturnsLeaveError proves a failed leave-alternate-screen write
+// during cleanup is reported instead of a successful selection.
+func TestSelectReturnsLeaveAlternateScreenError(t *testing.T) {
+	session := &fakeSession{
+		input:  bytes.NewReader([]byte("\r")),
+		output: &failingBuffer{lockedBuffer: &lockedBuffer{}, failAfter: 3, err: errors.New("broken pipe")},
+		width:  100,
+		height: 24,
+		resize: make(chan struct{}),
+		ansi:   true,
+	}
+	got, err := Select(session, []model.SSHConnection{{ID: 1, Name: "one"}})
+	if err == nil || !strings.Contains(err.Error(), "leave alternate screen") {
+		t.Fatalf("Select() err = %v, want 'leave alternate screen' failure", err)
+	}
+	if got.ID != 0 {
+		t.Fatalf("Select() returned a connection %#v despite cleanup failure", got)
+	}
+}
+
+// TestSelectReturnsRestoreError proves a failing terminal Restore is
+// reported even though the selection itself succeeded.
+func TestSelectReturnsRestoreError(t *testing.T) {
+	session := newFakeSession("\r", 100, 24, true)
+	session.restoreErr = errors.New("terminal lost")
+	got, err := Select(session, []model.SSHConnection{{ID: 1, Name: "one"}})
+	if err == nil || !strings.Contains(err.Error(), "restore picker raw mode") {
+		t.Fatalf("Select() err = %v, want 'restore picker raw mode' failure", err)
+	}
+	if got.ID != 0 {
+		t.Fatalf("Select() returned a connection %#v despite restore failure", got)
+	}
+	if session.restoreCalls != 1 {
+		t.Fatalf("Restore called %d times, want 1", session.restoreCalls)
+	}
 }

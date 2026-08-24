@@ -31,6 +31,23 @@ var kernel32 = syscall.NewLazyDLL("kernel32.dll")
 // session is never terminated out from under deferred restoration.
 var procSetConsoleCtrlHandler = kernel32.NewProc("SetConsoleCtrlHandler")
 
+// Console-mode and control-handler calls go through these package
+// variables so Windows-only tests can inject failures and record the
+// calls EnterRaw makes, verifying that every failure after a console mode
+// change rolls the console back.
+var (
+	winGetConsoleMode = windows.GetConsoleMode
+	winSetConsoleMode = windows.SetConsoleMode
+	winSetCtrlHandler = func(cb uintptr, add bool) (ok bool, callErr error) {
+		var addArg uintptr
+		if add {
+			addArg = 1
+		}
+		r, _, err := procSetConsoleCtrlHandler.Call(cb, addArg)
+		return r != 0, err
+	}
+)
+
 // consoleCtrlHandler claims console control events (Ctrl-C, close, logoff,
 // etc.), returning TRUE so the process keeps running and the interactive
 // layer's deferred Restore always runs. Ctrl-C is normally delivered as
@@ -74,7 +91,9 @@ func newSession() (Session, error) {
 }
 
 // EnterRaw switches the console into raw input mode, enables VT output
-// processing, and registers the console control handler.
+// processing, and registers the console control handler. Every failure
+// after a console mode changed rolls the changed mode back so a failed
+// EnterRaw never leaves the console in raw or VT state.
 func (s *windowsSession) EnterRaw() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -88,23 +107,36 @@ func (s *windowsSession) EnterRaw() error {
 	inH := windows.Handle(s.in.Fd())
 	outH := windows.Handle(s.out.Fd())
 
-	if err := windows.GetConsoleMode(inH, &s.origIn); err != nil {
+	if err := winGetConsoleMode(inH, &s.origIn); err != nil {
 		return fmt.Errorf("get console input mode: %w", err)
 	}
-	if err := windows.SetConsoleMode(inH, winRawInputMode); err != nil {
+	if err := winSetConsoleMode(inH, winRawInputMode); err != nil {
 		return fmt.Errorf("set raw console input mode: %w", err)
 	}
-	if err := windows.GetConsoleMode(outH, &s.origOut); err == nil {
-		if err := windows.SetConsoleMode(outH, s.origOut|winOutputVTExtra); err != nil {
-			s.origOut = 0 // output VT processing is best-effort
+	// Output VT processing is best-effort: raw input still works if it
+	// cannot be enabled, and SupportsANSI reports false so the picker
+	// rejects the session later.
+	vtChanged := false
+	if err := winGetConsoleMode(outH, &s.origOut); err == nil {
+		if err := winSetConsoleMode(outH, s.origOut|winOutputVTExtra); err != nil {
+			s.origOut = 0 // no change was made; nothing to restore
 		} else {
 			s.ansi = true
+			vtChanged = true
 		}
 	}
 
 	cb := syscall.NewCallback(consoleCtrlHandler)
-	if r, _, callErr := procSetConsoleCtrlHandler.Call(cb, 1); r == 0 {
-		_ = windows.SetConsoleMode(inH, s.origIn)
+	if ok, callErr := winSetCtrlHandler(cb, true); !ok {
+		// Roll back the input mode and, when it was changed, the output
+		// VT mode and ANSI flag so the console and session state stay
+		// consistent after the failed EnterRaw.
+		_ = winSetConsoleMode(inH, s.origIn)
+		if vtChanged {
+			_ = winSetConsoleMode(outH, s.origOut)
+		}
+		s.origOut = 0
+		s.ansi = false
 		return fmt.Errorf("register console ctrl handler: %v", callErr)
 	}
 	s.handler = cb
@@ -121,15 +153,15 @@ func (s *windowsSession) Restore() error {
 	defer s.mu.Unlock()
 	var err error
 	if s.raw {
-		if r, _, callErr := procSetConsoleCtrlHandler.Call(s.handler, 0); r == 0 && err == nil {
+		if ok, callErr := winSetCtrlHandler(s.handler, false); !ok && err == nil {
 			err = fmt.Errorf("unregister console ctrl handler: %v", callErr)
 		}
 		s.handler = 0
-		if mErr := windows.SetConsoleMode(windows.Handle(s.in.Fd()), s.origIn); mErr != nil && err == nil {
+		if mErr := winSetConsoleMode(windows.Handle(s.in.Fd()), s.origIn); mErr != nil && err == nil {
 			err = fmt.Errorf("restore console input mode: %w", mErr)
 		}
 		if s.origOut != 0 {
-			_ = windows.SetConsoleMode(windows.Handle(s.out.Fd()), s.origOut)
+			_ = winSetConsoleMode(windows.Handle(s.out.Fd()), s.origOut)
 		}
 		s.raw = false
 	}

@@ -13,9 +13,12 @@ const (
 	KeyRune Key = iota
 	// KeyBackspace deletes the last query character.
 	KeyBackspace
-	// KeyUp and KeyDown move the selection.
+	// KeyUp and KeyDown move the selection (or the detail viewport when
+	// it has focus).
 	KeyUp
 	KeyDown
+	// KeyTab toggles focus between the list and the detail viewport.
+	KeyTab
 	// KeyEnter confirms the selected connection.
 	KeyEnter
 	// KeyCancel aborts the picker (Ctrl-C or bare ESC).
@@ -103,7 +106,7 @@ func DecodeBytes(b []byte) []DecodedKey {
 }
 
 // keyForRune classifies one decoded rune: printable runes become KeyRune,
-// supported control bytes map to their key, and other control bytes are
+// supported control bytes map to their key, and everything else is
 // ignored.
 func keyForRune(r rune) (DecodedKey, bool) {
 	switch {
@@ -111,6 +114,8 @@ func keyForRune(r rune) (DecodedKey, bool) {
 		switch r {
 		case '\b', 0x7f:
 			return DecodedKey{Kind: KeyBackspace}, true
+		case '\t':
+			return DecodedKey{Kind: KeyTab}, true
 		case '\r', '\n':
 			return DecodedKey{Kind: KeyEnter}, true
 		case 0x03:
