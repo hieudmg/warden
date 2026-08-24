@@ -1,4 +1,5 @@
 import { render, screen, within } from "@testing-library/react"
+import userEvent from "@testing-library/user-event"
 import { describe, expect, test, vi } from "vitest"
 import type { SSHConnection } from "@/api/types"
 import { emptySSHForm, sshFormFromConnection, toSSHRequest, type SSHFormState } from "./ssh-form"
@@ -27,8 +28,9 @@ function connection(overrides: Partial<SSHConnection> = {}): SSHConnection {
 }
 
 describe("emptySSHForm", () => {
-  test("defaults ports to 22 and 1080 with an empty route and blank secrets", () => {
+  test("defaults to password auth with ports 22 and 1080, an empty route, and blank secrets", () => {
     const form = emptySSHForm()
+    expect(form.authMode).toBe("password")
     expect(form.port).toBe("22")
     expect(form.proxyPort).toBe("1080")
     expect(form.jumpIDs).toEqual([])
@@ -60,6 +62,27 @@ describe("sshFormFromConnection", () => {
     expect(form.privateKeyPassphrase).toBe("")
     expect(form.proxyPassword).toBe("")
   })
+
+  test("infers private-key auth when only a private key is stored", () => {
+    const form = sshFormFromConnection(
+      connection({ has_password: false, has_private_key: true, has_private_key_passphrase: true }),
+    )
+    expect(form.authMode).toBe("privateKey")
+  })
+
+  test("infers password auth when only a password is stored", () => {
+    const form = sshFormFromConnection(
+      connection({ has_password: true, has_private_key: false, has_private_key_passphrase: false }),
+    )
+    expect(form.authMode).toBe("password")
+  })
+
+  test("prefers password auth when both secrets are stored", () => {
+    const form = sshFormFromConnection(
+      connection({ has_password: true, has_private_key: true, has_private_key_passphrase: true }),
+    )
+    expect(form.authMode).toBe("password")
+  })
 })
 
 describe("toSSHRequest", () => {
@@ -69,6 +92,7 @@ describe("toSSHRequest", () => {
       host: "10.0.0.1",
       port: "22",
       username: "root",
+      authMode: "password",
       password: "",
       privateKey: "",
       privateKeyPassphrase: "",
@@ -96,7 +120,7 @@ describe("toSSHRequest", () => {
     })
   })
 
-  test("preserves each nonblank secret independently", () => {
+  test("serializes password mode with the password preserved and key fields null", () => {
     const form: SSHFormState = {
       ...emptySSHForm(),
       name: "bastion",
@@ -104,6 +128,28 @@ describe("toSSHRequest", () => {
       port: "22",
       username: "root",
       password: "hunter2",
+      proxyHost: "",
+      proxyPort: "1080",
+      proxyUsername: "",
+      proxyPassword: "proxy-pass",
+      jumpIDs: [],
+      defaultDir: "",
+    }
+    const request = toSSHRequest(form)
+    expect(request.password).toBe("hunter2")
+    expect(request.private_key).toBeNull()
+    expect(request.private_key_passphrase).toBeNull()
+    expect(request.proxy_password).toBe("proxy-pass")
+  })
+
+  test("serializes private-key mode with key fields preserved and password null", () => {
+    const form: SSHFormState = {
+      ...emptySSHForm(),
+      authMode: "privateKey",
+      name: "bastion",
+      host: "10.0.0.1",
+      port: "22",
+      username: "root",
       privateKey: "-----BEGIN OPENSSH PRIVATE KEY-----\nsecret\n-----END OPENSSH PRIVATE KEY-----",
       privateKeyPassphrase: "key-pass",
       proxyHost: "",
@@ -114,7 +160,7 @@ describe("toSSHRequest", () => {
       defaultDir: "",
     }
     const request = toSSHRequest(form)
-    expect(request.password).toBe("hunter2")
+    expect(request.password).toBeNull()
     expect(request.private_key).toBe(
       "-----BEGIN OPENSSH PRIVATE KEY-----\nsecret\n-----END OPENSSH PRIVATE KEY-----",
     )
@@ -123,10 +169,19 @@ describe("toSSHRequest", () => {
   })
 
   test("does not trim nonblank secrets", () => {
-    const form: SSHFormState = { ...emptySSHForm(), password: "  spaced  ", privateKey: "  key  " }
-    const request = toSSHRequest(form)
-    expect(request.password).toBe("  spaced  ")
-    expect(request.private_key).toBe("  key  ")
+    const passwordForm: SSHFormState = { ...emptySSHForm(), password: "  spaced  " }
+    const passwordRequest = toSSHRequest(passwordForm)
+    expect(passwordRequest.password).toBe("  spaced  ")
+    expect(passwordRequest.private_key).toBeNull()
+
+    const keyForm: SSHFormState = {
+      ...emptySSHForm(),
+      authMode: "privateKey",
+      privateKey: "  key  ",
+    }
+    const keyRequest = toSSHRequest(keyForm)
+    expect(keyRequest.private_key).toBe("  key  ")
+    expect(keyRequest.password).toBeNull()
   })
 
   test("serializes jump IDs in visible order and numeric inputs as numbers", () => {
@@ -183,6 +238,40 @@ describe("SSHForm", () => {
     expect(proxyPort.closest("div.flex.items-end.gap-2")).toBe(row)
     expect(within(row as HTMLElement).getByText("@")).toBeInTheDocument()
     expect(within(row as HTMLElement).getByText(":")).toBeInTheDocument()
+  })
+
+  test("renders password and private-key auth as mutually exclusive tabs", () => {
+    renderForm()
+    expect(screen.getByRole("tab", { name: "Password" })).toHaveAttribute(
+      "aria-selected",
+      "true",
+    )
+    expect(screen.getByRole("tab", { name: "Private key" })).toHaveAttribute(
+      "aria-selected",
+      "false",
+    )
+    expect(screen.getByLabelText("Password", { selector: "input" })).toBeInTheDocument()
+    expect(screen.queryByLabelText("Private key", { selector: "textarea" })).not.toBeInTheDocument()
+  })
+
+  test("switching auth tabs clears the inactive mode's secret", async () => {
+    const user = userEvent.setup()
+    renderForm()
+
+    const passwordInput = screen.getByLabelText("Password", { selector: "input" })
+    await user.type(passwordInput, "hunter2")
+    expect(passwordInput).toHaveValue("hunter2")
+
+    await user.click(screen.getByRole("tab", { name: "Private key" }))
+    expect(screen.getByLabelText("Private key", { selector: "textarea" })).toHaveValue("")
+    expect(
+      screen.getByLabelText("Private key passphrase", { selector: "input" }),
+    ).toHaveValue("")
+    expect(screen.queryByLabelText("Password", { selector: "input" })).not.toBeInTheDocument()
+
+    await user.click(screen.getByRole("tab", { name: "Password" }))
+    expect(screen.getByLabelText("Password", { selector: "input" })).toHaveValue("")
+    expect(screen.queryByLabelText("Private key", { selector: "textarea" })).not.toBeInTheDocument()
   })
 
   test("renders form errors with role alert", () => {

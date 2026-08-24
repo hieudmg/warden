@@ -4,18 +4,22 @@ import { Button } from "@/components/ui/button"
 import { DialogFooter } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Textarea } from "@/components/ui/textarea"
 import { parseJumpRoute, serializeJumpRoute } from "./jump-route"
 import { JumpRouteField } from "./jump-route-field"
 
 /** Controlled SSH form state. Secrets are always blank on open because
  * list/get responses are redacted; only literal empty strings serialize
- * as null so stored values are retained on edit. */
+ * as null so stored values are retained on edit. Password and private
+ * key are mutually exclusive auth modes selected by tabs: switching
+ * modes clears the inactive mode's secret client-side. */
 export interface SSHFormState {
   name: string
   host: string
   port: string
   username: string
+  authMode: "password" | "privateKey"
   password: string
   privateKey: string
   privateKeyPassphrase: string
@@ -33,6 +37,7 @@ export function emptySSHForm(): SSHFormState {
     host: "",
     port: "22",
     username: "",
+    authMode: "password",
     password: "",
     privateKey: "",
     privateKeyPassphrase: "",
@@ -51,6 +56,8 @@ export function sshFormFromConnection(connection: SSHConnection): SSHFormState {
     host: connection.host,
     port: String(connection.port),
     username: connection.username,
+    authMode:
+      connection.has_private_key && !connection.has_password ? "privateKey" : "password",
     password: "",
     privateKey: "",
     privateKeyPassphrase: "",
@@ -68,14 +75,15 @@ export function sshFormFromConnection(connection: SSHConnection): SSHFormState {
 const nullableSecret = (value: string): string | null => (value === "" ? null : value)
 
 export function toSSHRequest(form: SSHFormState): SSHConnectionRequest {
+  const useKey = form.authMode === "privateKey"
   return {
     name: form.name,
     host: form.host,
     port: Number(form.port),
     username: form.username,
-    password: nullableSecret(form.password),
-    private_key: nullableSecret(form.privateKey),
-    private_key_passphrase: nullableSecret(form.privateKeyPassphrase),
+    password: useKey ? null : nullableSecret(form.password),
+    private_key: useKey ? nullableSecret(form.privateKey) : null,
+    private_key_passphrase: useKey ? nullableSecret(form.privateKeyPassphrase) : null,
     proxy_host: form.proxyHost,
     proxy_port: Number(form.proxyPort),
     proxy_username: form.proxyUsername,
@@ -152,37 +160,60 @@ export function SSHForm({ connection, profiles, pending, error, onSubmit, onCanc
           />
         </div>
       </div>
-      <div className="grid gap-1.5">
-        <Label htmlFor="ssh-password">Password</Label>
-        <Input
-          id="ssh-password"
-          type="password"
-          autoComplete="new-password"
-          placeholder="Leave blank to keep the stored value"
-          value={form.password}
-          onChange={event => set("password", event.target.value)}
-        />
-      </div>
-      <div className="grid gap-1.5">
-        <Label htmlFor="ssh-private-key">Private key</Label>
-        <Textarea
-          id="ssh-private-key"
-          placeholder="Leave blank to keep the stored value"
-          value={form.privateKey}
-          onChange={event => set("privateKey", event.target.value)}
-        />
-      </div>
-      <div className="grid gap-1.5">
-        <Label htmlFor="ssh-private-key-passphrase">Private key passphrase</Label>
-        <Input
-          id="ssh-private-key-passphrase"
-          type="password"
-          autoComplete="new-password"
-          placeholder="Leave blank to keep the stored value"
-          value={form.privateKeyPassphrase}
-          onChange={event => set("privateKeyPassphrase", event.target.value)}
-        />
-      </div>
+      <Tabs
+        value={form.authMode}
+        onValueChange={value => {
+          const authMode = value as "password" | "privateKey"
+          setForm(current => ({
+            ...current,
+            authMode,
+            password: authMode === "password" ? current.password : "",
+            privateKey: authMode === "privateKey" ? current.privateKey : "",
+            privateKeyPassphrase:
+              authMode === "privateKey" ? current.privateKeyPassphrase : "",
+          }))
+        }}
+      >
+        <TabsList className="grid w-full grid-cols-2">
+          <TabsTrigger value="password">Password</TabsTrigger>
+          <TabsTrigger value="privateKey">Private key</TabsTrigger>
+        </TabsList>
+        <TabsContent value="password" className="grid gap-3 pt-3">
+          <div className="grid gap-1.5">
+            <Label htmlFor="ssh-password">Password</Label>
+            <Input
+              id="ssh-password"
+              type="password"
+              autoComplete="new-password"
+              placeholder="Leave blank to keep the stored value"
+              value={form.password}
+              onChange={event => set("password", event.target.value)}
+            />
+          </div>
+        </TabsContent>
+        <TabsContent value="privateKey" className="grid gap-3 pt-3">
+          <div className="grid gap-1.5">
+            <Label htmlFor="ssh-private-key">Private key</Label>
+            <Textarea
+              id="ssh-private-key"
+              placeholder="Leave blank to keep the stored value"
+              value={form.privateKey}
+              onChange={event => set("privateKey", event.target.value)}
+            />
+          </div>
+          <div className="grid gap-1.5">
+            <Label htmlFor="ssh-private-key-passphrase">Private key passphrase</Label>
+            <Input
+              id="ssh-private-key-passphrase"
+              type="password"
+              autoComplete="new-password"
+              placeholder="Leave blank to keep the stored value"
+              value={form.privateKeyPassphrase}
+              onChange={event => set("privateKeyPassphrase", event.target.value)}
+            />
+          </div>
+        </TabsContent>
+      </Tabs>
       <div className="flex items-end gap-2">
         <div className="grid gap-1.5 flex-[3] min-w-0">
           <Label htmlFor="ssh-proxy-username">Proxy username</Label>
