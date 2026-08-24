@@ -5,7 +5,6 @@
 package picker
 
 import (
-	"bufio"
 	"errors"
 	"fmt"
 	"io"
@@ -215,7 +214,12 @@ func Select(session terminal.Session, conns []model.SSHConnection) (conn model.S
 	// continuation byte; the wait is fd-level readiness polling with no
 	// background reader, so no goroutine can survive Select and consume
 	// input meant for the subsequent SSH session.
-	reader := bufio.NewReader(session.Stdin())
+	//
+	// Bytes are consumed one at a time with no intermediate buffer: a
+	// buffered reader could absorb keystrokes typed past the confirming
+	// Enter and silently discard them when Select returns, stealing input
+	// from the SSH session that follows. Every byte past Enter stays in
+	// the underlying reader for that session.
 	var dec StreamDecoder
 	for {
 		mu.Lock()
@@ -224,44 +228,35 @@ func Select(session terminal.Session, conns []model.SSHConnection) (conn model.S
 		if rErr != nil {
 			return model.SSHConnection{}, fmt.Errorf("render picker: %w", rErr)
 		}
-		b, err := reader.ReadByte()
+		b, err := readByte(session.Stdin())
 		if err != nil {
 			return model.SSHConnection{}, fmt.Errorf("read picker input: %w", err)
 		}
 		keys := dec.Feed([]byte{b})
 		// A leading ESC is normally the start of an arrow sequence. Never
-		// flush it just because the bufio buffer is momentarily empty:
-		// with byte-at-a-time delivery the continuation may simply not
-		// have arrived yet. Wait a bounded grace for the next byte instead
-		// via the session's readiness poll; the poll spawns no reader, so
-		// a timed-out bare ESC cancels with nothing left blocked on stdin.
+		// flush it just because the continuation byte has not arrived
+		// yet: with byte-at-a-time delivery it may simply be delayed.
+		// Wait a bounded grace for the next byte via the session's
+		// readiness poll; the poll spawns no reader, so a timed-out bare
+		// ESC cancels with nothing left blocked on stdin.
 		if len(keys) == 0 && len(dec.Pending()) > 0 && dec.Pending()[0] == 0x1b {
-			var nb byte
-			var ok bool
-			if reader.Buffered() > 0 {
-				nb, err = reader.ReadByte()
-				ok = err == nil
-			} else {
-				ok, err = session.StdinReadyWithin(escGrace)
-				if err != nil {
-					return model.SSHConnection{}, fmt.Errorf("read picker input: %w", err)
-				}
-				if ok {
-					nb, err = reader.ReadByte()
-				}
-			}
+			ok, err := session.StdinReadyWithin(escGrace)
 			if err != nil {
-				if err == io.EOF {
-					keys = dec.Flush() // lone ESC at end of stream cancels
-				} else {
-					return model.SSHConnection{}, fmt.Errorf("read picker input: %w", err)
-				}
-			} else if ok {
-				keys = dec.Feed([]byte{nb})
-			} else {
+				return model.SSHConnection{}, fmt.Errorf("read picker input: %w", err)
+			}
+			if !ok {
 				// The grace elapsed with no continuation byte: the ESC
 				// stands alone and cancels.
 				keys = dec.Flush()
+			} else {
+				nb, rerr := readByte(session.Stdin())
+				if rerr == io.EOF {
+					keys = dec.Flush() // lone ESC at end of stream cancels
+				} else if rerr != nil {
+					return model.SSHConnection{}, fmt.Errorf("read picker input: %w", rerr)
+				} else {
+					keys = dec.Feed([]byte{nb})
+				}
 			}
 		}
 		for _, k := range keys {
@@ -290,6 +285,16 @@ func Select(session terminal.Session, conns []model.SSHConnection) (conn model.S
 			}
 		}
 	}
+}
+
+// readByte reads exactly one byte from r without any buffering. Select
+// consumes input through this helper so the picker can never hold bytes
+// typed beyond the confirming Enter: everything past that key stays in
+// the underlying reader for the subsequent SSH session.
+func readByte(r io.Reader) (byte, error) {
+	var b [1]byte
+	_, err := io.ReadFull(r, b[:])
+	return b[0], err
 }
 
 // enterAlternateScreen switches to the alternate screen, clears it, homes

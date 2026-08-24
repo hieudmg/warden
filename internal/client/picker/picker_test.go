@@ -318,9 +318,27 @@ func visibleColumnOf(line string, target rune) int {
 	return -1
 }
 
-// oneByteReader returns exactly one byte per Read call so the bufio
-// buffer never holds more than one byte, reproducing terminal input that
-// delivers an escape sequence one byte at a time.
+// recallReader serves its data in the requested chunk sizes and records
+// how much was consumed, so a test can inspect exactly which bytes the
+// picker left behind for the SSH session that follows it.
+type recallReader struct {
+	data []byte
+	pos  int
+}
+
+func (r *recallReader) Read(p []byte) (int, error) {
+	if r.pos >= len(r.data) {
+		return 0, io.EOF
+	}
+	n := copy(p, r.data[r.pos:])
+	r.pos += n
+	return n, nil
+}
+
+func (r *recallReader) Remaining() []byte { return r.data[r.pos:] }
+
+// oneByteReader returns exactly one byte per Read call, simulating
+// terminal input that delivers an escape sequence one byte at a time.
 type oneByteReader struct {
 	data []byte
 	pos  int
@@ -333,6 +351,30 @@ func (r *oneByteReader) Read(p []byte) (int, error) {
 	p[0] = r.data[r.pos]
 	r.pos++
 	return 1, nil
+}
+
+// TestSelectLeavesTypedAheadInputForSSH proves the picker never consumes
+// bytes past the confirming Enter: a keystroke burst delivered in one
+// chunk (as a terminal paste or type-ahead would be) must leave the
+// trailing bytes readable for the SSH session that follows Select, not
+// swallowed in a picker-side read buffer.
+func TestSelectLeavesTypedAheadInputForSSH(t *testing.T) {
+	in := &recallReader{data: []byte("a\rb")}
+	session := &fakeSession{
+		input:  in,
+		output: &lockedBuffer{},
+		width:  100,
+		height: 24,
+		resize: make(chan struct{}),
+		ansi:   true,
+	}
+	got, err := Select(session, []model.SSHConnection{{ID: 1, Name: "alpha"}})
+	if err != nil || got.ID != 1 {
+		t.Fatalf("Select() = %#v, %v; want ID 1, nil", got, err)
+	}
+	if rem := in.Remaining(); string(rem) != "b" {
+		t.Fatalf("bytes left for the SSH session after Enter = %q, want \"b\": the picker must not buffer keystrokes typed beyond Enter", rem)
+	}
 }
 
 func TestSelectRestoresTerminalAndReturnsHighlightedConnection(t *testing.T) {
@@ -452,8 +494,8 @@ func waitFor(t *testing.T, cond func() bool) {
 
 // TestSelectDecodesSplitArrowSequence proves a raw arrow sequence split
 // across reads (ESC, then [, then B) still navigates instead of
-// canceling: the pending ESC must never be flushed just because the bufio
-// buffer is momentarily empty.
+// canceling: the pending ESC must never be flushed just because the
+// continuation byte has not arrived yet.
 func TestSelectDecodesSplitArrowSequence(t *testing.T) {
 	session := &fakeSession{
 		input:  &oneByteReader{data: []byte("\x1b[B\r")},
