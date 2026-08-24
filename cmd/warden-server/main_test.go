@@ -2,6 +2,9 @@ package main
 
 import (
 	"bytes"
+	"io/fs"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -25,4 +28,35 @@ func TestRunServeRejectsEmptyExplicitConfigFlag(t *testing.T) {
 
 func emptyLookupEnv(string) (string, bool) {
 	return "", false
+}
+
+func TestUIAssetsStaticFSPointsAtRootContainingIndexHTML(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "index.html"), []byte("<html>override</html>"), 0o644); err != nil {
+		t.Fatalf("write index.html: %v", err)
+	}
+
+	assets := uiAssets(dir)
+	data, err := fs.ReadFile(assets, "index.html")
+	if err != nil {
+		t.Fatalf("index.html not readable at fs root: %v", err)
+	}
+	if !strings.Contains(string(data), "override") {
+		t.Errorf("served index.html = %q, want override fixture", data)
+	}
+}
+
+func TestUIAssetsDefaultsToEmbeddedDistribution(t *testing.T) {
+	t.Parallel()
+
+	assets := uiAssets("")
+	data, err := fs.ReadFile(assets, "index.html")
+	if err != nil {
+		t.Fatalf("embedded distribution missing index.html at fs root: %v", err)
+	}
+	if len(data) == 0 {
+		t.Errorf("embedded index.html is empty")
+	}
 }

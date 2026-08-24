@@ -30,6 +30,14 @@ PORT=""
 log()  { printf '== %s\n' "$*"; }
 fail() { printf 'FAIL: %s\n' "$*" >&2; exit 1; }
 
+# --- Frontend -------------------------------------------------------------
+# The server binary embeds the generated UI, so it must exist before the
+# Go build below. Locked install, tests, and production build happen here.
+log "building frontend"
+npm --prefix "$ROOT/web" ci
+npm --prefix "$ROOT/web" test
+npm --prefix "$ROOT/web" run build
+
 cleanup() {
   if [ -n "$SERVER_PID" ] && kill -0 "$SERVER_PID" 2>/dev/null; then
     kill "$SERVER_PID" 2>/dev/null || true

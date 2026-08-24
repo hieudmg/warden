@@ -21,6 +21,14 @@ LDFLAGS="-s -w"
 log() { printf '== %s\n' "$*"; }
 
 cd "$ROOT"
+
+# The server binary embeds the generated UI, so the frontend must be
+# built before the release compilation below.
+log "building frontend"
+npm --prefix "$ROOT/web" ci
+npm --prefix "$ROOT/web" test
+npm --prefix "$ROOT/web" run build
+
 log "building release artifacts into $DIST"
 rm -rf "$DIST"
 mkdir -p "$DIST"

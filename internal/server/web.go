@@ -1,6 +1,6 @@
 // Web UI serving: one listener serves both the embedded management UI and
 // the JSON API. Requests under /api/v1/ are delegated to the API handler;
-// everything else is served from the embedded assets. The UI is
+// everything else is served from the assets fs. The UI is
 // management-only, so no route here exposes terminals, credentials, or
 // remote execution.
 package server
@@ -20,10 +20,11 @@ import (
 // ServeUI wraps the API handler with the embedded management UI. Requests
 // whose path starts with /api/ are delegated unchanged to api. The root
 // path and /index.html are served with Cache-Control: no-store because the
-// UI is stateful and must always reflect current server state. Asset paths
-// are whitelisted (only the embedded files exist), served with content-type
-// detection and a strong ETag so browsers revalidate efficiently. Unknown
-// non-API paths return 404.
+// UI is stateful and must always reflect current server state. Every other
+// existing asset is hashed at build time, so it is served with a long
+// immutable cache lifetime. Asset names come from a whitelist of existing
+// embedded files; traversal attempts fail path validation before any file
+// access. Unknown non-API paths return 404.
 func ServeUI(api http.Handler, assets fs.FS) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if strings.HasPrefix(r.URL.Path, "/api/") {
@@ -41,22 +42,25 @@ func ServeUI(api http.Handler, assets fs.FS) http.Handler {
 			// The management UI entrypoint must never be cached: a
 			// stale index could hide newer server capabilities or
 			// retain stale page state.
-			name = "static/index.html"
+			name = "index.html"
 			w.Header().Set("Cache-Control", "no-store")
-		case "/static/app.js", "/static/styles.css":
-			name = strings.TrimPrefix(r.URL.Path, "/")
 		default:
-			http.NotFound(w, r)
-			return
+			name = strings.TrimPrefix(r.URL.Path, "/")
+			if !fs.ValidPath(name) {
+				http.NotFound(w, r)
+				return
+			}
+			// Vite emits content-hashed asset filenames, so any
+			// asset that exists today is immutable for its lifetime.
+			w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
 		}
 		serveAsset(w, r, assets, name)
 	})
 }
 
-// serveAsset writes one embedded file with content-type detection, a strong
-// ETag, and standard conditional-request handling via http.ServeContent.
-// The name comes from the whitelist above, so no path-cleaning pass is
-// needed.
+// serveAsset writes one file from the assets fs with content-type
+// detection, a strong ETag, and standard conditional-request handling via
+// http.ServeContent. Directories and missing files return 404.
 func serveAsset(w http.ResponseWriter, r *http.Request, assets fs.FS, name string) {
 	data, err := fs.ReadFile(assets, name)
 	if err != nil {
@@ -64,7 +68,7 @@ func serveAsset(w http.ResponseWriter, r *http.Request, assets fs.FS, name strin
 		return
 	}
 	modtime := time.Time{}
-	if info, serr := fs.Stat(assets, name); serr == nil {
+	if info, serr := fs.Stat(assets, name); serr == nil && !info.IsDir() {
 		modtime = info.ModTime()
 	}
 

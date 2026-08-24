@@ -3,14 +3,14 @@ package server
 import (
 	"context"
 	"io"
+	"io/fs"
 	"net"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"testing/fstest"
 	"time"
-
-	"warden/internal/web"
 )
 
 // apiStub is a minimal API handler that answers the management UI's calls
@@ -29,8 +29,18 @@ func apiStub() http.Handler {
 	})
 }
 
+// fixtureAssets mirrors the generated Vite distribution layout: index.html
+// at the fs root with hashed sibling assets under assets/.
+func fixtureAssets() fs.FS {
+	return fstest.MapFS{
+		"index.html":        {Data: []byte(`<html><script type="module" src="/assets/app-a1.js"></script></html>`)},
+		"assets/app-a1.js":  {Data: []byte(`console.log("warden")`)},
+		"assets/app-a1.css": {Data: []byte(`:root{color-scheme:light}`)},
+	}
+}
+
 func serveUIHandler() http.Handler {
-	return ServeUI(apiStub(), web.Assets)
+	return ServeUI(apiStub(), fixtureAssets())
 }
 
 func TestServeUIServesIndexAtRoot(t *testing.T) {
@@ -49,7 +59,7 @@ func TestServeUIServesIndexAtRoot(t *testing.T) {
 		t.Errorf("GET / Cache-Control = %q, want no-store", cc)
 	}
 	body := rec.Body.String()
-	if !strings.Contains(body, "<html") || !strings.Contains(body, "app.js") {
+	if !strings.Contains(body, "<html") || !strings.Contains(body, "/assets/app-a1.js") {
 		t.Errorf("GET / body does not look like the management UI shell")
 	}
 }
@@ -67,13 +77,13 @@ func TestServeUIServesIndexAtExplicitPath(t *testing.T) {
 	}
 }
 
-func TestServeUIServesStaticAssetsWithTypeAndETag(t *testing.T) {
+func TestServeUIServesHashedAssetsWithTypeETagAndLongCache(t *testing.T) {
 	for _, tc := range []struct {
-		path    string
-		wantCT  string
+		path   string
+		wantCT string
 	}{
-		{"/static/app.js", "text/javascript"},
-		{"/static/styles.css", "text/css"},
+		{"/assets/app-a1.js", "text/javascript"},
+		{"/assets/app-a1.css", "text/css"},
 	} {
 		rec := httptest.NewRecorder()
 		req := httptest.NewRequest(http.MethodGet, tc.path, nil)
@@ -89,9 +99,46 @@ func TestServeUIServesStaticAssetsWithTypeAndETag(t *testing.T) {
 		if rec.Header().Get("Etag") == "" {
 			t.Errorf("GET %s missing ETag header", tc.path)
 		}
+		if cc := rec.Header().Get("Cache-Control"); cc != "public, max-age=31536000, immutable" {
+			t.Errorf("GET %s Cache-Control = %q, want long immutable cache", tc.path, cc)
+		}
 		if rec.Body.Len() == 0 {
 			t.Errorf("GET %s empty body", tc.path)
 		}
+	}
+}
+
+func TestServeUIETagSupportsConditionalRequests(t *testing.T) {
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/assets/app-a1.js", nil)
+	serveUIHandler().ServeHTTP(rec, req)
+	etag := rec.Header().Get("Etag")
+	if etag == "" {
+		t.Fatalf("missing ETag on asset response")
+	}
+
+	rec = httptest.NewRecorder()
+	req = httptest.NewRequest(http.MethodGet, "/assets/app-a1.js", nil)
+	req.Header.Set("If-None-Match", etag)
+	serveUIHandler().ServeHTTP(rec, req)
+	if rec.Code != http.StatusNotModified {
+		t.Fatalf("GET with If-None-Match status = %d, want 304", rec.Code)
+	}
+	if rec.Body.Len() != 0 {
+		t.Errorf("304 response has body")
+	}
+}
+
+func TestServeUIHeadHasNoBody(t *testing.T) {
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodHead, "/assets/app-a1.js", nil)
+	serveUIHandler().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("HEAD /assets/app-a1.js status = %d, want 200", rec.Code)
+	}
+	if rec.Body.Len() != 0 {
+		t.Errorf("HEAD response has a body")
 	}
 }
 
@@ -108,13 +155,34 @@ func TestServeUIDelegatesAPIPaths(t *testing.T) {
 	}
 }
 
-func TestServeUIUnknownPathsReturn404(t *testing.T) {
-	for _, path := range []string{"/does-not-exist", "/static/missing.js", "/api/v1/nope"} {
+func TestServeUIRejectsTraversalDirectoriesAndMissingPaths(t *testing.T) {
+	for _, tc := range []struct {
+		path   string
+		method string
+	}{
+		{"/../go.mod", http.MethodGet},
+		{"/assets/../index.html", http.MethodGet},
+		{"/assets/", http.MethodGet},
+		{"/assets", http.MethodGet},
+		{"/does-not-exist", http.MethodGet},
+		{"/assets/missing.js", http.MethodGet},
+		{"/static/app.js", http.MethodGet},
+		{"/api/v1/nope", http.MethodGet},
+		{"/assets/app-a1.js", http.MethodPost},
+	} {
 		rec := httptest.NewRecorder()
-		req := httptest.NewRequest(http.MethodGet, path, nil)
+		req := httptest.NewRequest(tc.method, tc.path, nil)
 		serveUIHandler().ServeHTTP(rec, req)
-		if rec.Code != http.StatusNotFound {
-			t.Errorf("GET %s status = %d, want 404", path, rec.Code)
+
+		want := http.StatusNotFound
+		if tc.method == http.MethodPost {
+			want = http.StatusMethodNotAllowed
+		}
+		if rec.Code != want {
+			t.Errorf("%s %s status = %d, want %d", tc.method, tc.path, rec.Code, want)
+		}
+		if strings.Contains(rec.Body.String(), "app-a1.js") {
+			t.Errorf("%s %s leaked asset content", tc.method, tc.path)
 		}
 	}
 }

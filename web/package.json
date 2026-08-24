@@ -8,8 +8,8 @@
     "npm": ">=10"
   },
   "scripts": {
-    "build": "tsc -b && vite build",
-    "test": "vitest run",
+    "build": "tsc -b && vite build && node scripts/verify-dist.mjs ../internal/web/dist",
+    "test": "vitest run && node --test scripts/verify-dist.test.mjs",
     "test:watch": "vitest"
   },
   "dependencies": {

@@ -90,13 +90,8 @@ func runServe(args []string, stdout, stderr io.Writer, lookupEnv func(string) (s
 	reports.New(s, rec).Register(mux)
 
 	// The management UI is embedded by default; WARDEN_SERVER_STATIC_FS
-	// overrides it with a directory that mirrors the embedded layout
-	// (static/index.html, static/app.js, static/styles.css).
-	var assets fs.FS = web.Assets
-	if cfg.StaticFS != "" {
-		assets = os.DirFS(cfg.StaticFS)
-	}
-	handler := server.ServeUI(mux, assets)
+	// overrides it with a directory containing index.html at its root.
+	handler := server.ServeUI(mux, uiAssets(cfg.StaticFS))
 
 	srv := server.New(cfg.ListenAddr, handler)
 	errCh := make(chan error, 1)
@@ -123,6 +118,17 @@ func runServe(args []string, stdout, stderr io.Writer, lookupEnv func(string) (s
 		fmt.Fprintf(stdout, "received %s, shutting down\n", sig)
 		return 0
 	}
+}
+
+// uiAssets returns the filesystem the management UI is served from. The
+// default is the generated Vite distribution embedded in the binary;
+// WARDEN_SERVER_STATIC_FS overrides it with a directory that contains
+// index.html directly at its root (the layout the frontend build emits).
+func uiAssets(staticFS string) fs.FS {
+	if staticFS != "" {
+		return os.DirFS(staticFS)
+	}
+	return web.Distribution()
 }
 
 func printUsage(w io.Writer) {
