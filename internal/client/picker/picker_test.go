@@ -224,6 +224,31 @@ func TestRenderClampsTitleAndQueryToWidth(t *testing.T) {
 	}
 }
 
+func TestRenderFinalRowHasNoTrailingNewline(t *testing.T) {
+	state := NewState([]model.SSHConnection{
+		{ID: 1, Name: "prod", Host: "db.example.test"},
+		{ID: 2, Name: "staging", Host: "stage.example.test"},
+	})
+	for _, tc := range []struct {
+		width, height int
+	}{
+		{100, 24}, // wide layout, rows fill the viewport
+		{79, 24},  // narrow layout, rows fill the viewport
+		{100, 2},  // wide layout, headers only
+		{79, 4},   // narrow layout, minimal body
+	} {
+		var out bytes.Buffer
+		Render(&out, state, tc.width, tc.height)
+		s := out.String()
+		if rows := strings.Count(s, "\r\n"); rows != tc.height-1 {
+			t.Fatalf("width %d height %d: emitted %d CRLF-separated rows, want exactly %d rows filling the viewport: %q", tc.width, tc.height, rows+1, tc.height, s)
+		}
+		if strings.HasSuffix(s, "\r\n") {
+			t.Fatalf("width %d height %d: render ends with CRLF after the final viewport row; that trailing newline would scroll the alternate screen: %q", tc.width, tc.height, s)
+		}
+	}
+}
+
 // visibleLength counts the visible runes in a rendered line, ignoring
 // ANSI escape sequences.
 func visibleLength(line string) int {

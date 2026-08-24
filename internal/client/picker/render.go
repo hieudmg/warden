@@ -60,8 +60,12 @@ func Render(w io.Writer, state State, width, height int) {
 	if width < 1 || height < 1 {
 		return
 	}
-	var b strings.Builder
-	b.WriteString("\x1b[2J\x1b[H")
+
+	// Build every row as a separate line, then join them with CRLF so the
+	// final viewport row never carries a trailing newline: when exactly
+	// height rows are rendered a trailing CRLF would move the cursor past
+	// the last row and scroll the alternate screen.
+	var lines []string
 
 	// Two fixed header rows (title, search prompt); the remaining rows
 	// (bodyRows) are shared between the list and the preview so the
@@ -72,16 +76,10 @@ func Render(w io.Writer, state State, width, height int) {
 		bodyRows = 0
 	}
 
-	b.WriteString(cyan)
-	b.WriteString(clamp("warden xssh — pick a connection", width))
-	b.WriteString(reset)
-	b.WriteString("\r\n")
+	lines = append(lines, cyan+clamp("warden xssh — pick a connection", width)+reset)
 
 	if height >= 2 {
-		b.WriteString(yellow)
-		b.WriteString(clamp("Search: "+sanitize(state.query), width))
-		b.WriteString(reset)
-		b.WriteString("\r\n")
+		lines = append(lines, yellow+clamp("Search: "+sanitize(state.query), width)+reset)
 	}
 
 	filtered := state.Filtered()
@@ -98,14 +96,11 @@ func Render(w io.Writer, state State, width, height int) {
 			fields = FormatConnection(selectedConn)
 		}
 		for i := 0; i < bodyRows; i++ {
-			b.WriteString(listLine(filtered, state.selected, i, leftWidth))
-			b.WriteString(cyan)
-			b.WriteString("│")
-			b.WriteString(reset)
+			line := listLine(filtered, state.selected, i, leftWidth) + cyan + "│" + reset
 			if i < len(fields) {
-				b.WriteString(fieldLine(fields[i], rightWidth))
+				line += fieldLine(fields[i], rightWidth)
 			}
-			b.WriteString("\r\n")
+			lines = append(lines, line)
 		}
 	} else {
 		// Narrow layout: split the body rows between the list and the
@@ -117,18 +112,19 @@ func Render(w io.Writer, state State, width, height int) {
 			listRows, previewRows = 1, 0
 		}
 		for i := 0; i < listRows; i++ {
-			b.WriteString(listLine(filtered, state.selected, i, width))
-			b.WriteString("\r\n")
+			lines = append(lines, listLine(filtered, state.selected, i, width))
 		}
 		if hasSelected {
 			fields := FormatConnection(selectedConn)
 			for i := 0; i < previewRows && i < len(fields); i++ {
-				b.WriteString(fieldLine(fields[i], width))
-				b.WriteString("\r\n")
+				lines = append(lines, fieldLine(fields[i], width))
 			}
 		}
 	}
 
+	var b strings.Builder
+	b.WriteString("\x1b[2J\x1b[H")
+	b.WriteString(strings.Join(lines, "\r\n"))
 	w.Write([]byte(b.String()))
 }
 
