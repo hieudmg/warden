@@ -34,6 +34,9 @@ test("dialog content caps its height to the dynamic viewport", () => {
   const content = document.querySelector('[data-slot="dialog-content"]')
   expect(content).not.toBeNull()
   expect(content!.className).toContain("max-h-[calc(100dvh-2rem)]")
+  // sm:max-w-sm (24rem) was bumped to sm:max-w-xl (36rem) so wider forms fit.
+  expect(content!.className).toContain("sm:max-w-xl")
+  expect(content!.className).not.toContain("sm:max-w-sm")
 })
 
 test("dialog content hosts a flex-1 scrollable body wrapping the children", () => {
