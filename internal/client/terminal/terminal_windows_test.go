@@ -7,6 +7,19 @@ import (
 	"testing"
 )
 
+// TestWindowsSessionReportsANSICapability verifies SupportsANSI reflects
+// whether VT output processing was enabled during EnterRaw.
+func TestWindowsSessionReportsANSICapability(t *testing.T) {
+	s := &windowsSession{ansi: true}
+	if !s.SupportsANSI() {
+		t.Fatal("SupportsANSI() = false, want true")
+	}
+	s.ansi = false
+	if s.SupportsANSI() {
+		t.Fatal("SupportsANSI() = true, want false")
+	}
+}
+
 // TestWindowsEnterRawFailsOnNonConsole verifies raw mode fails cleanly on
 // a redirected (non-console) stdin and that Restore afterwards is a
 // harmless no-op.

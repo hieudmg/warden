@@ -35,6 +35,9 @@ type Session interface {
 	Stdin() io.Reader
 	Stdout() io.Writer
 	Stderr() io.Writer
+	// SupportsANSI reports whether the terminal can render ANSI/VT escape
+	// sequences. The picker requires them; interactive SSH does not.
+	SupportsANSI() bool
 }
 
 // NewSession returns a Session bound to the process standard streams. It

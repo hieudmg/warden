@@ -5,9 +5,15 @@
 package picker
 
 import (
+	"bufio"
+	"errors"
+	"fmt"
+	"io"
 	"strings"
+	"sync"
 	"unicode/utf8"
 
+	"warden/internal/client/terminal"
 	"warden/internal/model"
 )
 
@@ -77,6 +83,117 @@ func (s State) Apply(k DecodedKey) State {
 		}
 	}
 	return s
+}
+
+// Select runs the interactive picker on session until the user confirms a
+// connection or cancels. It enters raw mode, switches to the alternate
+// screen, and returns the selected redacted connection only after the
+// terminal is fully restored, so no picker goroutine remains to consume
+// input meant for the subsequent SSH session.
+func Select(session terminal.Session, conns []model.SSHConnection) (model.SSHConnection, error) {
+	if len(conns) == 0 {
+		return model.SSHConnection{}, errors.New("no ssh connections configured")
+	}
+	if err := session.EnterRaw(); err != nil {
+		return model.SSHConnection{}, fmt.Errorf("enter picker raw mode: %w", err)
+	}
+	defer session.Restore()
+	if !session.SupportsANSI() {
+		return model.SSHConnection{}, errors.New("terminal does not support ANSI rendering; use a modern terminal")
+	}
+	enterAlternateScreen(session.Stdout())
+	defer leaveAlternateScreen(session.Stdout())
+
+	state := NewState(conns)
+	width, height := session.Size()
+	if width < 1 || height < 1 {
+		width, height = 80, 24
+	}
+
+	// One resize-render goroutine. State snapshots and stdout writes are
+	// guarded by mu; the goroutine stops via done before the alternate
+	// screen is left and raw mode restored, so no picker goroutine
+	// outlives Select to consume input meant for the SSH session.
+	var mu sync.Mutex
+	done := make(chan struct{})
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		for {
+			select {
+			case <-session.ResizeEvents():
+				mu.Lock()
+				w, h := session.Size()
+				if w < 1 || h < 1 {
+					w, h = 80, 24
+				}
+				width, height = w, h
+				Render(session.Stdout(), state, width, height)
+				mu.Unlock()
+			case <-done:
+				return
+			}
+		}
+	}()
+	defer func() {
+		close(done)
+		wg.Wait()
+	}()
+
+	render := func() {
+		mu.Lock()
+		Render(session.Stdout(), state, width, height)
+		mu.Unlock()
+	}
+	render()
+
+	// All input reads stay in this goroutine: a blocked stdin reader must
+	// never outlive selection and consume keys from the SSH session.
+	reader := bufio.NewReader(session.Stdin())
+	var dec StreamDecoder
+	for {
+		b, err := reader.ReadByte()
+		if err != nil {
+			return model.SSHConnection{}, fmt.Errorf("read picker input: %w", err)
+		}
+		keys := dec.Feed([]byte{b})
+		// A leading ESC is normally the start of an arrow sequence; only
+		// cancel when no continuation byte is already buffered.
+		if len(keys) == 0 && len(dec.Pending()) > 0 && dec.Pending()[0] == 0x1b && reader.Buffered() == 0 {
+			keys = append(keys, dec.Flush()...)
+		}
+		for _, k := range keys {
+			switch k.Kind {
+			case KeyEnter:
+				mu.Lock()
+				conn, ok := state.Selected()
+				mu.Unlock()
+				if ok {
+					return conn, nil
+				}
+			case KeyCancel:
+				return model.SSHConnection{}, errors.New("selection aborted")
+			default:
+				mu.Lock()
+				state = state.Apply(k)
+				Render(session.Stdout(), state, width, height)
+				mu.Unlock()
+			}
+		}
+	}
+}
+
+// enterAlternateScreen switches to the alternate screen, clears it, homes
+// the cursor, and hides it.
+func enterAlternateScreen(w io.Writer) {
+	io.WriteString(w, "\x1b[?1049h\x1b[2J\x1b[H\x1b[?25l")
+}
+
+// leaveAlternateScreen shows the cursor again and returns to the normal
+// screen.
+func leaveAlternateScreen(w io.Writer) {
+	io.WriteString(w, "\x1b[?25h\x1b[?1049l")
 }
 
 // rebuild recomputes matches for the current query. A connection matches

@@ -52,6 +52,7 @@ type windowsSession struct {
 	origIn  uint32
 	origOut uint32
 	handler uintptr
+	ansi    bool
 
 	stopResize chan struct{}
 	stopOnce   sync.Once
@@ -96,6 +97,8 @@ func (s *windowsSession) EnterRaw() error {
 	if err := windows.GetConsoleMode(outH, &s.origOut); err == nil {
 		if err := windows.SetConsoleMode(outH, s.origOut|winOutputVTExtra); err != nil {
 			s.origOut = 0 // output VT processing is best-effort
+		} else {
+			s.ansi = true
 		}
 	}
 
@@ -181,3 +184,7 @@ func (s *windowsSession) ResizeEvents() <-chan struct{} { return s.events }
 func (s *windowsSession) Stdin() io.Reader              { return s.in }
 func (s *windowsSession) Stdout() io.Writer             { return s.out }
 func (s *windowsSession) Stderr() io.Writer             { return os.Stderr }
+
+// SupportsANSI reports whether VT output processing was successfully
+// enabled on the console during EnterRaw.
+func (s *windowsSession) SupportsANSI() bool { return s.ansi }

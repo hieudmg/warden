@@ -132,3 +132,7 @@ func (s *unixSession) ResizeEvents() <-chan struct{} { return s.events }
 func (s *unixSession) Stdin() io.Reader              { return s.in }
 func (s *unixSession) Stdout() io.Writer             { return s.out }
 func (s *unixSession) Stderr() io.Writer             { return os.Stderr }
+
+// SupportsANSI reports true: Unix terminals accept ANSI/VT escape
+// sequences.
+func (s *unixSession) SupportsANSI() bool { return true }

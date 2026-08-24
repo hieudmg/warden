@@ -79,6 +79,10 @@ func (d *StreamDecoder) Feed(b []byte) []DecodedKey {
 	return out
 }
 
+// Pending returns the bytes currently buffered awaiting completion of an
+// escape sequence or multi-byte rune.
+func (d *StreamDecoder) Pending() []byte { return d.pending }
+
 // Flush resolves whatever was buffered at the end of a stream: a lone ESC
 // becomes KeyCancel; other incomplete sequences are dropped. It resets the
 // decoder so a fresh input stream can follow.
