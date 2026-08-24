@@ -18,6 +18,9 @@ vi.mock("@/api/client", () => ({
     updateDB: vi.fn(),
     deleteDB: vi.fn(),
     dbDependents: vi.fn(),
+    listReports: vi.fn(),
+    createProject: vi.fn(),
+    createReport: vi.fn(),
   },
 }))
 
@@ -67,6 +70,16 @@ beforeEach(() => {
   mockedAPI.listSSH.mockReset().mockResolvedValue([sshConnection(1)])
   mockedAPI.listDB.mockReset().mockResolvedValue([dbConnection(1)])
   mockedAPI.listProjects.mockReset().mockResolvedValue([project(1)])
+  mockedAPI.listReports.mockReset().mockResolvedValue([])
+  mockedAPI.createProject.mockReset().mockResolvedValue({ id: 2, name: "project-2" })
+  mockedAPI.createReport.mockReset().mockResolvedValue({
+    id: 1,
+    project: "project-1",
+    title: "report",
+    summary: "summary",
+    agent_model: "gpt-4o",
+    created_at: "2026-08-24T00:00:00Z",
+  })
 })
 
 describe("App", () => {

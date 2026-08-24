@@ -1,12 +1,11 @@
 import { useCallback, useRef, useState } from "react"
 import { api } from "@/api/client"
-import type { Project } from "@/api/types"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
-import { ResourceError } from "@/components/resource-error"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
-import { useListResource, type ListResource } from "@/hooks/use-list-resource"
+import { useListResource } from "@/hooks/use-list-resource"
 import { SSHTab } from "@/features/ssh/ssh-tab"
 import { DBTab } from "@/features/db/db-tab"
+import { ProjectsReportsTab } from "@/features/projects/projects-reports-tab"
 
 export interface NotificationItem {
   id: number
@@ -32,33 +31,6 @@ export function Notifications({ items }: { items: readonly NotificationItem[] })
             <AlertDescription>{item.message}</AlertDescription>
           </Alert>
         ),
-      )}
-    </div>
-  )
-}
-
-interface TabPlaceholderProps<T> {
-  label: string
-  resource: ListResource<T>
-  notify: Notify
-}
-
-function TabPlaceholder<T>({ label, resource, notify: _notify }: TabPlaceholderProps<T>) {
-  return (
-    <div className="p-4">
-      <h2 className="mb-2 text-lg font-semibold">{label}</h2>
-      {resource.loading && <p className="text-sm text-muted-foreground">Loading…</p>}
-      {resource.error && (
-        <ResourceError
-          error={resource.error}
-          onRetry={() => void resource.reload()}
-          label={label.toLowerCase()}
-        />
-      )}
-      {!resource.loading && !resource.error && (
-        <p className="text-sm text-muted-foreground">
-          {resource.data.length} item{resource.data.length === 1 ? "" : "s"}
-        </p>
       )}
     </div>
   )
@@ -100,7 +72,7 @@ export function App() {
           <DBTab resource={db} sshProfiles={ssh.data} notify={notify} />
         </TabsContent>
         <TabsContent value="projects">
-          <TabPlaceholder<Project> label="Projects & reports" resource={projects} notify={notify} />
+          <ProjectsReportsTab resource={projects} notify={notify} />
         </TabsContent>
       </Tabs>
     </div>
