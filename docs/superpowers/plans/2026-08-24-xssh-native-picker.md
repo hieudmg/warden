@@ -347,7 +347,7 @@ Expected: PASS.
 Replace this exact unchecked item with command results after executing Step 3:
 
 ```markdown
-- [ ] Validation results: `go test ./...`; Windows client build; Windows terminal-test compile; `go vet ./...`.
+- [x] Validation results: `go test ./...` PASS; `GOOS=windows GOARCH=amd64 go build -o /tmp/warden.exe ./cmd/warden` PASS; `GOOS=windows GOARCH=amd64 go test -c -o /tmp/terminal.test.exe ./internal/client/terminal` PASS; `go vet ./...` PASS.
 ```
 
 Use this completed form only with actual outputs:

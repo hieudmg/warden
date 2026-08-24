@@ -164,17 +164,25 @@ warden ssh <connection> "<command>"
 # an SSH tunnel; tabular output; no SQL or credentials in logs.
 warden db <connection> "<sql>"
 
-# Interactive shell (PTY). Omit the name for the built-in picker.
-# --accept-new enables interactive host-key confirmation.
-warden xssh [--accept-new] [connection]
-
 # Record an agent change report. Immutable, append-only.
 warden report create <project> --title <title> --summary <summary> --agent-model <name>
 
 # Redacted profile listing.
 warden config list
 warden config get <connection>
+
+# Interactive shell (PTY). Omit the name for the built-in picker.
+# --accept-new enables interactive host-key confirmation.
+warden xssh [--accept-new] [connection]
 ```
+
+When invoked without `<connection>`, `xssh` opens a colorized native
+terminal picker. Type to filter profile names and hostnames; use Up/Down
+to move, Enter to connect, and Esc or Ctrl-C to cancel. The right pane
+shows the selected profile; password, private-key, passphrase, and
+proxy-password values are never shown and instead display whether they
+are configured. Terminals narrower than 80 columns use a stacked layout.
+Use a modern ANSI/VT-capable terminal on Windows.
 
 Exit status mirrors the remote command/query: 0 on success, nonzero on
 failure (remote exit status is propagated for `ssh`).
@@ -201,7 +209,8 @@ $env:WARDEN_CLIENT_API_BASE_URL = "http://<tailnet-host>:8080"
 
 `xssh` uses native Windows console APIs (raw-mode input, resize, Ctrl-C
 translation); no WSL, Cygwin, or native SSH is required. Host keys are
-verified against `%USERPROFILE%\.ssh\known_hosts`.
+verified against `%USERPROFILE%\.ssh\known_hosts`. The picker needs
+ANSI/VT rendering; interactive SSH retains the current console behavior.
 
 ## Build
 
