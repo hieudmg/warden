@@ -7,7 +7,10 @@
 // The session is single-use: after Restore it must not be re-entered.
 package terminal
 
-import "io"
+import (
+	"io"
+	"time"
+)
 
 // Session exposes the terminal primitives required to run an interactive
 // remote shell: raw-mode input, window size, resize notifications, and the
@@ -35,6 +38,16 @@ type Session interface {
 	Stdin() io.Reader
 	Stdout() io.Writer
 	Stderr() io.Writer
+	// SupportsANSI reports whether the terminal can render ANSI/VT escape
+	// sequences. The picker requires them; interactive SSH does not.
+	SupportsANSI() bool
+	// StdinReadyWithin waits up to d for input to be available on stdin
+	// and reports whether at least one byte can be read without blocking.
+	// It uses fd-level readiness polling, so it never leaves a reader
+	// blocked on stdin after returning: callers can bound an
+	// escape-sequence continuation wait without risking a background
+	// goroutine consuming input meant for a later session.
+	StdinReadyWithin(d time.Duration) (bool, error)
 }
 
 // NewSession returns a Session bound to the process standard streams. It

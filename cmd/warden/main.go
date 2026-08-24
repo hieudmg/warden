@@ -1,7 +1,6 @@
 package main
 
 import (
-	"bufio"
 	"context"
 	"errors"
 	"flag"
@@ -9,12 +8,11 @@ import (
 	"io"
 	"net/http"
 	"os"
-	"strconv"
-	"strings"
 	"time"
 
 	"warden/internal/client/api"
 	clientdb "warden/internal/client/db"
+	"warden/internal/client/picker"
 	clientreport "warden/internal/client/report"
 	clientssh "warden/internal/client/ssh"
 	"warden/internal/client/terminal"
@@ -59,7 +57,7 @@ func run(args []string, stdout, stderr io.Writer, lookupEnv func(string) (string
 	case "db":
 		return runDB(rest[1:], *configPath, configPathSet, stdout, stderr, lookupEnv)
 	case "xssh":
-		return runXSSH(rest[1:], *configPath, configPathSet, stdout, stderr, os.Stdin, lookupEnv)
+		return runXSSH(rest[1:], *configPath, configPathSet, stdout, stderr, lookupEnv)
 	case "report":
 		return runReport(rest[1:], *configPath, configPathSet, stdout, stderr, lookupEnv)
 	case "config":
@@ -182,7 +180,7 @@ func runDB(args []string, configPath string, configPathSet bool, stdout, stderr 
 	return 0
 }
 
-func runXSSH(args []string, configPath string, configPathSet bool, stdout, stderr io.Writer, stdin io.Reader, lookupEnv func(string) (string, bool)) int {
+func runXSSH(args []string, configPath string, configPathSet bool, stdout, stderr io.Writer, lookupEnv func(string) (string, bool)) int {
 	fs := flag.NewFlagSet("xssh", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	fs.Usage = func() {}
@@ -233,7 +231,17 @@ func runXSSH(args []string, configPath string, configPathSet bool, stdout, stder
 			return 1
 		}
 	} else {
-		sel, err = pickConnection(stdin, stdout, conns)
+		// The picker owns its terminal session: Select enters raw mode,
+		// renders, and restores the terminal before returning, so no
+		// picker goroutine remains to consume input meant for the SSH
+		// session. A fresh terminal session is created below for the
+		// interactive SSH session.
+		pickerSession, err := terminal.NewSession()
+		if err != nil {
+			fmt.Fprintf(stderr, "xssh: %v\n", err)
+			return 1
+		}
+		sel, err = picker.Select(pickerSession, conns)
 		if err != nil {
 			fmt.Fprintf(stderr, "xssh: %v\n", err)
 			return 1
@@ -261,62 +269,6 @@ func runXSSH(args []string, configPath string, configPathSet bool, stdout, stder
 		return 1
 	}
 	return 0
-}
-
-// pickConnection runs the built-in searchable picker over redacted SSH
-// connections, replacing the fzf dependency. Inputs are a list number, an
-// exact name, or a case-insensitive substring filter; "q"/"quit" aborts.
-// A filter matching exactly one connection selects it directly.
-func pickConnection(stdin io.Reader, stdout io.Writer, conns []model.SSHConnection) (model.SSHConnection, error) {
-	if len(conns) == 0 {
-		return model.SSHConnection{}, errors.New("no ssh connections configured")
-	}
-
-	current := conns
-	scanner := bufio.NewScanner(stdin)
-	for {
-		fmt.Fprintln(stdout, "Select an SSH connection (number, exact name, or filter; q to quit):")
-		for i, c := range current {
-			fmt.Fprintf(stdout, "  %2d  %-24s %s:%d  %s\n", i+1, c.Name, c.Host, c.Port, c.Username)
-		}
-		fmt.Fprint(stdout, "> ")
-		if !scanner.Scan() {
-			if err := scanner.Err(); err != nil {
-				return model.SSHConnection{}, err
-			}
-			return model.SSHConnection{}, errors.New("no selection made")
-		}
-		input := strings.TrimSpace(scanner.Text())
-		if input == "" {
-			continue
-		}
-		if input == "q" || input == "quit" {
-			return model.SSHConnection{}, errors.New("selection aborted")
-		}
-		if n, err := strconv.Atoi(input); err == nil && n >= 1 && n <= len(current) {
-			return current[n-1], nil
-		}
-		for _, c := range current {
-			if c.Name == input {
-				return c, nil
-			}
-		}
-		lower := strings.ToLower(input)
-		var matched []model.SSHConnection
-		for _, c := range current {
-			if strings.Contains(strings.ToLower(c.Name), lower) {
-				matched = append(matched, c)
-			}
-		}
-		switch len(matched) {
-		case 0:
-			fmt.Fprintf(stdout, "no connection matches %q\n", input)
-		case 1:
-			return matched[0], nil
-		default:
-			current = matched
-		}
-	}
 }
 
 func runReport(args []string, configPath string, configPathSet bool, stdout, stderr io.Writer, lookupEnv func(string) (string, bool)) int {

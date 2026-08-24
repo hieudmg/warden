@@ -3,9 +3,145 @@
 package terminal
 
 import (
+	"errors"
 	"os"
+	"reflect"
+	"strings"
 	"testing"
+	"time"
+
+	"golang.org/x/sys/windows"
 )
+
+// TestWindowsSessionReportsANSICapability verifies SupportsANSI reflects
+// whether VT output processing was enabled during EnterRaw.
+func TestWindowsSessionReportsANSICapability(t *testing.T) {
+	s := &windowsSession{ansi: true}
+	if !s.SupportsANSI() {
+		t.Fatal("SupportsANSI() = false, want true")
+	}
+	s.ansi = false
+	if s.SupportsANSI() {
+		t.Fatal("SupportsANSI() = true, want false")
+	}
+}
+
+// TestWindowsStdinReadyWithin verifies the console-input readiness wait
+// reports false within the timeout when no input is pending and true as
+// soon as input is available, using a pipe handle as a waitable stand-in
+// for a console input handle.
+func TestWindowsStdinReadyWithin(t *testing.T) {
+	pr, pw, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer pr.Close()
+	defer pw.Close()
+	s := &windowsSession{in: pr}
+
+	start := time.Now()
+	ok, err := s.StdinReadyWithin(30 * time.Millisecond)
+	if err != nil {
+		t.Fatalf("StdinReadyWithin with no input: %v", err)
+	}
+	if ok {
+		t.Fatal("StdinReadyWithin = true with no input, want false")
+	}
+	if elapsed := time.Since(start); elapsed < 20*time.Millisecond {
+		t.Fatalf("StdinReadyWithin returned after %v, want ~30ms wait", elapsed)
+	}
+
+	if _, err := pw.Write([]byte{'x'}); err != nil {
+		t.Fatalf("write to pipe: %v", err)
+	}
+	ok, err = s.StdinReadyWithin(2 * time.Second)
+	if err != nil {
+		t.Fatalf("StdinReadyWithin with pending input: %v", err)
+	}
+	if !ok {
+		t.Fatal("StdinReadyWithin = false with pending input, want true")
+	}
+}
+
+// TestWindowsEnterRawRollsBackModesOnHandlerFailure verifies that when
+// console-handler registration fails after the output VT mode was already
+// changed, EnterRaw restores the original output mode and clears the ANSI
+// flag instead of leaving the console in VT state.
+func TestWindowsEnterRawRollsBackModesOnHandlerFailure(t *testing.T) {
+	pr, pw, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer pr.Close()
+	defer pw.Close()
+
+	s := &windowsSession{
+		in:         pr,
+		out:        pw,
+		stopResize: make(chan struct{}),
+		events:     make(chan struct{}),
+	}
+
+	origGet := winGetConsoleMode
+	origSet := winSetConsoleMode
+	origHandler := winSetCtrlHandler
+	t.Cleanup(func() {
+		winGetConsoleMode = origGet
+		winSetConsoleMode = origSet
+		winSetCtrlHandler = origHandler
+	})
+
+	inH := windows.Handle(pr.Fd())
+	const (
+		origInput  = uint32(3)
+		origOutput = uint32(7)
+	)
+	var inModeCalls, outModeCalls []uint32
+	winGetConsoleMode = func(h windows.Handle, mode *uint32) error {
+		if h == inH {
+			*mode = origInput
+		} else {
+			*mode = origOutput
+		}
+		return nil
+	}
+	winSetConsoleMode = func(h windows.Handle, mode uint32) error {
+		if h == inH {
+			inModeCalls = append(inModeCalls, mode)
+		} else {
+			outModeCalls = append(outModeCalls, mode)
+		}
+		return nil
+	}
+	winSetCtrlHandler = func(cb uintptr, add bool) (bool, error) {
+		return false, errors.New("handler denied")
+	}
+
+	err = s.EnterRaw()
+	if err == nil || !strings.Contains(err.Error(), "register console ctrl handler") {
+		t.Fatalf("EnterRaw() = %v, want handler registration failure", err)
+	}
+	wantIn := []uint32{winRawInputMode, origInput}
+	if !reflect.DeepEqual(inModeCalls, wantIn) {
+		t.Fatalf("input mode calls = %#v, want %#v", inModeCalls, wantIn)
+	}
+	wantOut := []uint32{origOutput | winOutputVTExtra, origOutput}
+	if !reflect.DeepEqual(outModeCalls, wantOut) {
+		t.Fatalf("output mode calls = %#v, want %#v (VT enabled then rolled back)", outModeCalls, wantOut)
+	}
+	if s.ansi {
+		t.Fatal("ansi = true after failed EnterRaw, want false")
+	}
+	if s.origOut != 0 {
+		t.Fatalf("origOut = %d after rollback, want 0", s.origOut)
+	}
+	if s.raw {
+		t.Fatal("raw = true after failed EnterRaw, want false")
+	}
+	if err := s.Restore(); err != nil {
+		t.Fatalf("Restore after failed EnterRaw: %v", err)
+	}
+}
 
 // TestWindowsEnterRawFailsOnNonConsole verifies raw mode fails cleanly on
 // a redirected (non-console) stdin and that Restore afterwards is a

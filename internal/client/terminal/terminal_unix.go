@@ -10,6 +10,7 @@ import (
 	"os/signal"
 	"sync"
 	"syscall"
+	"time"
 
 	"golang.org/x/sys/unix"
 	"golang.org/x/term"
@@ -132,3 +133,51 @@ func (s *unixSession) ResizeEvents() <-chan struct{} { return s.events }
 func (s *unixSession) Stdin() io.Reader              { return s.in }
 func (s *unixSession) Stdout() io.Writer             { return s.out }
 func (s *unixSession) Stderr() io.Writer             { return os.Stderr }
+
+// SupportsANSI reports true: Unix terminals accept ANSI/VT escape
+// sequences.
+func (s *unixSession) SupportsANSI() bool { return true }
+
+// poll is the fd readiness syscall used by StdinReadyWithin, kept behind
+// a variable so tests can inject EINTR deterministically: the Go runtime
+// installs its signal handlers with SA_RESTART, so runtime-delivered
+// signals restart poll instead of returning EINTR and cannot be relied on
+// to exercise the EINTR retry path.
+var poll = unix.Poll
+
+// StdinReadyWithin waits up to d for stdin input using poll(2). The wait
+// is pure readiness polling, so a timed-out wait leaves no reader blocked
+// on the pty and cannot consume bytes meant for a later session. EINTR
+// (e.g. from SIGWINCH) is retried rather than treated as "no input", but
+// each retry polls for only the remaining budget, so repeated
+// interruptions can never extend the wait past d.
+func (s *unixSession) StdinReadyWithin(d time.Duration) (bool, error) {
+	fds := []unix.PollFd{{Fd: int32(s.in.Fd()), Events: unix.POLLIN}}
+	ms := int(d / time.Millisecond)
+	if d > 0 && ms == 0 {
+		ms = 1
+	}
+	deadline := time.Now().Add(d)
+	for {
+		n, err := poll(fds, ms)
+		if err == unix.EINTR {
+			// The interruption consumed part of the budget: retry with
+			// only the remaining time instead of a fresh full timeout, so
+			// a burst of signals cannot stretch the bounded wait (the
+			// picker's ESC grace) indefinitely.
+			remaining := time.Until(deadline)
+			if remaining <= 0 {
+				return false, nil
+			}
+			ms = int(remaining / time.Millisecond)
+			if ms == 0 {
+				ms = 1
+			}
+			continue
+		}
+		if err != nil {
+			return false, err
+		}
+		return n > 0, nil
+	}
+}

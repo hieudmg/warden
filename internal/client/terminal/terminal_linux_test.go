@@ -160,7 +160,86 @@ func TestRawModeDeliversCtrlCAsByte(t *testing.T) {
 	}
 }
 
-// TestResizeEventsPropagate verifies a SIGWINCH while raw is active is
+// TestUnixStdinReadyWithin verifies the timed stdin readiness wait
+// reports false after the grace window with no input and true as soon as
+// a byte arrives, without ever blocking past the window or leaving a
+// reader goroutine behind on the pty. It runs in raw mode, matching the
+// picker's use: canonical mode would hold a partial line unreadable.
+func TestUnixStdinReadyWithin(t *testing.T) {
+	master, slave := newPtyPair(t)
+	s := &unixSession{in: slave}
+	if err := s.EnterRaw(); err != nil {
+		t.Fatalf("EnterRaw: %v", err)
+	}
+	defer s.Restore()
+
+	start := time.Now()
+	ok, err := s.StdinReadyWithin(30 * time.Millisecond)
+	if err != nil {
+		t.Fatalf("StdinReadyWithin with no input: %v", err)
+	}
+	if ok {
+		t.Fatal("StdinReadyWithin = true with no input, want false")
+	}
+	if elapsed := time.Since(start); elapsed < 20*time.Millisecond {
+		t.Fatalf("StdinReadyWithin returned after %v, want ~30ms wait", elapsed)
+	}
+
+	if _, err := master.Write([]byte{'x'}); err != nil {
+		t.Fatalf("write to master: %v", err)
+	}
+	ok, err = s.StdinReadyWithin(2 * time.Second)
+	if err != nil {
+		t.Fatalf("StdinReadyWithin with pending input: %v", err)
+	}
+	if !ok {
+		t.Fatal("StdinReadyWithin = false with pending input, want true")
+	}
+}
+
+// TestUnixStdinReadyWithinBoundedUnderEINTR proves an EINTR burst cannot
+// stretch the readiness wait: every retry must poll for only the
+// remaining time, not restart the full timeout, so the picker's bounded
+// ESC grace stays bounded under repeated interruptions. The poll seam is
+// injected to force EINTR deterministically: the Go runtime installs its
+// signal handlers with SA_RESTART, so runtime-delivered signals restart
+// poll instead of returning EINTR and cannot be relied on to exercise the
+// retry path. The injected poll reports EINTR until well past the grace,
+// then reports no input; a timeout-restarting implementation keeps
+// polling until the injection stops and exceeds the grace.
+func TestUnixStdinReadyWithinBoundedUnderEINTR(t *testing.T) {
+	orig := poll
+	defer func() { poll = orig }()
+
+	_, slave := newPtyPair(t)
+	s := &unixSession{in: slave}
+
+	const grace = 30 * time.Millisecond
+	const storm = 150 * time.Millisecond
+	const bound = storm - 10*time.Millisecond // margin for clock anchoring
+	stormEnd := time.Now().Add(storm)
+	poll = func(_ []unix.PollFd, _ int) (int, error) {
+		if time.Now().After(stormEnd) {
+			return 0, nil // storm over: report no input
+		}
+		return 0, unix.EINTR
+	}
+
+	begin := time.Now()
+	ok, err := s.StdinReadyWithin(grace)
+	elapsed := time.Since(begin)
+	if err != nil {
+		t.Fatalf("StdinReadyWithin under EINTR burst: %v", err)
+	}
+	if ok {
+		t.Fatal("StdinReadyWithin = true with no input, want false")
+	}
+	if elapsed >= bound {
+		t.Fatalf("StdinReadyWithin ran %v under a %s EINTR burst, want the %v grace bounded", elapsed, storm, grace)
+	}
+}
+
+// TestResizeEventsPropagate verifies SIGWINCH while raw is active is
 // delivered on the ResizeEvents channel.
 func TestResizeEventsPropagate(t *testing.T) {
 	_, slave := newPtyPair(t)
