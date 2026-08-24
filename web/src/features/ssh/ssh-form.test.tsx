@@ -27,10 +27,10 @@ function connection(overrides: Partial<SSHConnection> = {}): SSHConnection {
 }
 
 describe("emptySSHForm", () => {
-  test("defaults ports to 22 and 0 with an empty route and blank secrets", () => {
+  test("defaults ports to 22 and 1080 with an empty route and blank secrets", () => {
     const form = emptySSHForm()
     expect(form.port).toBe("22")
-    expect(form.proxyPort).toBe("0")
+    expect(form.proxyPort).toBe("1080")
     expect(form.jumpIDs).toEqual([])
     expect(form.password).toBe("")
     expect(form.privateKey).toBe("")
@@ -107,7 +107,7 @@ describe("toSSHRequest", () => {
       privateKey: "-----BEGIN OPENSSH PRIVATE KEY-----\nsecret\n-----END OPENSSH PRIVATE KEY-----",
       privateKeyPassphrase: "key-pass",
       proxyHost: "",
-      proxyPort: "0",
+      proxyPort: "1080",
       proxyUsername: "",
       proxyPassword: "proxy-pass",
       jumpIDs: [],

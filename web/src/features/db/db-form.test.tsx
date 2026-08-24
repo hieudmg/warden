@@ -43,9 +43,9 @@ function ssh(id: number, name: string): SSHConnection {
 }
 
 describe("emptyDBForm", () => {
-  test("defaults to Direct with a blank password and port 0", () => {
+  test("defaults to Direct with a blank password and port 3306", () => {
     const form = emptyDBForm()
-    expect(form.port).toBe("0")
+    expect(form.port).toBe("3306")
     expect(form.sshConnectionID).toBe("0")
     expect(form.password).toBe("")
     expect(form.name).toBe("")
@@ -84,7 +84,7 @@ describe("toDBRequest", () => {
     expect(toDBRequest(form)).toEqual({
       name: "db-1",
       host: "127.0.0.1",
-      port: 0,
+      port: 3306,
       username: "app",
       password: null,
       database: "warden",

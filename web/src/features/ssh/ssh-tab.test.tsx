@@ -142,7 +142,7 @@ describe("SSHTab", () => {
       private_key: null,
       private_key_passphrase: null,
       proxy_host: "",
-      proxy_port: 0,
+      proxy_port: 1080,
       proxy_username: "",
       proxy_password: null,
       jump_connection_ids: "[]",

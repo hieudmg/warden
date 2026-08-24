@@ -151,7 +151,7 @@ describe("DBTab", () => {
     expect(mockedAPI.createDB).toHaveBeenCalledWith({
       name: "db-1",
       host: "127.0.0.1",
-      port: 0,
+      port: 3306,
       username: "app",
       password: null,
       database: "warden",

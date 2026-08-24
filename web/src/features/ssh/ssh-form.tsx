@@ -37,7 +37,7 @@ export function emptySSHForm(): SSHFormState {
     privateKey: "",
     privateKeyPassphrase: "",
     proxyHost: "",
-    proxyPort: "0",
+    proxyPort: "1080",
     proxyUsername: "",
     proxyPassword: "",
     jumpIDs: [],

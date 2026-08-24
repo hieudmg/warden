@@ -30,7 +30,7 @@ export function emptyDBForm(): DBFormState {
   return {
     name: "",
     host: "",
-    port: "0",
+    port: "3306",
     username: "",
     password: "",
     database: "",
