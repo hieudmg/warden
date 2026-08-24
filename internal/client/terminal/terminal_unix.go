@@ -91,7 +91,9 @@ func (s *unixSession) Restore() error {
 
 // startResize forwards SIGWINCH notifications to the ResizeEvents
 // channel. The send is non-blocking so a slow consumer never stalls the
-// signal loop; Restore stops the goroutine via stopResize.
+// signal loop; Restore stops the goroutine via stopResize. The send is
+// also guarded against sending on a closed channel by checking s.done
+// under s.mu, which Restore holds while closing events.
 func (s *unixSession) startResize() {
 	ch := make(chan os.Signal, 1)
 	signal.Notify(ch, syscall.SIGWINCH)
@@ -100,6 +102,12 @@ func (s *unixSession) startResize() {
 		for {
 			select {
 			case <-ch:
+				s.mu.Lock()
+				done := s.done
+				s.mu.Unlock()
+				if done {
+					return
+				}
 				select {
 				case s.events <- struct{}{}:
 				default:
