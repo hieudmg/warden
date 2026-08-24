@@ -1,0 +1,292 @@
+import { render, screen, waitFor, within } from "@testing-library/react"
+import userEvent from "@testing-library/user-event"
+import { beforeEach, describe, expect, test, vi } from "vitest"
+import { api, ApiError } from "@/api/client"
+import type { DBConnection, SSHConnection } from "@/api/types"
+import type { ListResource } from "@/hooks/use-list-resource"
+import { DBTab } from "./db-tab"
+
+vi.mock("@/api/client", () => {
+  class MockApiError extends Error {
+    code: string
+    status: number
+    constructor(code: string, message: string, status: number) {
+      super(message)
+      this.name = "ApiError"
+      this.code = code
+      this.status = status
+    }
+  }
+  return {
+    api: {
+      createDB: vi.fn(),
+      updateDB: vi.fn(),
+      deleteDB: vi.fn(),
+      dbDependents: vi.fn(),
+    },
+    ApiError: MockApiError,
+  }
+})
+
+const mockedAPI = vi.mocked(api)
+
+function db(id: number, name: string, overrides: Partial<DBConnection> = {}): DBConnection {
+  return {
+    id,
+    name,
+    host: "127.0.0.1",
+    port: 3306,
+    username: "app",
+    has_password: false,
+    database: "warden",
+    ssh_connection_id: 0,
+    created_at: "2026-08-24T00:00:00Z",
+    updated_at: "2026-08-24T00:00:00Z",
+    ...overrides,
+  }
+}
+
+function ssh(id: number, name: string): SSHConnection {
+  return {
+    id,
+    name,
+    host: "10.0.0.1",
+    port: 22,
+    username: "root",
+    has_password: false,
+    has_private_key: false,
+    has_private_key_passphrase: false,
+    proxy_host: "",
+    proxy_port: 0,
+    proxy_username: "",
+    has_proxy_password: false,
+    jump_connection_ids: "[]",
+    default_dir: "",
+    created_at: "2026-08-24T00:00:00Z",
+    updated_at: "2026-08-24T00:00:00Z",
+  }
+}
+
+function resource(overrides: Partial<ListResource<DBConnection>> = {}): ListResource<DBConnection> {
+  return {
+    data: [],
+    loading: false,
+    error: null,
+    reload: vi.fn().mockResolvedValue(undefined),
+    ...overrides,
+  }
+}
+
+const notify = vi.fn()
+
+beforeEach(() => {
+  mockedAPI.createDB.mockReset()
+  mockedAPI.updateDB.mockReset()
+  mockedAPI.deleteDB.mockReset()
+  mockedAPI.dbDependents.mockReset()
+  notify.mockReset()
+})
+
+describe("DBTab", () => {
+  test("shows a loading state while the resource loads", () => {
+    render(<DBTab resource={resource({ loading: true })} sshProfiles={[]} notify={notify} />)
+    expect(screen.getByText("Loading…")).toBeInTheDocument()
+  })
+
+  test("shows an empty state when no connections exist", () => {
+    render(<DBTab resource={resource({ data: [] })} sshProfiles={[]} notify={notify} />)
+    expect(screen.getByText("No database connections yet.")).toBeInTheDocument()
+  })
+
+  test("shows a load error with a Retry action", async () => {
+    const user = userEvent.setup()
+    const reload = vi.fn().mockResolvedValue(undefined)
+    render(
+      <DBTab
+        resource={resource({ error: new Error("boom"), reload })}
+        sshProfiles={[]}
+        notify={notify}
+      />,
+    )
+
+    expect(screen.getByRole("alert")).toHaveTextContent("Unable to load database connections")
+    await user.click(screen.getByRole("button", { name: "Retry" }))
+    expect(reload).toHaveBeenCalledTimes(1)
+  })
+
+  test("renders row columns with Direct, named, and missing SSH values", () => {
+    const profiles = [ssh(2, "jump-a")]
+    const connections = [
+      db(1, "db-1", { host: "127.0.0.1", has_password: true, username: "app", database: "warden" }),
+      db(2, "db-2", { host: "127.0.0.2", username: "reader", database: "analytics", ssh_connection_id: 2 }),
+      db(3, "db-3", { host: "127.0.0.3", username: "admin", database: "logs", ssh_connection_id: 91 }),
+    ]
+    render(<DBTab resource={resource({ data: connections })} sshProfiles={profiles} notify={notify} />)
+
+    expect(screen.getByText("db-1")).toBeInTheDocument()
+    expect(screen.getByText("127.0.0.1:3306")).toBeInTheDocument()
+    expect(screen.getByText("app")).toBeInTheDocument()
+    expect(screen.getByText("Password")).toBeInTheDocument()
+    expect(screen.getByText("warden")).toBeInTheDocument()
+    expect(screen.getByText("Direct")).toBeInTheDocument()
+    expect(screen.getByText("jump-a")).toBeInTheDocument()
+    expect(screen.getByText("Missing SSH #91")).toBeInTheDocument()
+  })
+
+  test("creates a connection through the dialog with a converted payload", async () => {
+    const user = userEvent.setup()
+    const reload = vi.fn().mockResolvedValue(undefined)
+    mockedAPI.createDB.mockResolvedValue(db(1, "db-1"))
+    render(<DBTab resource={resource({ data: [], reload })} sshProfiles={[]} notify={notify} />)
+
+    await user.click(screen.getByRole("button", { name: "New database" }))
+    const dialog = await screen.findByRole("dialog")
+    await user.type(within(dialog).getByLabelText("Name"), "db-1")
+    await user.type(within(dialog).getByLabelText("Host"), "127.0.0.1")
+    await user.type(within(dialog).getByLabelText("Username"), "app")
+    await user.type(within(dialog).getByLabelText("Database"), "warden")
+    await user.click(within(dialog).getByRole("button", { name: "Save" }))
+
+    await waitFor(() => expect(mockedAPI.createDB).toHaveBeenCalledTimes(1))
+    expect(mockedAPI.createDB).toHaveBeenCalledWith({
+      name: "db-1",
+      host: "127.0.0.1",
+      port: 0,
+      username: "app",
+      password: null,
+      database: "warden",
+      ssh_connection_id: 0,
+    })
+    expect(reload).toHaveBeenCalledTimes(1)
+    expect(notify).toHaveBeenCalledWith('Created database connection "db-1".', "success")
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument())
+  })
+
+  test("edits a connection with a blank password serialized as null", async () => {
+    const user = userEvent.setup()
+    const reload = vi.fn().mockResolvedValue(undefined)
+    mockedAPI.updateDB.mockResolvedValue(db(1, "renamed"))
+    render(<DBTab resource={resource({ data: [db(1, "db-1")], reload })} sshProfiles={[]} notify={notify} />)
+
+    await user.click(screen.getByRole("button", { name: "Edit db-1" }))
+    const dialog = await screen.findByRole("dialog")
+    const nameInput = within(dialog).getByLabelText("Name")
+    expect(nameInput).toHaveValue("db-1")
+    await user.clear(nameInput)
+    await user.type(nameInput, "renamed")
+    await user.click(within(dialog).getByRole("button", { name: "Save" }))
+
+    await waitFor(() => expect(mockedAPI.updateDB).toHaveBeenCalledTimes(1))
+    expect(mockedAPI.updateDB).toHaveBeenCalledWith(
+      1,
+      expect.objectContaining({
+        name: "renamed",
+        password: null,
+        ssh_connection_id: 0,
+      }),
+    )
+    expect(reload).toHaveBeenCalledTimes(1)
+    expect(notify).toHaveBeenCalledWith('Updated database connection "renamed".', "success")
+  })
+
+  test("keeps the dialog open with entered values after a rejected submit", async () => {
+    const user = userEvent.setup()
+    mockedAPI.createDB.mockRejectedValue(
+      new ApiError("conflict", "a connection with that name already exists", 409),
+    )
+    render(<DBTab resource={resource({ data: [] })} sshProfiles={[]} notify={notify} />)
+
+    await user.click(screen.getByRole("button", { name: "New database" }))
+    const dialog = await screen.findByRole("dialog")
+    await user.type(within(dialog).getByLabelText("Name"), "dup")
+    await user.type(within(dialog).getByLabelText("Host"), "127.0.0.9")
+    await user.type(within(dialog).getByLabelText("Username"), "app")
+    await user.type(within(dialog).getByLabelText("Database"), "warden")
+    await user.click(within(dialog).getByRole("button", { name: "Save" }))
+
+    const alert = await within(dialog).findByRole("alert")
+    expect(alert).toHaveTextContent("a connection with that name already exists")
+    expect(within(dialog).getByLabelText("Name")).toHaveValue("dup")
+    expect(within(dialog).getByLabelText("Host")).toHaveValue("127.0.0.9")
+    expect(screen.getByRole("dialog")).toBeInTheDocument()
+  })
+
+  test("blocks duplicate submit while a request is pending", async () => {
+    const user = userEvent.setup()
+    mockedAPI.createDB.mockReturnValue(new Promise(() => {}))
+    render(<DBTab resource={resource({ data: [] })} sshProfiles={[]} notify={notify} />)
+
+    await user.click(screen.getByRole("button", { name: "New database" }))
+    const dialog = await screen.findByRole("dialog")
+    await user.type(within(dialog).getByLabelText("Name"), "slow")
+    await user.type(within(dialog).getByLabelText("Host"), "127.0.0.1")
+    await user.type(within(dialog).getByLabelText("Username"), "app")
+    await user.type(within(dialog).getByLabelText("Database"), "warden")
+    await user.click(within(dialog).getByRole("button", { name: "Save" }))
+
+    expect(mockedAPI.createDB).toHaveBeenCalledTimes(1)
+    const saving = within(dialog).getByRole("button", { name: "Saving" })
+    expect(saving).toBeDisabled()
+    await user.click(saving)
+    expect(mockedAPI.createDB).toHaveBeenCalledTimes(1)
+  })
+
+  test("looks up dependents before opening the delete confirmation", async () => {
+    const user = userEvent.setup()
+    mockedAPI.dbDependents.mockResolvedValue({
+      ssh: [{ id: 2, name: "jump-a" }],
+      db: [{ id: 3, name: "db-2" }],
+    })
+    render(<DBTab resource={resource({ data: [db(1, "db-1")] })} sshProfiles={[]} notify={notify} />)
+
+    await user.click(screen.getByRole("button", { name: "Delete db-1" }))
+    const dialog = await screen.findByRole("dialog")
+    expect(mockedAPI.dbDependents).toHaveBeenCalledWith(1)
+    expect(await within(dialog).findByText(/jump-a/)).toBeInTheDocument()
+    expect(within(dialog).getByText(/db-2/)).toBeInTheDocument()
+    expect(within(dialog).getByText(/will become invalid/)).toBeInTheDocument()
+  })
+
+  test("deletes after confirmation, refreshes, and notifies", async () => {
+    const user = userEvent.setup()
+    const reload = vi.fn().mockResolvedValue(undefined)
+    mockedAPI.dbDependents.mockResolvedValue({ ssh: [], db: [] })
+    mockedAPI.deleteDB.mockResolvedValue(undefined)
+    render(<DBTab resource={resource({ data: [db(1, "db-1")], reload })} sshProfiles={[]} notify={notify} />)
+
+    await user.click(screen.getByRole("button", { name: "Delete db-1" }))
+    const dialog = await screen.findByRole("dialog")
+    expect(await within(dialog).findByText("No other connections reference it.")).toBeInTheDocument()
+    await user.click(within(dialog).getByRole("button", { name: "Delete" }))
+
+    await waitFor(() => expect(mockedAPI.deleteDB).toHaveBeenCalledWith(1))
+    expect(reload).toHaveBeenCalledTimes(1)
+    expect(notify).toHaveBeenCalledWith('Deleted database connection "db-1".', "success")
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument())
+  })
+
+  test("withholds Delete when the dependents lookup fails", async () => {
+    const user = userEvent.setup()
+    mockedAPI.dbDependents.mockRejectedValue(new Error("dependents unavailable"))
+    render(<DBTab resource={resource({ data: [db(1, "db-1")] })} sshProfiles={[]} notify={notify} />)
+
+    await user.click(screen.getByRole("button", { name: "Delete db-1" }))
+    const dialog = await screen.findByRole("dialog")
+    expect(mockedAPI.dbDependents).toHaveBeenCalledWith(1)
+    expect(await within(dialog).findByText("Unable to check for dependents.")).toBeInTheDocument()
+    expect(within(dialog).queryByRole("button", { name: "Delete" })).not.toBeInTheDocument()
+    expect(within(dialog).getByRole("button", { name: "Cancel" })).toBeInTheDocument()
+  })
+
+  test("never renders secret values, only presence badges", () => {
+    render(
+      <DBTab
+        resource={resource({ data: [db(1, "db-1", { has_password: true })] })}
+        sshProfiles={[]}
+        notify={notify}
+      />,
+    )
+    expect(screen.getByText("Password")).toBeInTheDocument()
+    expect(screen.queryByText("hunter2")).not.toBeInTheDocument()
+  })
+})

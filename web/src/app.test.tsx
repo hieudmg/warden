@@ -14,6 +14,10 @@ vi.mock("@/api/client", () => ({
     updateSSH: vi.fn(),
     deleteSSH: vi.fn(),
     sshDependents: vi.fn(),
+    createDB: vi.fn(),
+    updateDB: vi.fn(),
+    deleteDB: vi.fn(),
+    dbDependents: vi.fn(),
   },
 }))
 

@@ -1,11 +1,12 @@
 import { useCallback, useRef, useState } from "react"
 import { api } from "@/api/client"
-import type { DBConnection, Project } from "@/api/types"
+import type { Project } from "@/api/types"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { ResourceError } from "@/components/resource-error"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { useListResource, type ListResource } from "@/hooks/use-list-resource"
 import { SSHTab } from "@/features/ssh/ssh-tab"
+import { DBTab } from "@/features/db/db-tab"
 
 export interface NotificationItem {
   id: number
@@ -96,7 +97,7 @@ export function App() {
           <SSHTab resource={ssh} notify={notify} />
         </TabsContent>
         <TabsContent value="db">
-          <TabPlaceholder<DBConnection> label="Databases" resource={db} notify={notify} />
+          <DBTab resource={db} sshProfiles={ssh.data} notify={notify} />
         </TabsContent>
         <TabsContent value="projects">
           <TabPlaceholder<Project> label="Projects & reports" resource={projects} notify={notify} />
