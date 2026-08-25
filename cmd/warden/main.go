@@ -8,7 +8,9 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"strings"
 	"time"
+	"unicode"
 
 	"warden/internal/client/api"
 	clientdb "warden/internal/client/db"
@@ -349,29 +351,17 @@ func runConfig(args []string, configPath string, configPathSet bool, stdout, std
 		printConfigUsage(stdout)
 		return 0
 	}
-
-	switch args[0] {
-	case "list":
-		if len(args) == 2 && isFlagHelp(args[1]) {
-			printConfigListUsage(stdout)
-			return 0
-		}
-		if len(args) != 1 {
-			fmt.Fprintln(stderr, "usage: warden config list")
-			return 2
-		}
-	case "get":
-		if len(args) == 2 && isFlagHelp(args[1]) {
-			printConfigGetUsage(stdout)
-			return 0
-		}
-		if len(args) != 2 {
-			fmt.Fprintln(stderr, "usage: warden config get <connection>")
-			return 2
-		}
-	default:
+	if args[0] != "search" {
 		fmt.Fprintf(stderr, "unknown config command %q\n\n", args[0])
 		printConfigUsage(stderr)
+		return 2
+	}
+	if len(args) == 2 && isFlagHelp(args[1]) {
+		printConfigSearchUsage(stdout)
+		return 0
+	}
+	if len(args) != 2 || strings.TrimSpace(args[1]) == "" {
+		fmt.Fprintln(stderr, "usage: warden config search <query>")
 		return 2
 	}
 
@@ -381,8 +371,105 @@ func runConfig(args []string, configPath string, configPathSet bool, stdout, std
 		return 1
 	}
 
-	fmt.Fprintf(stdout, "client bootstrap ready for config via %s\n", cfg.APIBaseURL)
+	cl := api.New(cfg.APIBaseURL, &http.Client{Timeout: cfg.Timeout})
+	ctx := context.Background()
+	sshConns, err := cl.ListSSH(ctx)
+	if err != nil {
+		fmt.Fprintf(stderr, "config search: %v\n", err)
+		return 1
+	}
+	dbConns, err := cl.ListDB(ctx)
+	if err != nil {
+		fmt.Fprintf(stderr, "config search: %v\n", err)
+		return 1
+	}
+
+	writeConfigSearchResults(stdout, args[1], sshConns, dbConns)
 	return 0
+}
+
+func writeConfigSearchResults(w io.Writer, query string, sshConns []model.SSHConnection, dbConns []model.DBConnection) {
+	query = strings.ToLower(strings.TrimSpace(query))
+	sshNames := make(map[int64]string, len(sshConns))
+	var matchedSSH []model.SSHConnection
+	for _, conn := range sshConns {
+		sshNames[conn.ID] = conn.Name
+		if matchesConfigSearch(query, conn.Name, conn.Host) {
+			matchedSSH = append(matchedSSH, conn)
+		}
+	}
+
+	var matchedDB []model.DBConnection
+	for _, conn := range dbConns {
+		if matchesConfigSearch(query, conn.Name, conn.Host) {
+			matchedDB = append(matchedDB, conn)
+		}
+	}
+	if len(matchedSSH) == 0 && len(matchedDB) == 0 {
+		fmt.Fprintln(w, "No matching connections.")
+		return
+	}
+
+	var lines []string
+	if len(matchedSSH) > 0 {
+		lines = append(lines, "SSH")
+		for i, conn := range matchedSSH {
+			entry := sanitizeConfigSearchField(conn.Name) + " — " + sanitizeConfigSearchField(conn.Host)
+			lines = append(lines, treeEntry(i, len(matchedSSH), entry))
+		}
+	}
+	if len(matchedDB) > 0 {
+		if len(lines) > 0 {
+			lines = append(lines, "")
+		}
+		lines = append(lines, "DB")
+		for i, conn := range matchedDB {
+			entry := sanitizeConfigSearchField(conn.Name) + " — " + sanitizeConfigSearchField(conn.Host)
+			if conn.SSHConnectionID != 0 {
+				sshName, ok := sshNames[conn.SSHConnectionID]
+				if !ok {
+					sshName = fmt.Sprintf("unavailable (id: %d)", conn.SSHConnectionID)
+				}
+				entry += " — SSH: " + sanitizeConfigSearchField(sshName)
+			}
+			lines = append(lines, treeEntry(i, len(matchedDB), entry))
+		}
+	}
+	fmt.Fprintln(w, strings.Join(lines, "\n"))
+}
+
+func matchesConfigSearch(query, name, host string) bool {
+	return strings.Contains(strings.ToLower(name), query) || strings.Contains(strings.ToLower(host), query)
+}
+
+func treeEntry(index, total int, value string) string {
+	if index == total-1 {
+		return "└── " + value
+	}
+	return "├── " + value
+}
+
+func sanitizeConfigSearchField(value string) string {
+	var b strings.Builder
+	for _, r := range value {
+		switch r {
+		case '\x1b':
+			b.WriteString(`\x1b`)
+		case '\r':
+			b.WriteString(`\r`)
+		case '\n':
+			b.WriteString(`\n`)
+		case '\t':
+			b.WriteString(`\t`)
+		default:
+			if unicode.IsControl(r) {
+				fmt.Fprintf(&b, `\u%04x`, r)
+			} else {
+				b.WriteRune(r)
+			}
+		}
+	}
+	return b.String()
 }
 
 func loadClient(configPath string, configPathSet bool, lookupEnv func(string) (string, bool)) (config.Client, error) {
@@ -399,8 +486,7 @@ func printUsage(w io.Writer) {
   warden [--config path] db <connection> <sql>
   warden [--config path] xssh [connection]
   warden [--config path] report create <project> --title <title> --summary <summary> --agent-model <name>
-  warden [--config path] config list
-  warden [--config path] config get <connection>
+  warden [--config path] config search <query>
   warden --help
 
 Environment overrides:
@@ -445,20 +531,13 @@ func printReportCreateUsage(w io.Writer) {
 
 func printConfigUsage(w io.Writer) {
 	fmt.Fprint(w, `Usage:
-  warden config list
-  warden config get <connection>
+  warden config search <query>
 `)
 }
 
-func printConfigListUsage(w io.Writer) {
+func printConfigSearchUsage(w io.Writer) {
 	fmt.Fprint(w, `Usage:
-  warden config list
-`)
-}
-
-func printConfigGetUsage(w io.Writer) {
-	fmt.Fprint(w, `Usage:
-  warden config get <connection>
+  warden config search <query>
 `)
 }
 
