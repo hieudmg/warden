@@ -128,6 +128,14 @@ func (h *Handler) createSSH(w http.ResponseWriter, r *http.Request) {
 		writeStoreError(w, err)
 		return
 	}
+	// Re-read with the group join so the create response carries the
+	// group_name the client needs to render the row immediately.
+	created, err = h.store.GetSSH(r.Context(), created.ID)
+	if err != nil {
+		h.record(r, "ssh_connection.create", "ssh_connection", strconv.FormatInt(created.ID, 10), "failure", err, nil)
+		writeStoreError(w, err)
+		return
+	}
 	h.record(r, "ssh_connection.create", "ssh_connection", strconv.FormatInt(created.ID, 10), "success", nil, nil)
 	server.WriteJSON(w, http.StatusCreated, redactSSH(created))
 }
@@ -269,6 +277,13 @@ func (h *Handler) createDB(w http.ResponseWriter, r *http.Request) {
 	created, err := h.store.CreateDB(r.Context(), p)
 	if err != nil {
 		h.record(r, "db_connection.create", "db_connection", "", "failure", err, nil)
+		writeStoreError(w, err)
+		return
+	}
+	// Fetch again with the JOIN so the response includes the group name.
+	created, err = h.store.GetDB(r.Context(), created.ID)
+	if err != nil {
+		h.record(r, "db_connection.create", "db_connection", strconv.FormatInt(created.ID, 10), "failure", err, nil)
 		writeStoreError(w, err)
 		return
 	}

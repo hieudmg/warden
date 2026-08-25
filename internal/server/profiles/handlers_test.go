@@ -477,6 +477,9 @@ func TestCreateSSHWithGroupID(t *testing.T) {
 	if created.GroupID != g.ID {
 		t.Errorf("create response group_id = %d, want %d", created.GroupID, g.ID)
 	}
+	if created.GroupName != "prod" {
+		t.Errorf("create response group_name = %q, want prod", created.GroupName)
+	}
 
 	// GET returns the joined group name.
 	rec = doRequest(t, mux, "GET", fmt.Sprintf("/api/v1/ssh-connections/%d", created.ID), "")
@@ -515,6 +518,9 @@ func TestCreateDBWithGroupID(t *testing.T) {
 	}
 	if created.GroupID != g.ID {
 		t.Errorf("create response group_id = %d, want %d", created.GroupID, g.ID)
+	}
+	if created.GroupName != "prod" {
+		t.Errorf("create response group_name = %q, want prod", created.GroupName)
 	}
 
 	got, err := s.GetDB(ctx, created.ID)
