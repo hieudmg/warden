@@ -250,6 +250,7 @@ export function SSHTab({ resource, notify }: SSHTabProps) {
               key={formDialog.mode === "edit" ? formDialog.connection.id : "new"}
               connection={formDialog.mode === "edit" ? formDialog.connection : null}
               profiles={resource.data}
+              groups={[]}
               pending={pending}
               error={formError}
               onSubmit={request => void handleSubmit(request)}

@@ -236,6 +236,7 @@ export function DBTab({ resource, sshProfiles, notify }: DBTabProps) {
               key={formDialog.mode === "edit" ? formDialog.connection.id : "new"}
               connection={formDialog.mode === "edit" ? formDialog.connection : null}
               sshProfiles={sshProfiles}
+              groups={[]}
               pending={pending}
               error={formError}
               onSubmit={request => void handleSubmit(request)}

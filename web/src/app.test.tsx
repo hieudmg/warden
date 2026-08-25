@@ -43,6 +43,7 @@ function sshConnection(id: number): SSHConnection {
     has_proxy_password: false,
     jump_connection_ids: "[]",
     default_dir: "",
+    group_id: 0,
     created_at: "2026-08-24T00:00:00Z",
     updated_at: "2026-08-24T00:00:00Z",
   }
@@ -58,6 +59,7 @@ function dbConnection(id: number): DBConnection {
     has_password: true,
     database: "warden",
     ssh_connection_id: 0,
+    group_id: 0,
     created_at: "2026-08-24T00:00:00Z",
     updated_at: "2026-08-24T00:00:00Z",
   }

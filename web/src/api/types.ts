@@ -17,6 +17,8 @@ export interface SSHConnection {
   has_proxy_password: boolean
   jump_connection_ids: string
   default_dir: string
+  group_id: number
+  group_name?: string
   created_at: string
   updated_at: string
 }
@@ -30,12 +32,27 @@ export interface DBConnection {
   has_password: boolean
   database: string
   ssh_connection_id: number
+  group_id: number
+  group_name?: string
   created_at: string
   updated_at: string
 }
 
 export interface Project {
   id: number
+  name: string
+}
+
+export interface Group {
+  id: number
+  name: string
+  ssh_connection_count: number
+  db_connection_count: number
+  created_at: string
+  updated_at: string
+}
+
+export interface GroupRequest {
   name: string
 }
 
@@ -75,6 +92,7 @@ export interface SSHConnectionRequest {
   proxy_password: string | null
   jump_connection_ids: string
   default_dir: string
+  group_id: number
 }
 
 export interface DBConnectionRequest {
@@ -85,6 +103,7 @@ export interface DBConnectionRequest {
   password: string | null
   database: string
   ssh_connection_id: number
+  group_id: number
 }
 
 export interface ProjectRequest {

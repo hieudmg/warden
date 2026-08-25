@@ -46,6 +46,7 @@ function ssh(id: number, name: string, overrides: Partial<SSHConnection> = {}): 
     has_proxy_password: false,
     jump_connection_ids: "[]",
     default_dir: "",
+    group_id: 0,
     created_at: "2026-08-24T00:00:00Z",
     updated_at: "2026-08-24T00:00:00Z",
     ...overrides,
@@ -147,6 +148,7 @@ describe("SSHTab", () => {
       proxy_password: null,
       jump_connection_ids: "[]",
       default_dir: "",
+      group_id: 0,
     })
     expect(reload).toHaveBeenCalledTimes(1)
     expect(notify).toHaveBeenCalledWith('Created SSH connection "bastion".', "success")

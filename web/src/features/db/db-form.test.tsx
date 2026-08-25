@@ -1,9 +1,20 @@
 import { render, screen, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { describe, expect, test, vi } from "vitest"
-import type { DBConnection, SSHConnection } from "@/api/types"
+import type { DBConnection, Group, SSHConnection } from "@/api/types"
 import { dbFormFromConnection, emptyDBForm, toDBRequest, type DBFormState } from "./db-form"
 import { DBForm } from "./db-form"
+
+function group(id: number, name: string): Group {
+  return {
+    id,
+    name,
+    ssh_connection_count: 0,
+    db_connection_count: 0,
+    created_at: "2026-08-24T00:00:00Z",
+    updated_at: "2026-08-24T00:00:00Z",
+  }
+}
 
 function db(id: number, name: string, overrides: Partial<DBConnection> = {}): DBConnection {
   return {
@@ -15,6 +26,7 @@ function db(id: number, name: string, overrides: Partial<DBConnection> = {}): DB
     has_password: true,
     database: "warden",
     ssh_connection_id: 0,
+    group_id: 0,
     created_at: "2026-08-24T00:00:00Z",
     updated_at: "2026-08-24T00:00:00Z",
     ...overrides,
@@ -37,6 +49,7 @@ function ssh(id: number, name: string): SSHConnection {
     has_proxy_password: false,
     jump_connection_ids: "[]",
     default_dir: "",
+    group_id: 0,
     created_at: "2026-08-24T00:00:00Z",
     updated_at: "2026-08-24T00:00:00Z",
   }
@@ -52,6 +65,7 @@ describe("emptyDBForm", () => {
     expect(form.host).toBe("")
     expect(form.username).toBe("")
     expect(form.database).toBe("")
+    expect(form.groupID).toBe("0")
   })
 })
 
@@ -64,6 +78,10 @@ describe("dbFormFromConnection", () => {
     expect(form.username).toBe("app")
     expect(form.database).toBe("warden")
     expect(form.sshConnectionID).toBe("91")
+  })
+
+  test("maps the saved group id to a string value", () => {
+    expect(dbFormFromConnection(db(1, "db-1", { group_id: 91 })).groupID).toBe("91")
   })
 
   test("initializes the password blank because responses are redacted", () => {
@@ -89,6 +107,7 @@ describe("toDBRequest", () => {
       password: null,
       database: "warden",
       ssh_connection_id: 0,
+      group_id: 0,
     })
   })
 
@@ -112,6 +131,11 @@ describe("toDBRequest", () => {
     expect(toDBRequest(form).ssh_connection_id).toBe(91)
   })
 
+  test("maps the group value to a numeric group_id", () => {
+    expect(toDBRequest({ ...emptyDBForm(), groupID: "7" }).group_id).toBe(7)
+    expect(toDBRequest({ ...emptyDBForm(), groupID: "0" }).group_id).toBe(0)
+  })
+
   test("converts numeric inputs to numbers", () => {
     const form: DBFormState = { ...emptyDBForm(), port: "3306" }
     expect(toDBRequest(form).port).toBe(3306)
@@ -126,6 +150,7 @@ describe("DBForm", () => {
       <DBForm
         connection={null}
         sshProfiles={[]}
+        groups={[]}
         pending={false}
         error={null}
         onSubmit={onSubmit}
@@ -200,11 +225,34 @@ describe("DBForm", () => {
     expect(onSubmit).toHaveBeenCalledWith(expect.objectContaining({ ssh_connection_id: 2 }))
   })
 
+  test("shows Missing group #91 when the saved group is absent from the list", () => {
+    renderForm({ connection: db(1, "db-1", { group_id: 91 }), groups: [] })
+
+    const combobox = screen.getByRole("combobox", { name: "Group" })
+    expect(combobox).toHaveTextContent("Missing group #91")
+  })
+
+  test("selecting a group sends its numeric group_id", async () => {
+    const user = userEvent.setup()
+    const onSubmit = vi.fn()
+    renderForm({ groups: [group(3, "prod")], onSubmit })
+
+    await user.type(screen.getByLabelText("Name"), "db-1")
+    await user.type(screen.getByLabelText("Host"), "127.0.0.1")
+    await user.type(screen.getByLabelText("Username"), "app")
+    await user.type(screen.getByLabelText("Database"), "warden")
+    await user.click(screen.getByRole("combobox", { name: "Group" }))
+    await user.click(await screen.findByRole("option", { name: "prod" }))
+    await user.click(screen.getByRole("button", { name: "Save" }))
+    expect(onSubmit).toHaveBeenCalledWith(expect.objectContaining({ group_id: 3 }))
+  })
+
   test("renders username @ host : port as one inline address row", () => {
     render(
       <DBForm
         connection={null}
         sshProfiles={[]}
+        groups={[]}
         pending={false}
         error={null}
         onSubmit={vi.fn()}
@@ -228,6 +276,7 @@ describe("DBForm", () => {
       <DBForm
         connection={null}
         sshProfiles={[]}
+        groups={[]}
         pending={false}
         error="a connection with that name already exists"
         onSubmit={vi.fn()}
