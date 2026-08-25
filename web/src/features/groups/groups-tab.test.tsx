@@ -202,4 +202,25 @@ describe("GroupsTab", () => {
     await waitFor(() => expect(mockedAPI.deleteGroup).toHaveBeenCalledWith(1))
     await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument())
   })
+
+  test("permits deletion when dependent lookup fails", async () => {
+    const user = userEvent.setup()
+    const reload = vi.fn().mockResolvedValue(undefined)
+    mockedAPI.groupDependents.mockRejectedValue(new Error("network unavailable"))
+    mockedAPI.deleteGroup.mockResolvedValue(undefined)
+    render(<GroupsTab resource={resource({ data: [group(1, "prod")], reload })} notify={notify} />)
+
+    await user.click(screen.getByRole("button", { name: "Delete prod" }))
+    const dialog = await screen.findByRole("dialog")
+    expect(await within(dialog).findByRole("alert")).toHaveTextContent(
+      "Unable to check for dependents: network unavailable",
+    )
+
+    const deleteButton = within(dialog).getByRole("button", { name: "Delete" })
+    expect(deleteButton).toBeEnabled()
+    await user.click(deleteButton)
+
+    await waitFor(() => expect(mockedAPI.deleteGroup).toHaveBeenCalledWith(1))
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument())
+  })
 })

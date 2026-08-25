@@ -294,14 +294,16 @@ export function GroupsTab({ resource, notify }: GroupsTabProps) {
             <DialogDescription>
               {deleteDialog?.loading
                 ? "Checking for dependents…"
-                : deleteDialog?.error
-                  ? "Unable to check for dependents."
-                  : `This will permanently delete "${deleteDialog?.target.name}".`}
+                : `This will permanently delete "${deleteDialog?.target.name}".`}
             </DialogDescription>
           </DialogHeader>
-          {deleteDialog && !deleteDialog.loading && !deleteDialog.error && (
+          {deleteDialog && !deleteDialog.loading && (
             <>
-              {hasDependents ? (
+              {deleteDialog.error ? (
+                <p role="alert" className="text-sm text-destructive">
+                  Unable to check for dependents: {deleteDialog.error}. You can still delete this group.
+                </p>
+              ) : hasDependents ? (
                 <div className="text-sm">
                   <p className="text-destructive">
                     These connections reference it and will become ungrouped:
@@ -337,16 +339,14 @@ export function GroupsTab({ resource, notify }: GroupsTabProps) {
               >
                 Cancel
               </Button>
-              {!deleteDialog.error && (
-                <Button
-                  type="button"
-                  variant="destructive"
-                  onClick={() => void confirmDelete()}
-                  disabled={deletePending}
-                >
-                  {deletePending ? "Deleting" : "Delete"}
-                </Button>
-              )}
+              <Button
+                type="button"
+                variant="destructive"
+                onClick={() => void confirmDelete()}
+                disabled={deletePending}
+              >
+                {deletePending ? "Deleting" : "Delete"}
+              </Button>
             </DialogFooter>
           )}
         </DialogContent>

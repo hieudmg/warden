@@ -15,8 +15,8 @@ transport resolution, secret handling, or jump-chain logic.
 ## Scope
 
 - A new `groups` table holding named, unique labels.
-- An optional `group_id` reference on every `ssh_connections` and
-  `db_connections` row. NULL (0 in code) means **ungrouped**.
+- A `group_id` reference on every `ssh_connections` and `db_connections`
+  row. Stored `0` means **ungrouped**; a positive value references a Group.
 - Web UI: dedicated **Groups** tab, group column on SSH/DB lists, group
   combobox on SSH/DB forms, group suffix on the jump-route combobox.
 - xssh native picker: Group field in the detail pane; group-name substring
@@ -32,7 +32,7 @@ transport resolution, secret handling, or jump-chain logic.
 | Decision | Choice | Rationale |
 |---|---|---|
 | Group storage | Managed entity in own table (id, unique name) | Renaming is a single-row update; uniqueness enforced by DB; pattern matches SSH/DB/projects. |
-| Group → connection link | Nullable integer column, no FK constraint | Deletion is never blocked (matches `ssh_connection_id` pattern); orphaned refs resolved at read time via LEFT JOIN. |
+| Group → connection link | Non-null integer, `0` sentinel, no FK constraint | A transactional delete clears references before deleting the group, so deletion is never blocked and stored profiles remain valid. |
 | Group name format | `[A-Za-z0-9._-]{1,100}`, trimmed, unique case-sensitive | Reuses existing connection-name regex for consistency; no shell-tokenization concerns since groups never appear in CLI args. |
 | Group delete behaviour | Hard delete; `GET /dependents` warns but never blocks | Matches SSH delete pattern. |
 | Group management UI | Dedicated **Groups** tab | Users need to rename and delete groups; mirror existing per-resource tab pattern. |
@@ -77,13 +77,6 @@ Existing rows migrate to `group_id = 0` (ungrouped). No data backfill.
 
 ```go
 // internal/model/profile.go
-type Group struct {
-    ID        int64
-    Name      string
-    CreatedAt time.Time
-    UpdatedAt time.Time
-}
-
 type GroupDependents struct {
     SSH []DependentRef
     DB  []DependentRef
@@ -94,11 +87,15 @@ type GroupDependents struct {
 
 ```go
 // internal/model/api.go
+// Group is both the domain and non-secret API representation; it is defined
+// here once because Groups require no separate redacted view.
 type Group struct {
-    ID        int64     `json:"id"`
-    Name      string    `json:"name"`
-    CreatedAt time.Time `json:"created_at"`
-    UpdatedAt time.Time `json:"updated_at"`
+    ID                 int64     `json:"id"`
+    Name               string    `json:"name"`
+    SSHConnectionCount int       `json:"ssh_connection_count"`
+    DBConnectionCount  int       `json:"db_connection_count"`
+    CreatedAt          time.Time `json:"created_at"`
+    UpdatedAt          time.Time `json:"updated_at"`
 }
 
 type GroupRequest struct {
@@ -120,25 +117,32 @@ type GroupRequest struct {
 Functions: `CreateGroup`, `GetGroup`, `ListGroups`, `UpdateGroup`,
 `DeleteGroup`, `GroupDependents`.
 
-Validation:
+Validation and integrity:
 
 - Trim before validation.
 - `groupNameRe = regexp.MustCompile(`^[A-Za-z0-9._-]{1,100}$`)`
 - Trimmed value stored (no leading/trailing whitespace ever persisted).
 - Duplicate name → `ErrDuplicate`.
 - Missing id on update → `errors.New("update group requires id")`.
-- `GroupDependents`: two SELECTs against `ssh_connections` and
-  `db_connections` filtered by `group_id = ?`.
+- `GroupDependents` first verifies the group exists, then selects SSH and DB
+  dependents filtered by `group_id = ?`; a missing group returns `ErrNotFound`.
+- `DeleteGroup` uses one transaction: set `group_id = 0` for matching SSH and
+  DB rows, then delete the group. It checks the delete row count and returns
+  `ErrNotFound` when applicable. Deletion is never blocked, and no profile
+  retains a deleted group's id.
 
 ### `internal/store/profiles.go` changes
 
 - `SSHProfile` and `DBProfile` gain `GroupID int64` and `GroupName string`.
 - `CreateSSH`/`UpdateSSH` write `group_id`. `CreateDB`/`UpdateDB` write
-  `group_id`.
+  `group_id`. A write rejects negative ids; a positive id must exist, checked
+  in the write transaction. `0` is accepted as ungrouped.
 - `GetSSH`/`GetDB` use a `LEFT JOIN groups g ON g.id = s.group_id`,
-  selecting `group_id` and `COALESCE(g.name, '') AS group_name`. Missing
-  group (orphaned FK) yields `GroupID = <original>`, `GroupName = ""`. The
-  picker renders `(not set)`; the web UI renders `(Ungrouped)`.
+  selecting `group_id` and `COALESCE(g.name, '') AS group_name`. The join is
+  tolerant of externally corrupted rows, although normal API operations
+  cannot create or retain an orphaned id.
+- `ListGroups` returns `SSHConnectionCount` and `DBConnectionCount` with one
+  aggregate query, avoiding one dependents request per table row.
 - `ListSSH`/`ListDB` already loop through per-id reads; no extra change.
 
 ## HTTP API
@@ -157,7 +161,9 @@ GET    /api/v1/groups/{id}/dependents    warning payload (SSH + DB refs)
 Audit operations: `group.list`, `group.get`, `group.create`, `group.update`,
 `group.delete`, `group.dependents`.
 
-Error mapping via existing `writeStoreError`:
+Error mapping uses resource-neutral wording (for example, "a resource with
+that name already exists"), not the current connection-specific duplicate
+message:
 
 - `ErrDuplicate` → 409 Conflict
 - `ErrValidation` → 400 Bad Request
@@ -171,8 +177,9 @@ profile struct. Response always carries `group_id` (0 when ungrouped);
 
 `internal/client/picker/render.go`:
 
-- `FormatConnection` adds `{Label: "Group", Value: orNotSet(c.GroupName)}`
-  after the `Name` field.
+- `FormatConnection` adds a `Group` field after `Name`: group name when
+  present, `(not set)` for `GroupID = 0`, or `Missing group #<id>` for an
+  externally corrupted nonzero reference.
 
 `internal/client/picker/picker.go`:
 
@@ -190,7 +197,8 @@ filter logic gain the group.
 Mirrors `ssh-tab.tsx`:
 
 - Search box filters by name (case-insensitive substring).
-- Columns: `Name`, `Used by` (dependent count), `Created`, `Updated`.
+- Columns: `Name`, `Used by` (`SSH <count> · DB <count>` from the list
+  response), `Created`, `Updated`.
 - Create dialog (name input only).
 - Edit dialog (rename).
 - Delete dialog: fetches `/dependents`, shows warning rows, confirm
@@ -200,14 +208,17 @@ Mirrors `ssh-tab.tsx`:
 ### `SSHTab` and `DBTab` table changes
 
 - New **Group** column between `Name` and `Host`.
-- Renders `GroupName` when non-empty; otherwise `(Ungrouped)` in
-  `text-muted-foreground`.
+- Renders `GroupName` when non-empty; `GroupID = 0` renders `(Ungrouped)`
+  in `text-muted-foreground`. A nonzero id with no returned name (only
+  possible after external DB modification) renders `Missing group #<id>`.
 
 ### `SSHForm` and `DBForm`
 
 - New `<Select>` placed immediately after the `Name` field (before `Host`).
 - Populated from `api.listGroups()` (passed in from `app.tsx`).
-- Options: `None` (value `0`) at top, then one entry per group.
+- Options: `None` (value `0`) at top, then one entry per group. A current
+  nonzero id absent from the list renders a `Missing group #<id>` option,
+  mirroring the DB form's existing missing-SSH behaviour.
 - Submit includes `group_id` in the request payload (0 when "None" is
   selected).
 
@@ -243,6 +254,8 @@ getGroupDependents(id: number): Promise<DependentsResponse>
 interface Group {
   id: number
   name: string
+  ssh_connection_count: number
+  db_connection_count: number
   created_at: string
   updated_at: string
 }
@@ -260,17 +273,18 @@ interface GroupRequest { name: string }
 ### Go (TDD — write tests first)
 
 - `internal/store/groups_test.go`: Create/Get/List/Update/Delete,
-  validation (empty/long/special chars), duplicate, not-found,
-  GroupDependents coverage.
+  validation (empty/long/special chars), duplicate, not-found, aggregate
+  SSH/DB counts, and GroupDependents coverage.
 - `internal/store/profiles_test.go`: CreateSSH/UpdateSSH/CreateDB/UpdateDB
   with `GroupID`; roundtrip preserves; clear via `GroupID = 0`;
-  LEFT JOIN tolerates orphaned FK.
+  LEFT JOIN tolerates an externally orphaned reference.
 - `internal/server/profiles/groups_test.go` (new): HTTP handler tests
   for full CRUD + dependents + audit.
 - `internal/server/profiles/handlers_test.go`: SSH/DB request with
-  `group_id` roundtrip.
+  `group_id` roundtrip and rejects nonexistent or negative ids.
 - `internal/client/picker/picker_test.go`: Group field in
-  `FormatConnection`; `rebuild()` matches by group substring.
+  `FormatConnection` (including missing reference display); `rebuild()`
+  matches by group substring.
 
 ### Web (Vitest)
 
@@ -287,8 +301,9 @@ interface GroupRequest { name: string }
 ### Migration verification
 
 - Apply migration to existing DB; verify `group_id = 0` on every row;
-  verify `groups` table is empty; create a group, assign, rename,
-  delete, observe `(Ungrouped)` reappearing.
+  verify `groups` table is empty; create a group, assign, rename, delete,
+  verify both profile tables now store `group_id = 0`, then observe
+  `(Ungrouped)` reappearing.
 
 ### Build verification
 
@@ -301,7 +316,7 @@ interface GroupRequest { name: string }
 
 Go:
 - `migrations/003_groups.up.sql` (new)
-- `internal/model/profile.go` (Group, GroupDependents)
+- `internal/model/profile.go` (GroupDependents, profile group fields)
 - `internal/model/api.go` (Group, GroupRequest, group_id/group_name)
 - `internal/store/groups.go` (new)
 - `internal/store/profiles.go` (GroupID/GroupName plumbing)
@@ -309,7 +324,6 @@ Go:
 - `internal/server/profiles/groups.go` (new — handlers)
 - `internal/client/picker/render.go` (FormatConnection Group field)
 - `internal/client/picker/picker.go` (rebuild GroupName match)
-- `internal/client/api/client.go` (group methods on Client)
 
 Web:
 - `web/src/api/types.ts` (Group, group_id/group_name)
