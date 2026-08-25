@@ -1,5 +1,6 @@
 import { useState, type FormEvent } from "react"
 import type { SSHConnection, SSHConnectionRequest } from "@/api/types"
+import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { DialogFooter } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
@@ -109,6 +110,7 @@ export function SSHForm({ connection, profiles, pending, error, onSubmit, onCanc
   const [form, setForm] = useState<SSHFormState>(() =>
     connection ? sshFormFromConnection(connection) : emptySSHForm(),
   )
+  const [passthroughOpen, setPassthroughOpen] = useState(false)
   const set = <K extends keyof SSHFormState>(key: K, value: SSHFormState[K]) =>
     setForm(current => ({ ...current, [key]: value }))
 
@@ -127,6 +129,73 @@ export function SSHForm({ connection, profiles, pending, error, onSubmit, onCanc
           onChange={event => set("name", event.target.value)}
           required
         />
+      </div>
+      <div className="rounded-lg border">
+        <Button
+          type="button"
+          variant="outline"
+          className="w-full justify-start gap-2 border-0"
+          aria-expanded={passthroughOpen}
+          onClick={() => setPassthroughOpen(current => !current)}
+        >
+          <span>Server Passthrough</span>
+          {form.proxyHost && <Badge variant="secondary">Proxy</Badge>}
+          {form.jumpIDs.length > 0 && <Badge variant="secondary">Jump route</Badge>}
+        </Button>
+        {passthroughOpen && (
+          <div className="grid gap-3 border-t p-3">
+            <div className="flex items-end gap-2">
+              <div className="grid gap-1.5 flex-[3] min-w-0">
+                <Label htmlFor="ssh-proxy-username">Proxy username</Label>
+                <Input
+                  id="ssh-proxy-username"
+                  value={form.proxyUsername}
+                  onChange={event => set("proxyUsername", event.target.value)}
+                />
+              </div>
+              <span className="text-sm text-muted-foreground pb-2">@</span>
+              <div className="grid gap-1.5 flex-[5] min-w-0">
+                <Label htmlFor="ssh-proxy-host">Proxy host</Label>
+                <Input
+                  id="ssh-proxy-host"
+                  value={form.proxyHost}
+                  onChange={event => set("proxyHost", event.target.value)}
+                />
+              </div>
+              <span className="text-sm text-muted-foreground pb-2">:</span>
+              <div className="grid gap-1.5 w-24">
+                <Label htmlFor="ssh-proxy-port">Proxy port</Label>
+                <Input
+                  id="ssh-proxy-port"
+                  type="number"
+                  min={0}
+                  max={65535}
+                  value={form.proxyPort}
+                  onChange={event => set("proxyPort", event.target.value)}
+                />
+              </div>
+            </div>
+            <div className="grid gap-1.5">
+              <Label htmlFor="ssh-proxy-password">Proxy password</Label>
+              <Input
+                id="ssh-proxy-password"
+                placeholder="Leave blank to keep the stored value"
+                value={form.proxyPassword}
+                onChange={event => set("proxyPassword", event.target.value)}
+              />
+            </div>
+            <Separator decorative={false} />
+            <div className="grid gap-1.5">
+              <Label>Jump route</Label>
+              <JumpRouteField
+                value={form.jumpIDs}
+                onChange={jumpIDs => set("jumpIDs", jumpIDs)}
+                profiles={profiles}
+                editingID={connection?.id}
+              />
+            </div>
+          </div>
+        )}
       </div>
       <div className="flex items-end gap-2">
         <div className="grid gap-1.5 flex-[3] min-w-0">
@@ -220,57 +289,6 @@ export function SSHForm({ connection, profiles, pending, error, onSubmit, onCanc
           </div>
         </div>
       )}
-      <Separator decorative={false} />
-      <div className="flex items-end gap-2">
-        <div className="grid gap-1.5 flex-[3] min-w-0">
-          <Label htmlFor="ssh-proxy-username">Proxy username</Label>
-          <Input
-            id="ssh-proxy-username"
-            value={form.proxyUsername}
-            onChange={event => set("proxyUsername", event.target.value)}
-          />
-        </div>
-        <span className="text-sm text-muted-foreground pb-2">@</span>
-        <div className="grid gap-1.5 flex-[5] min-w-0">
-          <Label htmlFor="ssh-proxy-host">Proxy host</Label>
-          <Input
-            id="ssh-proxy-host"
-            value={form.proxyHost}
-            onChange={event => set("proxyHost", event.target.value)}
-          />
-        </div>
-        <span className="text-sm text-muted-foreground pb-2">:</span>
-        <div className="grid gap-1.5 w-24">
-          <Label htmlFor="ssh-proxy-port">Proxy port</Label>
-          <Input
-            id="ssh-proxy-port"
-            type="number"
-            min={0}
-            max={65535}
-            value={form.proxyPort}
-            onChange={event => set("proxyPort", event.target.value)}
-          />
-        </div>
-      </div>
-      <div className="grid gap-1.5">
-        <Label htmlFor="ssh-proxy-password">Proxy password</Label>
-        <Input
-          id="ssh-proxy-password"
-          placeholder="Leave blank to keep the stored value"
-          value={form.proxyPassword}
-          onChange={event => set("proxyPassword", event.target.value)}
-        />
-      </div>
-      <Separator decorative={false} />
-      <div className="grid gap-1.5">
-        <Label>Jump route</Label>
-        <JumpRouteField
-          value={form.jumpIDs}
-          onChange={jumpIDs => set("jumpIDs", jumpIDs)}
-          profiles={profiles}
-          editingID={connection?.id}
-        />
-      </div>
       <Separator decorative={false} />
       <div className="grid gap-1.5">
         <Label htmlFor="ssh-default-dir">Default directory</Label>

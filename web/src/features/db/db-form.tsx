@@ -4,13 +4,7 @@ import { Button } from "@/components/ui/button"
 import { DialogFooter } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select"
+import { SSHProfileCombobox } from "@/components/ssh-profile-combobox"
 
 /** Controlled DB form state. The password is always blank on open because
  * list/get responses are redacted; only a literal empty string serializes
@@ -176,18 +170,15 @@ export function DBForm({ connection, sshProfiles, pending, error, onSubmit, onCa
       </div>
       <div className="grid gap-1.5">
         <Label htmlFor="db-ssh">SSH connection</Label>
-        <Select value={form.sshConnectionID} onValueChange={value => set("sshConnectionID", value)}>
-          <SelectTrigger id="db-ssh" className="w-full">
-            <SelectValue placeholder="Select SSH connection" />
-          </SelectTrigger>
-          <SelectContent>
-            {options.map(option => (
-              <SelectItem key={option.value} value={option.value}>
-                {option.label}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
+        <SSHProfileCombobox
+          id="db-ssh"
+          value={form.sshConnectionID}
+          options={options}
+          placeholder="Select SSH connection"
+          searchPlaceholder="Search SSH connections"
+          emptyLabel="No SSH connections found."
+          onValueChange={value => set("sshConnectionID", value)}
+        />
       </div>
       {error && (
         <p role="alert" className="text-sm text-destructive">

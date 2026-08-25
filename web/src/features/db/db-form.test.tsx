@@ -166,6 +166,17 @@ describe("DBForm", () => {
     expect(screen.getByRole("option", { name: "db-jump — db-jump.example:22" })).toBeInTheDocument()
   })
 
+  test("filters SSH profiles by search text", async () => {
+    const user = userEvent.setup()
+    renderForm({ sshProfiles: [ssh(2, "jump-a"), ssh(3, "db-jump")] })
+
+    await user.click(screen.getByRole("combobox", { name: "SSH connection" }))
+    await user.type(await screen.findByPlaceholderText("Search SSH connections"), "db-jump")
+
+    expect(screen.getByRole("option", { name: "db-jump — db-jump.example:22" })).toBeInTheDocument()
+    expect(screen.queryByRole("option", { name: "jump-a — jump-a.example:22" })).not.toBeInTheDocument()
+  })
+
   test("keeps Direct plus a Missing option when SSH profiles are unavailable", async () => {
     const user = userEvent.setup()
     renderForm({ connection: db(1, "db-1", { ssh_connection_id: 91 }), sshProfiles: [] })

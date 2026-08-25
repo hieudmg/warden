@@ -4,13 +4,7 @@ import { ArrowDown, ArrowUp, Trash2 } from "lucide-react"
 import type { SSHConnection } from "@/api/types"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select"
+import { SSHProfileCombobox } from "@/components/ssh-profile-combobox"
 import {
   jumpCandidates,
   jumpLabel,
@@ -88,27 +82,22 @@ export function JumpRouteField({
           )
         })}
       </ul>
-      <Select
+      <SSHProfileCombobox
+        aria-label="Add SSH profile to jump route"
         value={pendingAdd}
+        options={candidates.map(profile => ({
+          value: String(profile.id),
+          label: `${profile.name} — ${profile.host}:${profile.port}`,
+        }))}
+        placeholder="Add"
+        searchPlaceholder="Search SSH profiles"
+        emptyLabel="No SSH profiles found."
+        disabled={candidates.length === 0}
         onValueChange={selected => {
           setPendingAdd("")
           onChange([...value, Number(selected)])
         }}
-      >
-        <SelectTrigger
-          aria-label="Add SSH profile to jump route"
-          disabled={candidates.length === 0}
-        >
-          <SelectValue placeholder="Add" />
-        </SelectTrigger>
-        <SelectContent>
-          {candidates.map(profile => (
-            <SelectItem key={profile.id} value={String(profile.id)}>
-              {profile.name} — {profile.host}:{profile.port}
-            </SelectItem>
-          ))}
-        </SelectContent>
-      </Select>
+      />
     </div>
   )
 }

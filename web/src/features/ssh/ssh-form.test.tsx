@@ -199,7 +199,7 @@ describe("toSSHRequest", () => {
 })
 
 describe("SSHForm", () => {
-  function renderForm() {
+  function renderForm(overrides: Partial<Parameters<typeof SSHForm>[0]> = {}) {
     render(
       <SSHForm
         connection={null}
@@ -208,6 +208,7 @@ describe("SSHForm", () => {
         error={null}
         onSubmit={vi.fn()}
         onCancel={vi.fn()}
+        {...overrides}
       />,
     )
   }
@@ -226,8 +227,10 @@ describe("SSHForm", () => {
     expect(within(row as HTMLElement).getByText(":")).toBeInTheDocument()
   })
 
-  test("renders proxy-username @ proxy-host : proxy-port as one inline address row", () => {
+  test("renders proxy-username @ proxy-host : proxy-port as one inline address row", async () => {
+    const user = userEvent.setup()
     renderForm()
+    await user.click(screen.getByRole("button", { name: /Server Passthrough/ }))
     const proxyUsername = screen.getByLabelText("Proxy username")
     const proxyHost = screen.getByLabelText("Proxy host")
     const proxyPort = screen.getByLabelText("Proxy port")
@@ -238,6 +241,38 @@ describe("SSHForm", () => {
     expect(proxyPort.closest("div.flex.items-end.gap-2")).toBe(row)
     expect(within(row as HTMLElement).getByText("@")).toBeInTheDocument()
     expect(within(row as HTMLElement).getByText(":")).toBeInTheDocument()
+  })
+
+  test("starts Server Passthrough closed and marks configured proxy and jump route", () => {
+    renderForm({ connection: connection() })
+
+    const passthrough = screen.getByRole("button", { name: /Server Passthrough/ })
+    expect(passthrough).toHaveAttribute("aria-expanded", "false")
+    expect(within(passthrough).getByText("Proxy")).toBeInTheDocument()
+    expect(within(passthrough).getByText("Jump route")).toBeInTheDocument()
+    expect(screen.queryByLabelText("Proxy username")).not.toBeInTheDocument()
+    expect(screen.queryByRole("combobox", { name: "Add SSH profile to jump route" })).not.toBeInTheDocument()
+  })
+
+  test("shows proxy and jump-route settings after opening Server Passthrough", async () => {
+    const user = userEvent.setup()
+    renderForm()
+
+    await user.click(screen.getByRole("button", { name: /Server Passthrough/ }))
+
+    expect(screen.getByLabelText("Proxy username")).toBeInTheDocument()
+    expect(screen.getByText("Jump route")).toBeInTheDocument()
+  })
+
+  test("adds Proxy badge when passthrough proxy host is entered", async () => {
+    const user = userEvent.setup()
+    renderForm()
+
+    const passthrough = screen.getByRole("button", { name: /Server Passthrough/ })
+    await user.click(passthrough)
+    await user.type(screen.getByLabelText("Proxy host"), "proxy.example")
+
+    expect(within(passthrough).getByText("Proxy")).toBeInTheDocument()
   })
 
   test("renders password and private-key auth as mutually exclusive radios", () => {
@@ -269,11 +304,6 @@ describe("SSHForm", () => {
     expect(screen.queryByLabelText("Private key", { selector: "textarea" })).not.toBeInTheDocument()
   })
 
-  test("separates form sections with dividers", () => {
-    renderForm()
-    expect(screen.getAllByRole("separator").length).toBeGreaterThanOrEqual(4)
-  })
-
   test("uses plain text inputs for credentials and disables browser autoComplete", async () => {
     const user = userEvent.setup()
     renderForm()
@@ -284,6 +314,7 @@ describe("SSHForm", () => {
     // The passphrase input only mounts once the user picks private-key auth.
     await user.click(screen.getByRole("radio", { name: "Private key" }))
     expect(document.getElementById("ssh-private-key-passphrase")!.getAttribute("type")).toBeNull()
+    await user.click(screen.getByRole("button", { name: /Server Passthrough/ }))
     expect(document.getElementById("ssh-proxy-password")!.getAttribute("type")).toBeNull()
   })
 
