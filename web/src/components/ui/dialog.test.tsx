@@ -1,4 +1,7 @@
 import { render, screen } from "@testing-library/react"
+import userEvent from "@testing-library/user-event"
+import { createRef } from "react"
+import { vi } from "vitest"
 import {
   Dialog,
   DialogContent,
@@ -7,6 +10,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog"
+import { SSHProfileCombobox } from "@/components/ssh-profile-combobox"
 
 function TallDialog() {
   return (
@@ -93,6 +97,36 @@ test("body is the only scrollable region", () => {
   expect(footerRegion).not.toBeNull()
   expect(headerRegion!.className).not.toContain("overflow-y-auto")
   expect(footerRegion!.className).not.toContain("overflow-y-auto")
+})
+
+test("keeps combobox popup interactive inside its modal with a caller ref", async () => {
+  const user = userEvent.setup()
+  const dialogRef = createRef<HTMLDivElement>()
+  const onValueChange = vi.fn()
+  render(
+    <Dialog open>
+      <DialogContent ref={dialogRef}>
+        <SSHProfileCombobox
+          aria-label="Group"
+          value=""
+          options={[{ value: "1", label: "Production" }]}
+          placeholder="None"
+          searchPlaceholder="Search groups"
+          emptyLabel="No groups found."
+          onValueChange={onValueChange}
+        />
+      </DialogContent>
+    </Dialog>,
+  )
+
+  await user.click(screen.getByRole("combobox", { name: "Group" }))
+
+  const option = await screen.findByRole("option", { name: "Production" })
+  expect(dialogRef.current).toContainElement(option)
+  expect(screen.getByPlaceholderText("Search groups")).toHaveFocus()
+
+  await user.click(option)
+  expect(onValueChange).toHaveBeenCalledWith("1")
 })
 
 test("content without header or footer still wraps children in a scrollable body", () => {

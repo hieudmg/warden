@@ -7,6 +7,12 @@ import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
 import { XIcon } from "lucide-react"
 
+const DialogPortalContainerContext = React.createContext<HTMLElement | null>(null)
+
+function useDialogPortalContainer() {
+  return React.useContext(DialogPortalContainerContext)
+}
+
 function Dialog({
   ...props
 }: React.ComponentProps<typeof DialogPrimitive.Root>) {
@@ -51,10 +57,20 @@ function DialogContent({
   className,
   children,
   showCloseButton = true,
+  ref: forwardedRef,
   ...props
 }: React.ComponentProps<typeof DialogPrimitive.Content> & {
   showCloseButton?: boolean
 }) {
+  const [portalContainer, setPortalContainer] = React.useState<HTMLElement | null>(null)
+  const setContentRef = React.useCallback((element: HTMLDivElement | null) => {
+    setPortalContainer(element)
+    if (typeof forwardedRef === "function") {
+      forwardedRef(element)
+    } else if (forwardedRef) {
+      forwardedRef.current = element
+    }
+  }, [forwardedRef])
   const childrenArray = React.Children.toArray(children)
   const isHeader = (child: React.ReactNode) =>
     React.isValidElement(child) &&
@@ -72,6 +88,7 @@ function DialogContent({
     <DialogPortal>
       <DialogOverlay />
       <DialogPrimitive.Content
+        ref={setContentRef}
         data-slot="dialog-content"
         className={cn(
           "fixed top-1/2 left-1/2 z-50 flex max-h-[calc(100dvh-2rem)] w-full max-w-[calc(100%-2rem)] -translate-x-1/2 -translate-y-1/2 flex-col rounded-xl bg-popover text-sm text-popover-foreground ring-1 ring-foreground/10 duration-100 outline-none sm:max-w-xl data-open:animate-in data-open:fade-in-0 data-open:zoom-in-95 data-closed:animate-out data-closed:fade-out-0 data-closed:zoom-out-95",
@@ -79,6 +96,7 @@ function DialogContent({
         )}
         {...props}
       >
+        <DialogPortalContainerContext.Provider value={portalContainer}>
         {header && (
           <div data-slot="dialog-header-region" className="flex-none">
             {header}
@@ -108,6 +126,7 @@ function DialogContent({
             </Button>
           </DialogPrimitive.Close>
         )}
+        </DialogPortalContainerContext.Provider>
       </DialogPrimitive.Content>
     </DialogPortal>
   )
@@ -193,4 +212,5 @@ export {
   DialogPortal,
   DialogTitle,
   DialogTrigger,
+  useDialogPortalContainer,
 }
