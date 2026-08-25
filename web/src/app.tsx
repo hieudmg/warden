@@ -1,6 +1,13 @@
 import { useCallback, useRef, useState } from "react"
 import { api } from "@/api/client"
-import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
+import {
+  Toast,
+  ToastClose,
+  ToastDescription,
+  ToastProvider,
+  ToastTitle,
+  ToastViewport,
+} from "@/components/ui/toast"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { useListResource } from "@/hooks/use-list-resource"
 import { SSHTab } from "@/features/ssh/ssh-tab"
@@ -16,23 +23,32 @@ export interface NotificationItem {
 export type Notify = (message: string, kind: "success" | "error") => void
 
 /** Global notification region: success uses a polite live region, errors use alert role. */
-export function Notifications({ items }: { items: readonly NotificationItem[] }) {
+export function Notifications({
+  items,
+  onDismiss,
+}: {
+  items: readonly NotificationItem[]
+  onDismiss: (id: number) => void
+}) {
   return (
-    <div className="flex flex-col gap-2 px-6 py-2">
-      {items.map((item) =>
-        item.kind === "error" ? (
-          <Alert key={item.id} variant="destructive">
-            <AlertTitle>Error</AlertTitle>
-            <AlertDescription>{item.message}</AlertDescription>
-          </Alert>
-        ) : (
-          <Alert key={item.id} role="status" aria-live="polite">
-            <AlertTitle>Success</AlertTitle>
-            <AlertDescription>{item.message}</AlertDescription>
-          </Alert>
-        ),
-      )}
-    </div>
+    <ToastProvider>
+      {items.map((item) => (
+        <Toast
+          key={item.id}
+          variant={item.kind === "error" ? "destructive" : "default"}
+          role={item.kind === "error" ? "alert" : "status"}
+          aria-live={item.kind === "error" ? "assertive" : "polite"}
+          onOpenChange={(open) => {
+            if (!open) onDismiss(item.id)
+          }}
+        >
+          <ToastTitle>{item.kind === "error" ? "Error" : "Success"}</ToastTitle>
+          <ToastDescription>{item.message}</ToastDescription>
+          <ToastClose />
+        </Toast>
+      ))}
+      <ToastViewport />
+    </ToastProvider>
   )
 }
 
@@ -43,6 +59,9 @@ export function App() {
 
   const [notifications, setNotifications] = useState<NotificationItem[]>([])
   const nextNotificationID = useRef(1)
+  const dismissNotification = useCallback((id: number) => {
+    setNotifications((current) => current.filter((item) => item.id !== id))
+  }, [])
   const notify: Notify = useCallback((message, kind) => {
     setNotifications((current) => [
       ...current,
@@ -58,7 +77,7 @@ export function App() {
           tailnet management plane — read-only view of secrets, execution happens on clients
         </p>
       </header>
-      <Notifications items={notifications} />
+      <Notifications items={notifications} onDismiss={dismissNotification} />
       <Tabs defaultValue="ssh">
         <TabsList className="mx-4 mt-4">
           <TabsTrigger value="ssh">SSH</TabsTrigger>

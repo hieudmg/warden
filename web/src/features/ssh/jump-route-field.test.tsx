@@ -84,6 +84,17 @@ describe("JumpRouteField", () => {
     expect(screen.getByRole("combobox", { name: "Add SSH profile to jump route" })).toHaveTextContent("Add")
   })
 
+  test("filters jump-route candidates by search text", async () => {
+    const user = userEvent.setup()
+    render(<JumpRouteField value={[]} onChange={vi.fn()} profiles={profiles} />)
+
+    await user.click(screen.getByRole("combobox", { name: "Add SSH profile to jump route" }))
+    await user.type(await screen.findByPlaceholderText("Search SSH profiles"), "storefront")
+
+    expect(screen.getByRole("option", { name: "storefront-jump — storefront-jump.example:22" })).toBeInTheDocument()
+    expect(screen.queryByRole("option", { name: "jump-a — jump-a.example:22" })).not.toBeInTheDocument()
+  })
+
   test("excludes self and already-selected profiles from Add options", async () => {
     const user = userEvent.setup()
     render(<JumpRouteField value={exceptional} onChange={vi.fn()} profiles={profiles} editingID={7} />)
@@ -91,7 +102,7 @@ describe("JumpRouteField", () => {
     await user.click(screen.getByRole("combobox", { name: "Add SSH profile to jump route" }))
     expect(screen.queryByRole("option", { name: "jump-a — jump-a.example:22" })).not.toBeInTheDocument()
     expect(screen.queryByRole("option", { name: "bastion — bastion.example:22" })).not.toBeInTheDocument()
-    expect(screen.getByRole("option", { name: "storefront-jump — storefront-jump.example:22" })).toBeInTheDocument()
+    expect(await screen.findByRole("option", { name: "storefront-jump — storefront-jump.example:22" })).toBeInTheDocument()
   })
 
   test("disables Add when every profile is unavailable", () => {

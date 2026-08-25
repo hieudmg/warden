@@ -1,6 +1,7 @@
-import { render, screen } from "@testing-library/react"
+import { act, render, screen } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
-import { beforeEach, describe, expect, test, vi } from "vitest"
+import { useState } from "react"
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest"
 import { App, Notifications } from "./app"
 import { api } from "@/api/client"
 import type { SSHConnection, DBConnection, Project } from "./api/types"
@@ -147,40 +148,71 @@ describe("App", () => {
 })
 
 describe("Notifications", () => {
-  test("renders success notifications with polite live region", () => {
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
+  test("renders success toast with polite live region and dismiss control", () => {
     render(
       <Notifications
         items={[{ id: 1, message: "Connection saved.", kind: "success" }]}
+        onDismiss={() => {}}
       />,
     )
-    const region = screen.getByRole("status")
-    expect(region).toHaveAttribute("aria-live", "polite")
-    expect(region).toHaveTextContent("Connection saved.")
+    const toast = screen.getByText("Connection saved.").closest("[data-slot='toast']")
+    expect(toast).toHaveAttribute("role", "status")
+    expect(toast).toHaveAttribute("aria-live", "polite")
+    expect(screen.getByRole("button", { name: "Close" })).toBeInTheDocument()
   })
 
-  test("renders error notifications with alert role", () => {
+  test("renders error toast with alert role", () => {
     render(
       <Notifications
         items={[{ id: 2, message: "Unable to connect.", kind: "error" }]}
+        onDismiss={() => {}}
       />,
     )
     const alert = screen.getByRole("alert")
     expect(alert).toHaveTextContent("Unable to connect.")
   })
 
-  test("renders both kinds in order", () => {
-    render(
-      <Notifications
-        items={[
-          { id: 1, message: "Created.", kind: "success" },
-          { id: 2, message: "Delete failed.", kind: "error" },
-        ]}
-      />,
-    )
-    const alerts = screen.getAllByRole("alert")
-    const status = screen.getByRole("status")
-    expect(alerts).toHaveLength(1)
-    expect(status).toHaveTextContent("Created.")
-    expect(alerts[0]).toHaveTextContent("Delete failed.")
+  test("removes toast after 10 seconds", () => {
+    vi.useFakeTimers()
+
+    function ToastHarness() {
+      const [items, setItems] = useState([{ id: 1, message: "Created.", kind: "success" as const }])
+      return (
+        <Notifications
+          items={items}
+          onDismiss={(id: number) => setItems((current) => current.filter((item) => item.id !== id))}
+        />
+      )
+    }
+
+    render(<ToastHarness />)
+    expect(screen.getByText("Created.").closest("[data-slot='toast']")).toHaveAttribute("role", "status")
+
+    act(() => vi.advanceTimersByTime(10_000))
+
+    expect(screen.queryByText("Created.")).not.toBeInTheDocument()
+  })
+
+  test("removes toast when its dismiss control is clicked", async () => {
+    const user = userEvent.setup()
+
+    function ToastHarness() {
+      const [items, setItems] = useState([{ id: 1, message: "Created.", kind: "success" as const }])
+      return (
+        <Notifications
+          items={items}
+          onDismiss={(id: number) => setItems((current) => current.filter((item) => item.id !== id))}
+        />
+      )
+    }
+
+    render(<ToastHarness />)
+    await user.click(screen.getByRole("button", { name: "Close" }))
+
+    expect(screen.queryByText("Created.")).not.toBeInTheDocument()
   })
 })
