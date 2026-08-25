@@ -33,6 +33,7 @@ func FormatConnection(c model.SSHConnection) []Field {
 	return []Field{
 		{Label: "ID", Value: strconv.FormatInt(c.ID, 10)},
 		{Label: "Name", Value: orNotSet(c.Name)},
+		{Label: "Group", Value: groupValue(c)},
 		{Label: "Host", Value: orNotSet(c.Host)},
 		{Label: "Port", Value: orNotSetInt(c.Port)},
 		{Label: "Username", Value: orNotSet(c.Username)},
@@ -278,6 +279,20 @@ func configured(has bool) string {
 		return "[configured]"
 	}
 	return "[not configured]"
+}
+
+// groupValue renders the connection's group for the detail pane: the group
+// name when joined, the ungrouped marker for group_id 0, and a visible
+// missing-reference marker when an externally corrupted row carries a
+// nonzero id without a name.
+func groupValue(c model.SSHConnection) string {
+	if c.GroupName != "" {
+		return c.GroupName
+	}
+	if c.GroupID == 0 {
+		return "(not set)"
+	}
+	return "Missing group #" + strconv.FormatInt(c.GroupID, 10)
 }
 
 func orNotSet(s string) string {

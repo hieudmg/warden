@@ -16,10 +16,11 @@ import (
 	"warden/internal/model"
 )
 
-func TestStateFiltersNameAndHostCaseInsensitively(t *testing.T) {
+func TestStateFiltersNameHostAndGroupCaseInsensitively(t *testing.T) {
 	conns := []model.SSHConnection{
-		{ID: 1, Name: "prod-web", Host: "10.0.0.1"},
+		{ID: 1, Name: "web-front", Host: "10.0.0.1"},
 		{ID: 2, Name: "bastion", Host: "edge.example.test"},
+		{ID: 3, Name: "storefront", Host: "10.0.0.2", GroupName: "Production"},
 	}
 	state := NewState(conns)
 	state = state.Apply(DecodedKey{Kind: KeyRune, Rune: 'E'})
@@ -27,6 +28,16 @@ func TestStateFiltersNameAndHostCaseInsensitively(t *testing.T) {
 	state = state.Apply(DecodedKey{Kind: KeyRune, Rune: 'G'})
 	if got := state.Filtered(); len(got) != 1 || got[0].ID != 2 {
 		t.Fatalf("Filtered() = %#v, want bastion", got)
+	}
+
+	// A query also matches a connection's group name, case-insensitively:
+	// "prod" finds only the storefront via its group, not by name or host.
+	groupState := NewState(conns)
+	for _, r := range []rune{'p', 'r', 'o', 'd'} {
+		groupState = groupState.Apply(DecodedKey{Kind: KeyRune, Rune: r})
+	}
+	if got := groupState.Filtered(); len(got) != 1 || got[0].ID != 3 {
+		t.Fatalf("Filtered() = %#v, want storefront (group match)", got)
 	}
 }
 
@@ -200,11 +211,30 @@ func TestFormatConnectionRedactsSecretsAndShowsAllFields(t *testing.T) {
 		HasPassword: true, HasPrivateKey: false, HasPrivateKeyPassphrase: true,
 		ProxyHost: "proxy.example.test", ProxyPort: 8080, ProxyUsername: "proxy-user",
 		HasProxyPassword: true, JumpConnectionIDs: "[1,2]", DefaultDir: "/srv/app",
+		GroupID: 3, GroupName: "prod",
 	}
 	output := fieldsText(FormatConnection(c))
-	for _, want := range []string{"ID", "prod", "Host", "db.example.test", "Password", "[configured]", "Private key", "[not configured]", "Proxy password", "Jump connection IDs", "Default directory"} {
+	for _, want := range []string{"ID", "prod", "Host", "db.example.test", "Password", "[configured]", "Private key", "[not configured]", "Proxy password", "Jump connection IDs", "Default directory", "Group: prod"} {
 		if !strings.Contains(output, want) {
 			t.Fatalf("preview missing %q: %q", want, output)
+		}
+	}
+}
+
+func TestFormatConnectionGroupDisplay(t *testing.T) {
+	cases := []struct {
+		name      string
+		c         model.SSHConnection
+		wantValue string
+	}{
+		{"grouped", model.SSHConnection{ID: 7, GroupID: 3, GroupName: "prod"}, "prod"},
+		{"missing reference", model.SSHConnection{ID: 8, GroupID: 9}, "Missing group #9"},
+		{"ungrouped", model.SSHConnection{ID: 9, GroupID: 0}, "(not set)"},
+	}
+	for _, tc := range cases {
+		output := fieldsText(FormatConnection(tc.c))
+		if !strings.Contains(output, "Group: "+tc.wantValue) {
+			t.Fatalf("%s: preview missing %q: %q", tc.name, "Group: "+tc.wantValue, output)
 		}
 	}
 }
