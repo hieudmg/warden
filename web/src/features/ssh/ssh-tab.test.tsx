@@ -75,19 +75,19 @@ beforeEach(() => {
 
 describe("SSHTab", () => {
   test("shows a loading state while the resource loads", () => {
-    render(<SSHTab resource={resource({ loading: true })} notify={notify} />)
+    render(<SSHTab resource={resource({ loading: true })} groups={[]} notify={notify} />)
     expect(screen.getByText("Loading…")).toBeInTheDocument()
   })
 
   test("shows an empty state when no connections exist", () => {
-    render(<SSHTab resource={resource({ data: [] })} notify={notify} />)
+    render(<SSHTab resource={resource({ data: [] })} groups={[]} notify={notify} />)
     expect(screen.getByText("No SSH connections yet.")).toBeInTheDocument()
   })
 
   test("shows a load error with a Retry action", async () => {
     const user = userEvent.setup()
     const reload = vi.fn().mockResolvedValue(undefined)
-    render(<SSHTab resource={resource({ error: new Error("boom"), reload })} notify={notify} />)
+    render(<SSHTab resource={resource({ error: new Error("boom"), reload })} groups={[]} notify={notify} />)
 
     expect(screen.getByRole("alert")).toHaveTextContent("Unable to load SSH connections")
     await user.click(screen.getByRole("button", { name: "Retry" }))
@@ -107,7 +107,7 @@ describe("SSHTab", () => {
       jump_connection_ids: "[2,99]",
       default_dir: "/srv",
     })
-    render(<SSHTab resource={resource({ data: [connection, ...profiles] })} notify={notify} />)
+    render(<SSHTab resource={resource({ data: [connection, ...profiles] })} groups={[]} notify={notify} />)
 
     expect(screen.getByText("bastion")).toBeInTheDocument()
     expect(screen.getByText("10.0.0.1:22")).toBeInTheDocument()
@@ -126,7 +126,7 @@ describe("SSHTab", () => {
       ssh(2, "web", { group_id: 0 }),
       ssh(3, "legacy", { group_id: 7 }),
     ]
-    render(<SSHTab resource={resource({ data: connections })} notify={notify} />)
+    render(<SSHTab resource={resource({ data: connections })} groups={[]} notify={notify} />)
 
     expect(screen.getByText("prod")).toBeInTheDocument()
     expect(screen.getByText("(Ungrouped)")).toBeInTheDocument()
@@ -137,7 +137,7 @@ describe("SSHTab", () => {
     const user = userEvent.setup()
     const reload = vi.fn().mockResolvedValue(undefined)
     mockedAPI.createSSH.mockResolvedValue(ssh(1, "bastion"))
-    render(<SSHTab resource={resource({ data: [], reload })} notify={notify} />)
+    render(<SSHTab resource={resource({ data: [], reload })} groups={[]} notify={notify} />)
 
     await user.click(screen.getByRole("button", { name: "New connection" }))
     const dialog = await screen.findByRole("dialog")
@@ -172,7 +172,7 @@ describe("SSHTab", () => {
     const user = userEvent.setup()
     const reload = vi.fn().mockResolvedValue(undefined)
     mockedAPI.updateSSH.mockResolvedValue(ssh(1, "renamed"))
-    render(<SSHTab resource={resource({ data: [ssh(1, "bastion")], reload })} notify={notify} />)
+    render(<SSHTab resource={resource({ data: [ssh(1, "bastion")], reload })} groups={[]} notify={notify} />)
 
     await user.click(screen.getByRole("button", { name: "Edit bastion" }))
     const dialog = await screen.findByRole("dialog")
@@ -202,7 +202,7 @@ describe("SSHTab", () => {
     mockedAPI.createSSH.mockRejectedValue(
       new ApiError("conflict", "a connection with that name already exists", 409),
     )
-    render(<SSHTab resource={resource({ data: [] })} notify={notify} />)
+    render(<SSHTab resource={resource({ data: [] })} groups={[]} notify={notify} />)
 
     await user.click(screen.getByRole("button", { name: "New connection" }))
     const dialog = await screen.findByRole("dialog")
@@ -221,7 +221,7 @@ describe("SSHTab", () => {
   test("blocks duplicate submit while a request is pending", async () => {
     const user = userEvent.setup()
     mockedAPI.createSSH.mockReturnValue(new Promise(() => {}))
-    render(<SSHTab resource={resource({ data: [] })} notify={notify} />)
+    render(<SSHTab resource={resource({ data: [] })} groups={[]} notify={notify} />)
 
     await user.click(screen.getByRole("button", { name: "New connection" }))
     const dialog = await screen.findByRole("dialog")
@@ -243,7 +243,7 @@ describe("SSHTab", () => {
       ssh: [{ id: 2, name: "jump-a" }],
       db: [{ id: 3, name: "db-1" }],
     })
-    render(<SSHTab resource={resource({ data: [ssh(1, "bastion")] })} notify={notify} />)
+    render(<SSHTab resource={resource({ data: [ssh(1, "bastion")] })} groups={[]} notify={notify} />)
 
     await user.click(screen.getByRole("button", { name: "Delete bastion" }))
     const dialog = await screen.findByRole("dialog")
@@ -258,7 +258,7 @@ describe("SSHTab", () => {
     const reload = vi.fn().mockResolvedValue(undefined)
     mockedAPI.sshDependents.mockResolvedValue({ ssh: [], db: [] })
     mockedAPI.deleteSSH.mockResolvedValue(undefined)
-    render(<SSHTab resource={resource({ data: [ssh(1, "bastion")], reload })} notify={notify} />)
+    render(<SSHTab resource={resource({ data: [ssh(1, "bastion")], reload })} groups={[]} notify={notify} />)
 
     await user.click(screen.getByRole("button", { name: "Delete bastion" }))
     const dialog = await screen.findByRole("dialog")
@@ -274,7 +274,7 @@ describe("SSHTab", () => {
   test("withholds Delete when the dependents lookup fails", async () => {
     const user = userEvent.setup()
     mockedAPI.sshDependents.mockRejectedValue(new Error("dependents unavailable"))
-    render(<SSHTab resource={resource({ data: [ssh(1, "bastion")] })} notify={notify} />)
+    render(<SSHTab resource={resource({ data: [ssh(1, "bastion")] })} groups={[]} notify={notify} />)
 
     await user.click(screen.getByRole("button", { name: "Delete bastion" }))
     const dialog = await screen.findByRole("dialog")
@@ -286,7 +286,7 @@ describe("SSHTab", () => {
 
   test("focuses the first meaningful control when the create dialog opens", async () => {
     const user = userEvent.setup()
-    render(<SSHTab resource={resource({ data: [] })} notify={notify} />)
+    render(<SSHTab resource={resource({ data: [] })} groups={[]} notify={notify} />)
 
     await user.click(screen.getByRole("button", { name: "New connection" }))
     const dialog = await screen.findByRole("dialog")
@@ -295,7 +295,7 @@ describe("SSHTab", () => {
 
   test("closes the dialog on Escape and returns focus to the trigger", async () => {
     const user = userEvent.setup()
-    render(<SSHTab resource={resource({ data: [] })} notify={notify} />)
+    render(<SSHTab resource={resource({ data: [] })} groups={[]} notify={notify} />)
 
     const trigger = screen.getByRole("button", { name: "New connection" })
     await user.click(trigger)
@@ -310,7 +310,7 @@ describe("SSHTab", () => {
   test("names the target connection in the delete confirmation", async () => {
     const user = userEvent.setup()
     mockedAPI.sshDependents.mockResolvedValue({ ssh: [], db: [] })
-    render(<SSHTab resource={resource({ data: [ssh(1, "bastion")] })} notify={notify} />)
+    render(<SSHTab resource={resource({ data: [ssh(1, "bastion")] })} groups={[]} notify={notify} />)
 
     await user.click(screen.getByRole("button", { name: "Delete bastion" }))
     const dialog = await screen.findByRole("dialog")
@@ -323,7 +323,7 @@ describe("SSHTab", () => {
     const user = userEvent.setup()
     mockedAPI.sshDependents.mockResolvedValue({ ssh: [], db: [] })
     mockedAPI.deleteSSH.mockReturnValue(new Promise(() => {}))
-    render(<SSHTab resource={resource({ data: [ssh(1, "bastion")] })} notify={notify} />)
+    render(<SSHTab resource={resource({ data: [ssh(1, "bastion")] })} groups={[]} notify={notify} />)
 
     await user.click(screen.getByRole("button", { name: "Delete bastion" }))
     const dialog = await screen.findByRole("dialog")
@@ -340,7 +340,7 @@ describe("SSHTab", () => {
         resource={resource({
           data: [ssh(1, "bastion", { has_password: true, has_private_key: true })],
         })}
-        notify={notify}
+        groups={[]} notify={notify}
       />,
     )
     expect(screen.getByText("Password")).toBeInTheDocument()

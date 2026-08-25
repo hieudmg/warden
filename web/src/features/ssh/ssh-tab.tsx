@@ -26,8 +26,8 @@ import { SSHForm } from "./ssh-form"
 
 export interface SSHTabProps {
   resource: ListResource<SSHConnection>
-  /** Groups backing the form selector; empty when not yet wired. */
-  groups?: readonly Group[]
+  /** Groups backing the form selector. */
+  groups: readonly Group[]
   notify: (message: string, kind: "success" | "error") => void
 }
 
@@ -59,7 +59,7 @@ function jumpRouteLabels(connection: SSHConnection, profiles: readonly SSHConnec
   return ids.map(id => jumpLabel(id, profiles, connection.id)).join(", ")
 }
 
-export function SSHTab({ resource, groups = [], notify }: SSHTabProps) {
+export function SSHTab({ resource, groups, notify }: SSHTabProps) {
   const [formDialog, setFormDialog] = useState<FormDialogState | null>(null)
   const [pending, setPending] = useState(false)
   const [formError, setFormError] = useState<string | null>(null)

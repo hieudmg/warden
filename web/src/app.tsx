@@ -12,6 +12,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { useListResource } from "@/hooks/use-list-resource"
 import { SSHTab } from "@/features/ssh/ssh-tab"
 import { DBTab } from "@/features/db/db-tab"
+import { GroupsTab } from "@/features/groups/groups-tab"
 import { ProjectsReportsTab } from "@/features/projects/projects-reports-tab"
 
 export interface NotificationItem {
@@ -55,6 +56,7 @@ export function Notifications({
 export function App() {
   const ssh = useListResource(api.listSSH)
   const db = useListResource(api.listDB)
+  const groups = useListResource(api.listGroups)
   const projects = useListResource(api.listProjects)
 
   const [notifications, setNotifications] = useState<NotificationItem[]>([])
@@ -82,13 +84,17 @@ export function App() {
         <TabsList className="mx-4 mt-4">
           <TabsTrigger value="ssh">SSH</TabsTrigger>
           <TabsTrigger value="db">Databases</TabsTrigger>
+          <TabsTrigger value="groups">Groups</TabsTrigger>
           <TabsTrigger value="projects">Projects &amp; Reports</TabsTrigger>
         </TabsList>
         <TabsContent value="ssh">
-          <SSHTab resource={ssh} notify={notify} />
+          <SSHTab resource={ssh} groups={groups.data} notify={notify} />
         </TabsContent>
         <TabsContent value="db">
-          <DBTab resource={db} sshProfiles={ssh.data} notify={notify} />
+          <DBTab resource={db} sshProfiles={ssh.data} groups={groups.data} notify={notify} />
+        </TabsContent>
+        <TabsContent value="groups">
+          <GroupsTab resource={groups} notify={notify} />
         </TabsContent>
         <TabsContent value="projects">
           <ProjectsReportsTab resource={projects} notify={notify} />

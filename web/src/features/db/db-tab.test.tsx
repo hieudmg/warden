@@ -91,12 +91,12 @@ beforeEach(() => {
 
 describe("DBTab", () => {
   test("shows a loading state while the resource loads", () => {
-    render(<DBTab resource={resource({ loading: true })} sshProfiles={[]} notify={notify} />)
+    render(<DBTab resource={resource({ loading: true })} sshProfiles={[]} groups={[]} notify={notify} />)
     expect(screen.getByText("Loading…")).toBeInTheDocument()
   })
 
   test("shows an empty state when no connections exist", () => {
-    render(<DBTab resource={resource({ data: [] })} sshProfiles={[]} notify={notify} />)
+    render(<DBTab resource={resource({ data: [] })} sshProfiles={[]} groups={[]} notify={notify} />)
     expect(screen.getByText("No database connections yet.")).toBeInTheDocument()
   })
 
@@ -107,7 +107,7 @@ describe("DBTab", () => {
       <DBTab
         resource={resource({ error: new Error("boom"), reload })}
         sshProfiles={[]}
-        notify={notify}
+        groups={[]} notify={notify}
       />,
     )
 
@@ -123,7 +123,7 @@ describe("DBTab", () => {
       db(2, "db-2", { host: "127.0.0.2", username: "reader", database: "analytics", ssh_connection_id: 2 }),
       db(3, "db-3", { host: "127.0.0.3", username: "admin", database: "logs", ssh_connection_id: 91 }),
     ]
-    render(<DBTab resource={resource({ data: connections })} sshProfiles={profiles} notify={notify} />)
+    render(<DBTab resource={resource({ data: connections })} sshProfiles={profiles} groups={[]} notify={notify} />)
 
     expect(screen.getByText("db-1")).toBeInTheDocument()
     expect(screen.getByText("127.0.0.1:3306")).toBeInTheDocument()
@@ -141,7 +141,7 @@ describe("DBTab", () => {
       db(2, "db-2", { group_id: 0 }),
       db(3, "db-3", { group_id: 7 }),
     ]
-    render(<DBTab resource={resource({ data: connections })} sshProfiles={[]} notify={notify} />)
+    render(<DBTab resource={resource({ data: connections })} sshProfiles={[]} groups={[]} notify={notify} />)
 
     expect(screen.getByText("prod")).toBeInTheDocument()
     expect(screen.getByText("(Ungrouped)")).toBeInTheDocument()
@@ -152,7 +152,7 @@ describe("DBTab", () => {
     const user = userEvent.setup()
     const reload = vi.fn().mockResolvedValue(undefined)
     mockedAPI.createDB.mockResolvedValue(db(1, "db-1"))
-    render(<DBTab resource={resource({ data: [], reload })} sshProfiles={[]} notify={notify} />)
+    render(<DBTab resource={resource({ data: [], reload })} sshProfiles={[]} groups={[]} notify={notify} />)
 
     await user.click(screen.getByRole("button", { name: "New database" }))
     const dialog = await screen.findByRole("dialog")
@@ -182,7 +182,7 @@ describe("DBTab", () => {
     const user = userEvent.setup()
     const reload = vi.fn().mockResolvedValue(undefined)
     mockedAPI.updateDB.mockResolvedValue(db(1, "renamed"))
-    render(<DBTab resource={resource({ data: [db(1, "db-1")], reload })} sshProfiles={[]} notify={notify} />)
+    render(<DBTab resource={resource({ data: [db(1, "db-1")], reload })} sshProfiles={[]} groups={[]} notify={notify} />)
 
     await user.click(screen.getByRole("button", { name: "Edit db-1" }))
     const dialog = await screen.findByRole("dialog")
@@ -210,7 +210,7 @@ describe("DBTab", () => {
     mockedAPI.createDB.mockRejectedValue(
       new ApiError("conflict", "a connection with that name already exists", 409),
     )
-    render(<DBTab resource={resource({ data: [] })} sshProfiles={[]} notify={notify} />)
+    render(<DBTab resource={resource({ data: [] })} sshProfiles={[]} groups={[]} notify={notify} />)
 
     await user.click(screen.getByRole("button", { name: "New database" }))
     const dialog = await screen.findByRole("dialog")
@@ -230,7 +230,7 @@ describe("DBTab", () => {
   test("blocks duplicate submit while a request is pending", async () => {
     const user = userEvent.setup()
     mockedAPI.createDB.mockReturnValue(new Promise(() => {}))
-    render(<DBTab resource={resource({ data: [] })} sshProfiles={[]} notify={notify} />)
+    render(<DBTab resource={resource({ data: [] })} sshProfiles={[]} groups={[]} notify={notify} />)
 
     await user.click(screen.getByRole("button", { name: "New database" }))
     const dialog = await screen.findByRole("dialog")
@@ -253,7 +253,7 @@ describe("DBTab", () => {
       ssh: [{ id: 2, name: "jump-a" }],
       db: [{ id: 3, name: "db-2" }],
     })
-    render(<DBTab resource={resource({ data: [db(1, "db-1")] })} sshProfiles={[]} notify={notify} />)
+    render(<DBTab resource={resource({ data: [db(1, "db-1")] })} sshProfiles={[]} groups={[]} notify={notify} />)
 
     await user.click(screen.getByRole("button", { name: "Delete db-1" }))
     const dialog = await screen.findByRole("dialog")
@@ -268,7 +268,7 @@ describe("DBTab", () => {
     const reload = vi.fn().mockResolvedValue(undefined)
     mockedAPI.dbDependents.mockResolvedValue({ ssh: [], db: [] })
     mockedAPI.deleteDB.mockResolvedValue(undefined)
-    render(<DBTab resource={resource({ data: [db(1, "db-1")], reload })} sshProfiles={[]} notify={notify} />)
+    render(<DBTab resource={resource({ data: [db(1, "db-1")], reload })} sshProfiles={[]} groups={[]} notify={notify} />)
 
     await user.click(screen.getByRole("button", { name: "Delete db-1" }))
     const dialog = await screen.findByRole("dialog")
@@ -284,7 +284,7 @@ describe("DBTab", () => {
   test("withholds Delete when the dependents lookup fails", async () => {
     const user = userEvent.setup()
     mockedAPI.dbDependents.mockRejectedValue(new Error("dependents unavailable"))
-    render(<DBTab resource={resource({ data: [db(1, "db-1")] })} sshProfiles={[]} notify={notify} />)
+    render(<DBTab resource={resource({ data: [db(1, "db-1")] })} sshProfiles={[]} groups={[]} notify={notify} />)
 
     await user.click(screen.getByRole("button", { name: "Delete db-1" }))
     const dialog = await screen.findByRole("dialog")
@@ -296,7 +296,7 @@ describe("DBTab", () => {
 
   test("focuses the first meaningful control when the create dialog opens", async () => {
     const user = userEvent.setup()
-    render(<DBTab resource={resource({ data: [] })} sshProfiles={[]} notify={notify} />)
+    render(<DBTab resource={resource({ data: [] })} sshProfiles={[]} groups={[]} notify={notify} />)
 
     await user.click(screen.getByRole("button", { name: "New database" }))
     const dialog = await screen.findByRole("dialog")
@@ -305,7 +305,7 @@ describe("DBTab", () => {
 
   test("closes the dialog on Escape and returns focus to the trigger", async () => {
     const user = userEvent.setup()
-    render(<DBTab resource={resource({ data: [] })} sshProfiles={[]} notify={notify} />)
+    render(<DBTab resource={resource({ data: [] })} sshProfiles={[]} groups={[]} notify={notify} />)
 
     const trigger = screen.getByRole("button", { name: "New database" })
     await user.click(trigger)
@@ -320,7 +320,7 @@ describe("DBTab", () => {
   test("names the target connection in the delete confirmation", async () => {
     const user = userEvent.setup()
     mockedAPI.dbDependents.mockResolvedValue({ ssh: [], db: [] })
-    render(<DBTab resource={resource({ data: [db(1, "db-1")] })} sshProfiles={[]} notify={notify} />)
+    render(<DBTab resource={resource({ data: [db(1, "db-1")] })} sshProfiles={[]} groups={[]} notify={notify} />)
 
     await user.click(screen.getByRole("button", { name: "Delete db-1" }))
     const dialog = await screen.findByRole("dialog")
@@ -333,7 +333,7 @@ describe("DBTab", () => {
     const user = userEvent.setup()
     mockedAPI.dbDependents.mockResolvedValue({ ssh: [], db: [] })
     mockedAPI.deleteDB.mockReturnValue(new Promise(() => {}))
-    render(<DBTab resource={resource({ data: [db(1, "db-1")] })} sshProfiles={[]} notify={notify} />)
+    render(<DBTab resource={resource({ data: [db(1, "db-1")] })} sshProfiles={[]} groups={[]} notify={notify} />)
 
     await user.click(screen.getByRole("button", { name: "Delete db-1" }))
     const dialog = await screen.findByRole("dialog")
@@ -349,7 +349,7 @@ describe("DBTab", () => {
       <DBTab
         resource={resource({ data: [db(1, "db-1", { has_password: true })] })}
         sshProfiles={[]}
-        notify={notify}
+        groups={[]} notify={notify}
       />,
     )
     expect(screen.getByText("Password")).toBeInTheDocument()

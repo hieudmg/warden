@@ -1,7 +1,6 @@
-import { useRef, useState } from "react"
+import { useRef, useState, type FormEvent } from "react"
 import { api } from "@/api/client"
-import type { DBConnection, DBConnectionRequest, DependentsResponse, Group, SSHConnection } from "@/api/types"
-import { Badge } from "@/components/ui/badge"
+import type { DependentsResponse, Group } from "@/api/types"
 import { Button } from "@/components/ui/button"
 import {
   Dialog,
@@ -11,6 +10,8 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog"
+import { Input } from "@/components/ui/input"
+import { Label } from "@/components/ui/label"
 import { ResourceError } from "@/components/resource-error"
 import {
   Table,
@@ -21,20 +22,16 @@ import {
   TableRow,
 } from "@/components/ui/table"
 import type { ListResource } from "@/hooks/use-list-resource"
-import { DBForm } from "./db-form"
 
-export interface DBTabProps {
-  resource: ListResource<DBConnection>
-  sshProfiles: readonly SSHConnection[]
-  /** Groups backing the form selector. */
-  groups: readonly Group[]
+export interface GroupsTabProps {
+  resource: ListResource<Group>
   notify: (message: string, kind: "success" | "error") => void
 }
 
-type FormDialogState = { mode: "create" } | { mode: "edit"; connection: DBConnection }
+type FormDialogState = { mode: "create" } | { mode: "edit"; group: Group }
 
 interface DeleteDialogState {
-  target: DBConnection
+  target: Group
   dependents: DependentsResponse | null
   loading: boolean
   error: string | null
@@ -44,24 +41,17 @@ function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
 }
 
-/** Group display for one row: the name, (Ungrouped), or a Missing marker
- * for an externally corrupted nonzero reference. */
-function groupCell(connection: DBConnection): string {
-  if (connection.group_name) return connection.group_name
-  if (connection.group_id === 0) return "(Ungrouped)"
-  return `Missing group #${connection.group_id}`
+/** Deterministic UTC timestamp label for a group's server-generated time. */
+function formatTimestamp(iso: string): string {
+  const date = new Date(iso)
+  const pad = (n: number) => String(n).padStart(2, "0")
+  return `${date.getUTCFullYear()}-${pad(date.getUTCMonth() + 1)}-${pad(date.getUTCDate())} ${pad(date.getUTCHours())}:${pad(date.getUTCMinutes())} UTC`
 }
 
-/** SSH relationship display for one row: Direct, the profile name when
- * resolvable, or a visible Missing marker for a deleted profile. */
-function sshCell(connection: DBConnection, profiles: readonly SSHConnection[]): string {
-  if (connection.ssh_connection_id === 0) return "Direct"
-  const profile = profiles.find(candidate => candidate.id === connection.ssh_connection_id)
-  return profile ? profile.name : `Missing SSH #${connection.ssh_connection_id}`
-}
-
-export function DBTab({ resource, sshProfiles, groups, notify }: DBTabProps) {
+export function GroupsTab({ resource, notify }: GroupsTabProps) {
+  const [query, setQuery] = useState("")
   const [formDialog, setFormDialog] = useState<FormDialogState | null>(null)
+  const [name, setName] = useState("")
   const [pending, setPending] = useState(false)
   const [formError, setFormError] = useState<string | null>(null)
   const [deleteDialog, setDeleteDialog] = useState<DeleteDialogState | null>(null)
@@ -77,31 +67,34 @@ export function DBTab({ resource, sshProfiles, groups, notify }: DBTabProps) {
   const openCreate = (trigger: HTMLElement) => {
     lastTriggerRef.current = trigger
     setFormError(null)
+    setName("")
     setFormDialog({ mode: "create" })
   }
 
-  const openEdit = (connection: DBConnection, trigger: HTMLElement) => {
+  const openEdit = (group: Group, trigger: HTMLElement) => {
     lastTriggerRef.current = trigger
     setFormError(null)
-    setFormDialog({ mode: "edit", connection })
+    setName(group.name)
+    setFormDialog({ mode: "edit", group })
   }
 
-  const handleSubmit = async (request: DBConnectionRequest) => {
+  const handleSubmit = async (event: FormEvent) => {
+    event.preventDefault()
     if (!formDialog) return
     setPending(true)
     setFormError(null)
     try {
       if (formDialog.mode === "edit") {
-        await api.updateDB(formDialog.connection.id, request)
+        await api.updateGroup(formDialog.group.id, { name })
       } else {
-        await api.createDB(request)
+        await api.createGroup({ name })
       }
       await resource.reload()
       setFormDialog(null)
       if (formDialog.mode === "edit") {
-        notify(`Updated database connection "${request.name}".`, "success")
+        notify(`Updated group "${name}".`, "success")
       } else {
-        notify(`Created database connection "${request.name}".`, "success")
+        notify(`Created group "${name}".`, "success")
       }
     } catch (error) {
       setFormError(errorMessage(error))
@@ -110,15 +103,15 @@ export function DBTab({ resource, sshProfiles, groups, notify }: DBTabProps) {
     }
   }
 
-  const requestDelete = async (connection: DBConnection, trigger: HTMLElement) => {
+  const requestDelete = async (group: Group, trigger: HTMLElement) => {
     lastTriggerRef.current = trigger
     setDeleteError(null)
-    setDeleteDialog({ target: connection, dependents: null, loading: true, error: null })
+    setDeleteDialog({ target: group, dependents: null, loading: true, error: null })
     try {
-      const dependents = await api.dbDependents(connection.id)
-      setDeleteDialog({ target: connection, dependents, loading: false, error: null })
+      const dependents = await api.groupDependents(group.id)
+      setDeleteDialog({ target: group, dependents, loading: false, error: null })
     } catch (error) {
-      setDeleteDialog({ target: connection, dependents: null, loading: false, error: errorMessage(error) })
+      setDeleteDialog({ target: group, dependents: null, loading: false, error: errorMessage(error) })
     }
   }
 
@@ -127,10 +120,10 @@ export function DBTab({ resource, sshProfiles, groups, notify }: DBTabProps) {
     setDeletePending(true)
     setDeleteError(null)
     try {
-      await api.deleteDB(deleteDialog.target.id)
+      await api.deleteGroup(deleteDialog.target.id)
       await resource.reload()
       setDeleteDialog(null)
-      notify(`Deleted database connection "${deleteDialog.target.name}".`, "success")
+      notify(`Deleted group "${deleteDialog.target.name}".`, "success")
     } catch (error) {
       setDeleteError(errorMessage(error))
     } finally {
@@ -143,12 +136,18 @@ export function DBTab({ resource, sshProfiles, groups, notify }: DBTabProps) {
     dependents !== null && dependents !== undefined &&
     (dependents.ssh.length > 0 || dependents.db.length > 0)
 
+  const needle = query.trim().toLowerCase()
+  const filtered =
+    needle === ""
+      ? resource.data
+      : resource.data.filter(group => group.name.toLowerCase().includes(needle))
+
   return (
     <div className="p-4">
       <div className="mb-3 flex items-center justify-between">
-        <h2 className="text-lg font-semibold">Database connections</h2>
+        <h2 className="text-lg font-semibold">Groups</h2>
         <Button type="button" onClick={event => openCreate(event.currentTarget)}>
-          New database
+          New group
         </Button>
       </div>
 
@@ -157,76 +156,73 @@ export function DBTab({ resource, sshProfiles, groups, notify }: DBTabProps) {
         <ResourceError
           error={resource.error}
           onRetry={() => void resource.reload()}
-          label="database connections"
+          label="groups"
         />
       )}
       {!resource.loading && !resource.error && resource.data.length === 0 && (
-        <p className="text-sm text-muted-foreground">No database connections yet.</p>
+        <p className="text-sm text-muted-foreground">No groups yet.</p>
       )}
       {!resource.loading && !resource.error && resource.data.length > 0 && (
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead>Name</TableHead>
-              <TableHead>Group</TableHead>
-              <TableHead>Host</TableHead>
-              <TableHead>Username</TableHead>
-              <TableHead>Auth</TableHead>
-              <TableHead>Database</TableHead>
-              <TableHead>SSH connection</TableHead>
-              <TableHead className="text-right">Actions</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {resource.data.map(connection => (
-              <TableRow key={connection.id}>
-                <TableCell className="font-medium">{connection.name}</TableCell>
-                <TableCell>
-                  {connection.group_id === 0 && !connection.group_name ? (
-                    <span className="text-sm text-muted-foreground">(Ungrouped)</span>
-                  ) : (
-                    groupCell(connection)
-                  )}
-                </TableCell>
-                <TableCell>
-                  {connection.host}:{connection.port}
-                </TableCell>
-                <TableCell>{connection.username}</TableCell>
-                <TableCell>
-                  {connection.has_password ? (
-                    <Badge variant="secondary">Password</Badge>
-                  ) : (
-                    <span className="text-sm text-muted-foreground">None</span>
-                  )}
-                </TableCell>
-                <TableCell>{connection.database}</TableCell>
-                <TableCell>{sshCell(connection, sshProfiles)}</TableCell>
-                <TableCell className="text-right">
-                  <div className="flex justify-end gap-1">
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="sm"
-                      aria-label={`Edit ${connection.name}`}
-                      onClick={event => openEdit(connection, event.currentTarget)}
-                    >
-                      Edit
-                    </Button>
-                    <Button
-                      type="button"
-                      variant="destructive"
-                      size="sm"
-                      aria-label={`Delete ${connection.name}`}
-                      onClick={event => void requestDelete(connection, event.currentTarget)}
-                    >
-                      Delete
-                    </Button>
-                  </div>
-                </TableCell>
-              </TableRow>
-            ))}
-          </TableBody>
-        </Table>
+        <div className="space-y-3">
+          <div className="grid gap-1.5 max-w-sm">
+            <Label htmlFor="groups-search">Search groups</Label>
+            <Input
+              id="groups-search"
+              value={query}
+              onChange={event => setQuery(event.target.value)}
+              placeholder="Filter by name"
+            />
+          </div>
+          {filtered.length === 0 ? (
+            <p className="text-sm text-muted-foreground">No groups match your search.</p>
+          ) : (
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Name</TableHead>
+                  <TableHead>Used by</TableHead>
+                  <TableHead>Created</TableHead>
+                  <TableHead>Updated</TableHead>
+                  <TableHead className="text-right">Actions</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {filtered.map(group => (
+                  <TableRow key={group.id}>
+                    <TableCell className="font-medium">{group.name}</TableCell>
+                    <TableCell>
+                      SSH {group.ssh_connection_count} · DB {group.db_connection_count}
+                    </TableCell>
+                    <TableCell>{formatTimestamp(group.created_at)}</TableCell>
+                    <TableCell>{formatTimestamp(group.updated_at)}</TableCell>
+                    <TableCell className="text-right">
+                      <div className="flex justify-end gap-1">
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          aria-label={`Edit ${group.name}`}
+                          onClick={event => openEdit(group, event.currentTarget)}
+                        >
+                          Edit
+                        </Button>
+                        <Button
+                          type="button"
+                          variant="destructive"
+                          size="sm"
+                          aria-label={`Delete ${group.name}`}
+                          onClick={event => void requestDelete(group, event.currentTarget)}
+                        >
+                          Delete
+                        </Button>
+                      </div>
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          )}
+        </div>
       )}
 
       <Dialog
@@ -243,24 +239,41 @@ export function DBTab({ resource, sshProfiles, groups, notify }: DBTabProps) {
         >
           <DialogHeader>
             <DialogTitle>
-              {formDialog?.mode === "edit" ? `Edit ${formDialog.connection.name}` : "New database connection"}
+              {formDialog?.mode === "edit" ? `Edit ${formDialog.group.name}` : "New group"}
             </DialogTitle>
             <DialogDescription>
-              Secret fields are never shown; leave them blank to keep stored values.
+              Groups are shared labels for SSH and database connections.
             </DialogDescription>
           </DialogHeader>
-          {formDialog && (
-            <DBForm
-              key={formDialog.mode === "edit" ? formDialog.connection.id : "new"}
-              connection={formDialog.mode === "edit" ? formDialog.connection : null}
-              sshProfiles={sshProfiles}
-              groups={groups}
-              pending={pending}
-              error={formError}
-              onSubmit={request => void handleSubmit(request)}
-              onCancel={() => setFormDialog(null)}
-            />
-          )}
+          <form onSubmit={event => void handleSubmit(event)} autoComplete="off" className="grid gap-3">
+            <div className="grid gap-1.5">
+              <Label htmlFor="group-name">Name</Label>
+              <Input
+                id="group-name"
+                value={name}
+                onChange={event => setName(event.target.value)}
+                required
+              />
+            </div>
+            {formError && (
+              <p role="alert" className="text-sm text-destructive">
+                {formError}
+              </p>
+            )}
+            <DialogFooter>
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => setFormDialog(null)}
+                disabled={pending}
+              >
+                Cancel
+              </Button>
+              <Button type="submit" disabled={pending}>
+                {pending ? "Saving" : "Save"}
+              </Button>
+            </DialogFooter>
+          </form>
         </DialogContent>
       </Dialog>
 
@@ -277,7 +290,7 @@ export function DBTab({ resource, sshProfiles, groups, notify }: DBTabProps) {
           }}
         >
           <DialogHeader>
-            <DialogTitle>Delete database connection</DialogTitle>
+            <DialogTitle>Delete group</DialogTitle>
             <DialogDescription>
               {deleteDialog?.loading
                 ? "Checking for dependents…"
@@ -291,7 +304,7 @@ export function DBTab({ resource, sshProfiles, groups, notify }: DBTabProps) {
               {hasDependents ? (
                 <div className="text-sm">
                   <p className="text-destructive">
-                    These connections reference it and will become invalid:
+                    These connections reference it and will become ungrouped:
                   </p>
                   <ul className="mt-1 list-inside list-disc">
                     {dependents!.ssh.map(dependent => (

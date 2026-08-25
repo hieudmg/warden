@@ -33,7 +33,7 @@ function db(id: number, name: string, overrides: Partial<DBConnection> = {}): DB
   }
 }
 
-function ssh(id: number, name: string): SSHConnection {
+function ssh(id: number, name: string, overrides: Partial<SSHConnection> = {}): SSHConnection {
   return {
     id,
     name,
@@ -52,6 +52,7 @@ function ssh(id: number, name: string): SSHConnection {
     group_id: 0,
     created_at: "2026-08-24T00:00:00Z",
     updated_at: "2026-08-24T00:00:00Z",
+    ...overrides,
   }
 }
 
@@ -188,6 +189,22 @@ describe("DBForm", () => {
 
     await user.click(screen.getByRole("combobox", { name: "SSH connection" }))
     expect(await screen.findByRole("option", { name: "jump-a — jump-a.example:22" })).toBeInTheDocument()
+    expect(screen.getByRole("option", { name: "db-jump — db-jump.example:22" })).toBeInTheDocument()
+  })
+
+  test("appends the group name to SSH profile options when grouped", async () => {
+    const user = userEvent.setup()
+    renderForm({
+      sshProfiles: [
+        ssh(2, "jump-a", { group_id: 7, group_name: "prod" }),
+        ssh(3, "db-jump"),
+      ],
+    })
+
+    await user.click(screen.getByRole("combobox", { name: "SSH connection" }))
+    expect(
+      await screen.findByRole("option", { name: "jump-a — jump-a.example:22 (prod)" }),
+    ).toBeInTheDocument()
     expect(screen.getByRole("option", { name: "db-jump — db-jump.example:22" })).toBeInTheDocument()
   })
 

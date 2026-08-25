@@ -5,6 +5,7 @@ import { DialogFooter } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { SSHProfileCombobox, type SSHProfileOption } from "@/components/ssh-profile-combobox"
+import { jumpOptionLabel } from "../ssh/jump-route"
 
 /** Controlled DB form state. The password is always blank on open because
  * list/get responses are redacted; only a literal empty string serializes
@@ -79,7 +80,7 @@ function sshOptions(sshProfiles: readonly SSHConnection[], currentID: number): S
   for (const profile of sshProfiles) {
     options.push({
       value: String(profile.id),
-      label: `${profile.name} — ${profile.host}:${profile.port}`,
+      label: jumpOptionLabel(profile),
     })
   }
   return options
