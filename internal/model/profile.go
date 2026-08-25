@@ -28,6 +28,8 @@ type SSHProfile struct {
 	// Empty means no prefix. Validation lives in store/handlers: must be
 	// an absolute path with no path-traversal or control characters.
 	DefaultDir        string
+	GroupID           int64
+	GroupName         string
 	CreatedAt         time.Time
 	UpdatedAt         time.Time
 }
@@ -46,6 +48,8 @@ type DBProfile struct {
 	Password        []byte
 	Database        string
 	SSHConnectionID int64
+	GroupID         int64
+	GroupName       string
 	CreatedAt       time.Time
 	UpdatedAt       time.Time
 }
