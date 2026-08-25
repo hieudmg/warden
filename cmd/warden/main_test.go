@@ -21,6 +21,8 @@ import (
 	"golang.org/x/crypto/ssh"
 	"golang.org/x/crypto/ssh/knownhosts"
 	"golang.org/x/term"
+
+	"warden/internal/model"
 )
 
 func TestRunHelpCommandsSkipArgAndConfigValidation(t *testing.T) {
@@ -47,14 +49,9 @@ func TestRunHelpCommandsSkipArgAndConfigValidation(t *testing.T) {
 			wantUsage: "warden xssh [connection]",
 		},
 		{
-			name:      "config list",
-			args:      []string{"config", "list", "--help"},
-			wantUsage: "warden config list",
-		},
-		{
-			name:      "config get",
-			args:      []string{"config", "get", "--help"},
-			wantUsage: "warden config get <connection>",
+			name:      "config search",
+			args:      []string{"config", "search", "--help"},
+			wantUsage: "warden config search <query>",
 		},
 	}
 
@@ -102,6 +99,99 @@ func TestRunRejectsEmptyExplicitConfigFlag(t *testing.T) {
 
 func emptyLookupEnv(string) (string, bool) {
 	return "", false
+}
+
+func TestRunConfigSearch(t *testing.T) {
+	apiSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/v1/ssh-connections":
+			io.WriteString(w, `[
+				{"id":10,"name":"prod-web","host":"edge.internal","port":22,"username":"private-ssh-user"},
+				{"id":11,"name":"bastion","host":"prod-gateway.internal","port":22,"username":"private-bastion-user"},
+				{"id":12,"name":"dev-web","host":"dev.internal","port":22,"username":"private-dev-user"}
+			]`)
+		case "/api/v1/db-connections":
+			io.WriteString(w, `[
+				{"id":20,"name":"reporting","host":"prod-db.internal","port":3306,"username":"private-db-user","database":"analytics","ssh_connection_id":10},
+				{"id":21,"name":"prod-name","host":"mysql.internal","port":3306,"username":"private-mysql-user","database":"app"},
+				{"id":22,"name":"dev-db","host":"dev-db.internal","port":3306,"username":"private-dev-db-user","database":"dev"}
+			]`)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer apiSrv.Close()
+
+	lookupEnv := func(key string) (string, bool) {
+		switch key {
+		case "HOME":
+			return t.TempDir(), true
+		case "WARDEN_CLIENT_API_BASE_URL":
+			return apiSrv.URL, true
+		case "WARDEN_CLIENT_TIMEOUT":
+			return "10s", true
+		}
+		return "", false
+	}
+
+	var stdout, stderr bytes.Buffer
+	exitCode := run([]string{"config", "search", "PrOd"}, &stdout, &stderr, lookupEnv)
+	if exitCode != 0 {
+		t.Fatalf("run() exitCode = %d, want 0, stderr=%q", exitCode, stderr.String())
+	}
+	const want = "SSH\n├── prod-web — edge.internal\n└── bastion — prod-gateway.internal\n\nDB\n├── reporting — prod-db.internal — SSH: prod-web\n└── prod-name — mysql.internal\n"
+	if stdout.String() != want {
+		t.Errorf("stdout = %q, want %q", stdout.String(), want)
+	}
+	if stderr.Len() != 0 {
+		t.Errorf("stderr = %q, want empty", stderr.String())
+	}
+	if strings.Contains(stdout.String(), "private-ssh-user") || strings.Contains(stdout.String(), "private-db-user") || strings.Contains(stdout.String(), "private-mysql-user") {
+		t.Errorf("stdout = %q, must not include usernames", stdout.String())
+	}
+}
+
+func TestWriteConfigSearchResultsEscapesControlCharacters(t *testing.T) {
+	var stdout bytes.Buffer
+	writeConfigSearchResults(&stdout, "bad", []model.SSHConnection{{
+		ID: 1, Name: "bad\nname", Host: "host\x1b[2J\b\u0085",
+	}}, nil)
+
+	const want = "SSH\n└── bad\\nname — host\\x1b[2J\\u0008\\u0085\n"
+	if stdout.String() != want {
+		t.Errorf("stdout = %q, want %q", stdout.String(), want)
+	}
+}
+
+func TestRunConfigSearchNoMatches(t *testing.T) {
+	apiSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		io.WriteString(w, `[]`)
+	}))
+	defer apiSrv.Close()
+
+	lookupEnv := func(key string) (string, bool) {
+		switch key {
+		case "HOME":
+			return t.TempDir(), true
+		case "WARDEN_CLIENT_API_BASE_URL":
+			return apiSrv.URL, true
+		case "WARDEN_CLIENT_TIMEOUT":
+			return "10s", true
+		}
+		return "", false
+	}
+
+	var stdout, stderr bytes.Buffer
+	exitCode := run([]string{"config", "search", "missing"}, &stdout, &stderr, lookupEnv)
+	if exitCode != 0 {
+		t.Fatalf("run() exitCode = %d, want 0, stderr=%q", exitCode, stderr.String())
+	}
+	if stdout.String() != "No matching connections.\n" {
+		t.Errorf("stdout = %q, want no-match message", stdout.String())
+	}
+	if stderr.Len() != 0 {
+		t.Errorf("stderr = %q, want empty", stderr.String())
+	}
 }
 
 // TestRunSSHEndToEnd exercises the full warden ssh path: redacted list via
