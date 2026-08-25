@@ -4,7 +4,7 @@ import { describe, expect, test, vi } from "vitest"
 import type { SSHConnection } from "@/api/types"
 import { JumpRouteField } from "./jump-route-field"
 
-function ssh(id: number, name: string): SSHConnection {
+function ssh(id: number, name: string, overrides: Partial<SSHConnection> = {}): SSHConnection {
   return {
     id,
     name,
@@ -21,8 +21,10 @@ function ssh(id: number, name: string): SSHConnection {
     jump_connection_ids: "[]",
     default_dir: "",
     group_id: 0,
+    group_name: "",
     created_at: "2026-08-24T00:00:00Z",
     updated_at: "2026-08-24T00:00:00Z",
+    ...overrides,
   }
 }
 
@@ -104,6 +106,17 @@ describe("JumpRouteField", () => {
     expect(screen.queryByRole("option", { name: "jump-a — jump-a.example:22" })).not.toBeInTheDocument()
     expect(screen.queryByRole("option", { name: "bastion — bastion.example:22" })).not.toBeInTheDocument()
     expect(await screen.findByRole("option", { name: "storefront-jump — storefront-jump.example:22" })).toBeInTheDocument()
+  })
+
+  test("shows the group name on grouped candidate options", async () => {
+    const user = userEvent.setup()
+    const grouped = [ssh(2, "jump-a", { group_name: "prod" })]
+    render(<JumpRouteField value={[]} onChange={vi.fn()} profiles={grouped} />)
+
+    await user.click(screen.getByRole("combobox", { name: "Add SSH profile to jump route" }))
+    expect(
+      await screen.findByRole("option", { name: "jump-a — jump-a.example:22 (prod)" }),
+    ).toBeInTheDocument()
   })
 
   test("disables Add when every profile is unavailable", () => {

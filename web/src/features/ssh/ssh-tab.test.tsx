@@ -120,6 +120,19 @@ describe("SSHTab", () => {
     expect(screen.getByText("/srv")).toBeInTheDocument()
   })
 
+  test("renders the group column with named, ungrouped, and missing values", () => {
+    const connections = [
+      ssh(1, "bastion", { group_id: 3, group_name: "prod" }),
+      ssh(2, "web", { group_id: 0 }),
+      ssh(3, "legacy", { group_id: 7 }),
+    ]
+    render(<SSHTab resource={resource({ data: connections })} notify={notify} />)
+
+    expect(screen.getByText("prod")).toBeInTheDocument()
+    expect(screen.getByText("(Ungrouped)")).toBeInTheDocument()
+    expect(screen.getByText("Missing group #7")).toBeInTheDocument()
+  })
+
   test("creates a connection through the dialog with a converted payload", async () => {
     const user = userEvent.setup()
     const reload = vi.fn().mockResolvedValue(undefined)

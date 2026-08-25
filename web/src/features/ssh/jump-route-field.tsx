@@ -8,6 +8,7 @@ import { SSHProfileCombobox } from "@/components/ssh-profile-combobox"
 import {
   jumpCandidates,
   jumpLabel,
+  jumpOptionLabel,
   moveJump,
 } from "./jump-route"
 
@@ -87,7 +88,7 @@ export function JumpRouteField({
         value={pendingAdd}
         options={candidates.map(profile => ({
           value: String(profile.id),
-          label: `${profile.name} — ${profile.host}:${profile.port}`,
+          label: jumpOptionLabel(profile),
         }))}
         placeholder="Add"
         searchPlaceholder="Search SSH profiles"

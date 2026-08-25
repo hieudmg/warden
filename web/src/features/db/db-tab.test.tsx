@@ -135,6 +135,19 @@ describe("DBTab", () => {
     expect(screen.getByText("Missing SSH #91")).toBeInTheDocument()
   })
 
+  test("renders the group column with named, ungrouped, and missing values", () => {
+    const connections = [
+      db(1, "db-1", { group_id: 3, group_name: "prod" }),
+      db(2, "db-2", { group_id: 0 }),
+      db(3, "db-3", { group_id: 7 }),
+    ]
+    render(<DBTab resource={resource({ data: connections })} sshProfiles={[]} notify={notify} />)
+
+    expect(screen.getByText("prod")).toBeInTheDocument()
+    expect(screen.getByText("(Ungrouped)")).toBeInTheDocument()
+    expect(screen.getByText("Missing group #7")).toBeInTheDocument()
+  })
+
   test("creates a connection through the dialog with a converted payload", async () => {
     const user = userEvent.setup()
     const reload = vi.fn().mockResolvedValue(undefined)

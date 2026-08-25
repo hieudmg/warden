@@ -43,6 +43,13 @@ export function jumpLabel(
   return profile ? profile.name : `Missing SSH #${id}`
 }
 
+/** Option label for one jump-route candidate in the Add picker, appending
+ * the profile's group name when it is grouped. */
+export function jumpOptionLabel(profile: SSHConnection): string {
+  const base = `${profile.name} — ${profile.host}:${profile.port}`
+  return profile.group_name ? `${base} (${profile.group_name})` : base
+}
+
 /**
  * Profiles that may be appended to the route: the profile being edited and
  * every profile already selected are excluded so the UI cannot create a new

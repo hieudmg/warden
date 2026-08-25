@@ -3,12 +3,13 @@ import type { SSHConnection } from "@/api/types"
 import {
   jumpCandidates,
   jumpLabel,
+  jumpOptionLabel,
   moveJump,
   parseJumpRoute,
   serializeJumpRoute,
 } from "./jump-route"
 
-function ssh(id: number, name: string): SSHConnection {
+function ssh(id: number, name: string, overrides: Partial<SSHConnection> = {}): SSHConnection {
   return {
     id,
     name,
@@ -25,8 +26,10 @@ function ssh(id: number, name: string): SSHConnection {
     jump_connection_ids: "[]",
     default_dir: "",
     group_id: 0,
+    group_name: "",
     created_at: "2026-08-24T00:00:00Z",
     updated_at: "2026-08-24T00:00:00Z",
+    ...overrides,
   }
 }
 
@@ -100,6 +103,18 @@ describe("jumpLabel", () => {
 
   test("labels a valid profile normally when editing another profile", () => {
     expect(jumpLabel(7, profiles, 3)).toBe("bastion")
+  })
+})
+
+describe("jumpOptionLabel", () => {
+  test("appends the group name to a grouped candidate's option label", () => {
+    expect(jumpOptionLabel(ssh(2, "jump-a", { group_name: "prod" }))).toBe(
+      "jump-a — jump-a.example:22 (prod)",
+    )
+  })
+
+  test("keeps the option label unchanged for an ungrouped candidate", () => {
+    expect(jumpOptionLabel(ssh(2, "jump-a"))).toBe("jump-a — jump-a.example:22")
   })
 })
 
