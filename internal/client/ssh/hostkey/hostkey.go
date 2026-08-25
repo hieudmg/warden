@@ -14,6 +14,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 
 	"golang.org/x/crypto/ssh"
@@ -49,11 +50,35 @@ func Callback(path string, acceptNew bool, terminal io.ReadWriter) (ssh.HostKeyC
 		if len(keyErr.Want) > 0 {
 			// A key was previously accepted for this host and now
 			// differs: potential MITM, always fail.
-			return fmt.Errorf("host key for %s has changed (remote SHA-256 %s); refusing to connect",
-				knownhosts.Normalize(hostname), ssh.FingerprintSHA256(key))
+			return changedKeyError(path, hostname, key, keyErr.Want)
 		}
 		return handleUnknown(hostname, key, path, acceptNew, terminal)
 	}, nil
+}
+
+func changedKeyError(path, hostname string, key ssh.PublicKey, want []knownhosts.KnownKey) error {
+	normalized := knownhosts.Normalize(hostname)
+	locations := make([]string, 0, len(want))
+	for _, known := range want {
+		locations = append(locations, fmt.Sprintf("%s:%d", known.Filename, known.Line))
+	}
+
+	return fmt.Errorf("host key for %s has changed (remote SHA-256 %s); refusing to connect\n"+
+		"trusted key location(s): %s\n"+
+		"verify remote fingerprint out-of-band before removing stale key(s):\n%s",
+		normalized, ssh.FingerprintSHA256(key), strings.Join(locations, ", "),
+		removalGuidance(runtime.GOOS, path, normalized))
+}
+
+func removalGuidance(goos, path, hostname string) string {
+	if goos == "windows" {
+		return fmt.Sprintf("remove stale key(s) manually from %q using the location(s) above", path)
+	}
+	return fmt.Sprintf("  ssh-keygen -f %s -R %s", shellQuote(path), shellQuote(hostname))
+}
+
+func shellQuote(value string) string {
+	return "'" + strings.ReplaceAll(value, "'", "'\"'\"'") + "'"
 }
 
 // loadKnownHosts returns a host-key database for the file at path.
