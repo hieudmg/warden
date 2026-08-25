@@ -20,6 +20,8 @@ type SSHConnection struct {
 	HasProxyPassword        bool      `json:"has_proxy_password"`
 	JumpConnectionIDs       string    `json:"jump_connection_ids"`
 	DefaultDir              string    `json:"default_dir"`
+	GroupID                 int64     `json:"group_id"`
+	GroupName               string    `json:"group_name,omitempty"`
 	CreatedAt               time.Time `json:"created_at"`
 	UpdatedAt               time.Time `json:"updated_at"`
 }
@@ -34,6 +36,8 @@ type DBConnection struct {
 	HasPassword     bool      `json:"has_password"`
 	Database        string    `json:"database"`
 	SSHConnectionID int64     `json:"ssh_connection_id"`
+	GroupID         int64     `json:"group_id"`
+	GroupName       string    `json:"group_name,omitempty"`
 	CreatedAt       time.Time `json:"created_at"`
 	UpdatedAt       time.Time `json:"updated_at"`
 }
@@ -55,6 +59,7 @@ type SSHConnectionRequest struct {
 	ProxyPassword        *string `json:"proxy_password"`
 	JumpConnectionIDs    string  `json:"jump_connection_ids"`
 	DefaultDir           string  `json:"default_dir"`
+	GroupID              int64   `json:"group_id"`
 }
 
 // DBConnectionRequest is the write payload for a DB profile.
@@ -66,6 +71,7 @@ type DBConnectionRequest struct {
 	Password        *string `json:"password"`
 	Database        string  `json:"database"`
 	SSHConnectionID int64   `json:"ssh_connection_id"`
+	GroupID         int64   `json:"group_id"`
 }
 
 // DependentsResponse lists profiles referencing a connection id. It is the
@@ -87,4 +93,9 @@ type Group struct {
 	DBConnectionCount  int       `json:"db_connection_count"`
 	CreatedAt          time.Time `json:"created_at"`
 	UpdatedAt          time.Time `json:"updated_at"`
+}
+
+// GroupRequest is the write payload for creating/renaming a group.
+type GroupRequest struct {
+	Name string `json:"name"`
 }

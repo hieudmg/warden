@@ -456,3 +456,137 @@ func TestMethodNotAllowed(t *testing.T) {
 		t.Fatalf("status = %d, want 405, body=%s", rec.Code, rec.Body.String())
 	}
 }
+
+func TestCreateSSHWithGroupID(t *testing.T) {
+	mux, s, _ := newTestAPI(t)
+	ctx := context.Background()
+	g, err := s.CreateGroup(ctx, model.Group{Name: "prod"})
+	if err != nil {
+		t.Fatalf("CreateGroup: %v", err)
+	}
+
+	body := fmt.Sprintf(`{"name":"grouped","host":"h.invalid","port":22,"username":"u","jump_connection_ids":"[]","group_id":%d}`, g.ID)
+	rec := doRequest(t, mux, "POST", "/api/v1/ssh-connections", body)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("create status = %d, body=%s", rec.Code, rec.Body.String())
+	}
+	var created model.SSHConnection
+	if err := json.Unmarshal(rec.Body.Bytes(), &created); err != nil {
+		t.Fatalf("decode create response: %v", err)
+	}
+	if created.GroupID != g.ID {
+		t.Errorf("create response group_id = %d, want %d", created.GroupID, g.ID)
+	}
+
+	// GET returns the joined group name.
+	rec = doRequest(t, mux, "GET", fmt.Sprintf("/api/v1/ssh-connections/%d", created.ID), "")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("get status = %d, body=%s", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), `"group_name":"prod"`) {
+		t.Errorf("get response missing joined group_name: %s", rec.Body.String())
+	}
+
+	got, err := s.GetSSH(ctx, created.ID)
+	if err != nil {
+		t.Fatalf("GetSSH: %v", err)
+	}
+	if got.GroupID != g.ID || got.GroupName != "prod" {
+		t.Errorf("stored group = %d/%q, want %d/prod", got.GroupID, got.GroupName, g.ID)
+	}
+}
+
+func TestCreateDBWithGroupID(t *testing.T) {
+	mux, s, _ := newTestAPI(t)
+	ctx := context.Background()
+	g, err := s.CreateGroup(ctx, model.Group{Name: "prod"})
+	if err != nil {
+		t.Fatalf("CreateGroup: %v", err)
+	}
+
+	body := fmt.Sprintf(`{"name":"grouped","host":"db.invalid","port":3306,"username":"u","database":"appdb","group_id":%d}`, g.ID)
+	rec := doRequest(t, mux, "POST", "/api/v1/db-connections", body)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("create status = %d, body=%s", rec.Code, rec.Body.String())
+	}
+	var created model.DBConnection
+	if err := json.Unmarshal(rec.Body.Bytes(), &created); err != nil {
+		t.Fatalf("decode create response: %v", err)
+	}
+	if created.GroupID != g.ID {
+		t.Errorf("create response group_id = %d, want %d", created.GroupID, g.ID)
+	}
+
+	got, err := s.GetDB(ctx, created.ID)
+	if err != nil {
+		t.Fatalf("GetDB: %v", err)
+	}
+	if got.GroupID != g.ID || got.GroupName != "prod" {
+		t.Errorf("stored group = %d/%q, want %d/prod", got.GroupID, got.GroupName, g.ID)
+	}
+}
+
+func TestUpdateSSHClearsGroupID(t *testing.T) {
+	mux, s, _ := newTestAPI(t)
+	ctx := context.Background()
+	g, err := s.CreateGroup(ctx, model.Group{Name: "prod"})
+	if err != nil {
+		t.Fatalf("CreateGroup: %v", err)
+	}
+	created, err := s.CreateSSH(ctx, model.SSHProfile{
+		Name: "grp", Host: "h.invalid", Port: 22, Username: "u",
+		JumpConnectionIDs: "[]", GroupID: g.ID,
+	})
+	if err != nil {
+		t.Fatalf("CreateSSH: %v", err)
+	}
+
+	body := `{"name":"grp","host":"h.invalid","port":22,"username":"u","jump_connection_ids":"[]","group_id":0}`
+	rec := doRequest(t, mux, "PUT", fmt.Sprintf("/api/v1/ssh-connections/%d", created.ID), body)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("update status = %d, body=%s", rec.Code, rec.Body.String())
+	}
+	got, err := s.GetSSH(ctx, created.ID)
+	if err != nil {
+		t.Fatalf("GetSSH: %v", err)
+	}
+	if got.GroupID != 0 || got.GroupName != "" {
+		t.Errorf("group after clear = %d/%q, want 0/empty", got.GroupID, got.GroupName)
+	}
+}
+
+func TestCreateSSHRejectsMissingGroup(t *testing.T) {
+	mux, _, _ := newTestAPI(t)
+	body := `{"name":"x","host":"h","port":22,"username":"u","jump_connection_ids":"[]","group_id":999999}`
+	rec := doRequest(t, mux, "POST", "/api/v1/ssh-connections", body)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400, body=%s", rec.Code, rec.Body.String())
+	}
+	var e struct {
+		Code string `json:"code"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &e); err != nil {
+		t.Fatalf("decode error body: %v", err)
+	}
+	if e.Code != "validation_error" {
+		t.Errorf("error code = %q, want validation_error", e.Code)
+	}
+}
+
+func TestCreateDBRejectsMissingGroup(t *testing.T) {
+	mux, _, _ := newTestAPI(t)
+	body := `{"name":"x","host":"h","port":3306,"username":"u","database":"d","group_id":999999}`
+	rec := doRequest(t, mux, "POST", "/api/v1/db-connections", body)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400, body=%s", rec.Code, rec.Body.String())
+	}
+	var e struct {
+		Code string `json:"code"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &e); err != nil {
+		t.Fatalf("decode error body: %v", err)
+	}
+	if e.Code != "validation_error" {
+		t.Errorf("error code = %q, want validation_error", e.Code)
+	}
+}
