@@ -31,6 +31,7 @@ func TestOpenCreatesSchema(t *testing.T) {
 	want := []string{
 		"ssh_connections",
 		"db_connections",
+		"groups",
 		"projects",
 		"reports",
 		"audit_events",

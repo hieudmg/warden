@@ -74,3 +74,17 @@ type DependentsResponse struct {
 	SSH []DependentRef `json:"ssh"`
 	DB  []DependentRef `json:"db"`
 }
+
+// Group is both the domain and the non-secret API representation of a
+// connection group shared by SSH and DB profiles. Groups need no separate
+// redacted view: they hold no secret data. SSHConnectionCount and
+// DBConnectionCount report how many profiles reference the group and are
+// zero for a newly created group.
+type Group struct {
+	ID                 int64     `json:"id"`
+	Name               string    `json:"name"`
+	SSHConnectionCount int       `json:"ssh_connection_count"`
+	DBConnectionCount  int       `json:"db_connection_count"`
+	CreatedAt          time.Time `json:"created_at"`
+	UpdatedAt          time.Time `json:"updated_at"`
+}
