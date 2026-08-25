@@ -87,8 +87,18 @@ func TestChangedHostKeyRejected(t *testing.T) {
 	if err == nil {
 		t.Fatal("dial succeeded with changed host key, want rejection")
 	}
-	if !strings.Contains(err.Error(), "changed") {
+	message := err.Error()
+	if !strings.Contains(message, "changed") {
 		t.Errorf("err = %v, want changed-key message", err)
+	}
+	if !strings.Contains(message, path+":1") {
+		t.Errorf("err = %q, want trusted known_hosts location %q", message, path+":1")
+	}
+	if !strings.Contains(message, ssh.FingerprintSHA256(srv.hostKey)) {
+		t.Errorf("err = %q, want remote fingerprint", message)
+	}
+	if !strings.Contains(message, "ssh-keygen -f") || !strings.Contains(message, " -R ") {
+		t.Errorf("err = %q, want stale-key removal command", message)
 	}
 }
 
