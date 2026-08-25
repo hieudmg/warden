@@ -64,6 +64,13 @@ func (h *Handler) Register(mux *http.ServeMux) {
 	mux.HandleFunc("DELETE /api/v1/db-connections/{id}", h.deleteDB)
 	mux.HandleFunc("GET /api/v1/db-connections/{id}/dependents", h.dbDependents)
 
+	mux.HandleFunc("GET /api/v1/groups", h.listGroups)
+	mux.HandleFunc("POST /api/v1/groups", h.createGroup)
+	mux.HandleFunc("GET /api/v1/groups/{id}", h.getGroup)
+	mux.HandleFunc("PUT /api/v1/groups/{id}", h.updateGroup)
+	mux.HandleFunc("DELETE /api/v1/groups/{id}", h.deleteGroup)
+	mux.HandleFunc("GET /api/v1/groups/{id}/dependents", h.groupDependents)
+
 	mux.HandleFunc("GET /api/v1/transport/ssh/{id}", h.transportSSH)
 	mux.HandleFunc("GET /api/v1/transport/db/{id}", h.transportDB)
 }
@@ -100,6 +107,7 @@ func (h *Handler) createSSH(w http.ResponseWriter, r *http.Request) {
 		ProxyUsername:     req.ProxyUsername,
 		JumpConnectionIDs: req.JumpConnectionIDs,
 		DefaultDir:        req.DefaultDir,
+		GroupID:           req.GroupID,
 	}
 	if req.Password != nil {
 		p.Password = []byte(*req.Password)
@@ -117,6 +125,14 @@ func (h *Handler) createSSH(w http.ResponseWriter, r *http.Request) {
 	created, err := h.store.CreateSSH(r.Context(), p)
 	if err != nil {
 		h.record(r, "ssh_connection.create", "ssh_connection", "", "failure", err, nil)
+		writeStoreError(w, err)
+		return
+	}
+	// Re-read with the group join so the create response carries the
+	// group_name the client needs to render the row immediately.
+	created, err = h.store.GetSSH(r.Context(), created.ID)
+	if err != nil {
+		h.record(r, "ssh_connection.create", "ssh_connection", strconv.FormatInt(created.ID, 10), "failure", err, nil)
 		writeStoreError(w, err)
 		return
 	}
@@ -161,6 +177,7 @@ func (h *Handler) updateSSH(w http.ResponseWriter, r *http.Request) {
 		ProxyUsername:     req.ProxyUsername,
 		JumpConnectionIDs: req.JumpConnectionIDs,
 		DefaultDir:        req.DefaultDir,
+		GroupID:           req.GroupID,
 	}
 	if req.Password != nil {
 		p.Password = []byte(*req.Password)
@@ -251,6 +268,7 @@ func (h *Handler) createDB(w http.ResponseWriter, r *http.Request) {
 		Username:        req.Username,
 		Database:        req.Database,
 		SSHConnectionID: req.SSHConnectionID,
+		GroupID:         req.GroupID,
 	}
 	if req.Password != nil {
 		p.Password = []byte(*req.Password)
@@ -259,6 +277,13 @@ func (h *Handler) createDB(w http.ResponseWriter, r *http.Request) {
 	created, err := h.store.CreateDB(r.Context(), p)
 	if err != nil {
 		h.record(r, "db_connection.create", "db_connection", "", "failure", err, nil)
+		writeStoreError(w, err)
+		return
+	}
+	// Fetch again with the JOIN so the response includes the group name.
+	created, err = h.store.GetDB(r.Context(), created.ID)
+	if err != nil {
+		h.record(r, "db_connection.create", "db_connection", strconv.FormatInt(created.ID, 10), "failure", err, nil)
 		writeStoreError(w, err)
 		return
 	}
@@ -300,6 +325,7 @@ func (h *Handler) updateDB(w http.ResponseWriter, r *http.Request) {
 		Username:        req.Username,
 		Database:        req.Database,
 		SSHConnectionID: req.SSHConnectionID,
+		GroupID:         req.GroupID,
 	}
 	if req.Password != nil {
 		p.Password = []byte(*req.Password)
@@ -418,7 +444,7 @@ func writeStoreError(w http.ResponseWriter, err error) {
 	case errors.Is(err, store.ErrNotFound):
 		server.WriteError(w, http.StatusNotFound, server.ErrNotFound, "resource not found")
 	case errors.Is(err, store.ErrDuplicate):
-		server.WriteError(w, http.StatusConflict, server.ErrConflict, "a connection with that name already exists")
+		server.WriteError(w, http.StatusConflict, server.ErrConflict, "a resource with that name already exists")
 	case errors.Is(err, store.ErrValidation):
 		server.WriteError(w, http.StatusBadRequest, server.ErrValidation, err.Error())
 	default:
@@ -463,6 +489,8 @@ func redactSSH(p model.SSHProfile) model.SSHConnection {
 		HasProxyPassword:        len(p.ProxyPassword) > 0,
 		JumpConnectionIDs:       p.JumpConnectionIDs,
 		DefaultDir:              p.DefaultDir,
+		GroupID:                 p.GroupID,
+		GroupName:               p.GroupName,
 		CreatedAt:               p.CreatedAt,
 		UpdatedAt:               p.UpdatedAt,
 	}
@@ -478,6 +506,8 @@ func redactDB(p model.DBProfile) model.DBConnection {
 		HasPassword:     len(p.Password) > 0,
 		Database:        p.Database,
 		SSHConnectionID: p.SSHConnectionID,
+		GroupID:         p.GroupID,
+		GroupName:       p.GroupName,
 		CreatedAt:       p.CreatedAt,
 		UpdatedAt:       p.UpdatedAt,
 	}

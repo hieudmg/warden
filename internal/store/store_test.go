@@ -9,6 +9,9 @@ import (
 	"path/filepath"
 	"runtime"
 	"testing"
+	"time"
+
+	"warden/migrations"
 )
 
 func newTestStore(t *testing.T) *Store {
@@ -31,6 +34,7 @@ func TestOpenCreatesSchema(t *testing.T) {
 	want := []string{
 		"ssh_connections",
 		"db_connections",
+		"groups",
 		"projects",
 		"reports",
 		"audit_events",
@@ -224,5 +228,66 @@ func TestDBSSHReferenceHasNoForeignKey(t *testing.T) {
 	}
 	if got.SSHConnectionID != ssh.ID {
 		t.Errorf("DB row SSHConnectionID = %d, want preserved %d", got.SSHConnectionID, ssh.ID)
+	}
+}
+
+// TestOpenMigratesExistingConnectionsToUngrouped proves migration 003
+// upgrades a database created at the 001+002 schema: preexisting SSH and DB
+// rows gain group_id = 0 (ungrouped) and the groups table starts empty. The
+// prior schema is seeded from the embedded migration files and the
+// schema_migrations table is marked at version 2 so Open applies only 003.
+func TestOpenMigratesExistingConnectionsToUngrouped(t *testing.T) {
+	var key [32]byte
+	if _, err := rand.Read(key[:]); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(t.TempDir(), "warden.db")
+	db, err := sql.Open("sqlite", sqliteDSN(path))
+	if err != nil {
+		t.Fatal(err)
+	}
+	initial, err := migrations.FS.ReadFile("001_initial.up.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defaultDir, err := migrations.FS.ReadFile("002_default_dir.up.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, statement := range []string{string(initial), string(defaultDir),
+		"CREATE TABLE schema_migrations (version uint64, dirty bool)",
+		"INSERT INTO schema_migrations (version, dirty) VALUES (2, false)"} {
+		if _, err := db.Exec(statement); err != nil {
+			t.Fatal(err)
+		}
+	}
+	ts := time.Now().UTC().Format(time.RFC3339Nano)
+	if _, err := db.Exec(`INSERT INTO ssh_connections (name, host, port, username, jump_connection_ids, default_dir, created_at, updated_at) VALUES ('ssh', 'h', 22, 'u', '[]', '', ?, ?)`, ts, ts); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`INSERT INTO db_connections (name, host, port, username, database, created_at, updated_at) VALUES ('db', 'h', 3306, 'u', 'd', ?, ?)`, ts, ts); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	s, err := Open(context.Background(), path, key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	var sshGroupID, dbGroupID, groupCount int
+	if err := s.db.QueryRow("SELECT group_id FROM ssh_connections WHERE name='ssh'").Scan(&sshGroupID); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.db.QueryRow("SELECT group_id FROM db_connections WHERE name='db'").Scan(&dbGroupID); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.db.QueryRow("SELECT COUNT(*) FROM groups").Scan(&groupCount); err != nil {
+		t.Fatal(err)
+	}
+	if sshGroupID != 0 || dbGroupID != 0 || groupCount != 0 {
+		t.Fatalf("migration result = ssh:%d db:%d groups:%d; want 0, 0, 0", sshGroupID, dbGroupID, groupCount)
 	}
 }

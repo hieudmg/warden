@@ -312,13 +312,15 @@ func leaveAlternateScreen(w io.Writer) error {
 }
 
 // rebuild recomputes matches for the current query. A connection matches
-// when the lowercased query is contained in its lowercased Name or Host.
+// when the lowercased query is contained in its lowercased Name, Host, or
+// GroupName. An empty GroupName never matches a nonempty query.
 func (s State) rebuild() State {
 	needle := strings.ToLower(s.query)
 	matches := make([]int, 0, len(s.conns))
 	for i, c := range s.conns {
 		if strings.Contains(strings.ToLower(c.Name), needle) ||
-			strings.Contains(strings.ToLower(c.Host), needle) {
+			strings.Contains(strings.ToLower(c.Host), needle) ||
+			strings.Contains(strings.ToLower(c.GroupName), needle) {
 			matches = append(matches, i)
 		}
 	}

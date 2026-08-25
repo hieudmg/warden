@@ -77,6 +77,28 @@ func parseJumpIDs(s string) ([]int64, error) {
 	return ids, nil
 }
 
+// validateGroupID checks a profile's group assignment inside the write
+// transaction. Zero means ungrouped and is always valid; a positive id must
+// reference an existing group so API writes can never create an orphaned
+// assignment. Negative ids are rejected.
+func validateGroupID(ctx context.Context, tx *sql.Tx, groupID int64) error {
+	if groupID < 0 {
+		return fmt.Errorf("%w: group_id must not be negative", ErrValidation)
+	}
+	if groupID == 0 {
+		return nil
+	}
+	var found int
+	err := tx.QueryRowContext(ctx, "SELECT 1 FROM groups WHERE id=?", groupID).Scan(&found)
+	if errors.Is(err, sql.ErrNoRows) {
+		return fmt.Errorf("%w: group_id %d does not exist", ErrValidation, groupID)
+	}
+	if err != nil {
+		return fmt.Errorf("validate group id: %w", err)
+	}
+	return nil
+}
+
 func (s *Store) encryptSecret(aad []byte, plaintext []byte) ([]byte, error) {
 	if len(plaintext) == 0 {
 		return nil, nil
@@ -116,14 +138,18 @@ func (s *Store) CreateSSH(ctx context.Context, p model.SSHProfile) (model.SSHPro
 	}
 	defer tx.Rollback()
 
+	if err := validateGroupID(ctx, tx, p.GroupID); err != nil {
+		return model.SSHProfile{}, err
+	}
+
 	ts := nowUTC()
 	res, err := tx.ExecContext(ctx, `
 		INSERT INTO ssh_connections
 			(name, host, port, username, proxy_host, proxy_port, proxy_username,
-			 jump_connection_ids, default_dir, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			 jump_connection_ids, default_dir, group_id, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		p.Name, p.Host, p.Port, p.Username, p.ProxyHost, p.ProxyPort, p.ProxyUsername,
-		p.JumpConnectionIDs, p.DefaultDir, ts, ts)
+		p.JumpConnectionIDs, p.DefaultDir, p.GroupID, ts, ts)
 	if err != nil {
 		if isUniqueViolation(err) {
 			return model.SSHProfile{}, ErrDuplicate
@@ -174,17 +200,21 @@ func (s *Store) CreateSSH(ctx context.Context, p model.SSHProfile) (model.SSHPro
 
 func (s *Store) GetSSH(ctx context.Context, id int64) (model.SSHProfile, error) {
 	row := s.db.QueryRowContext(ctx, `
-		SELECT id, name, host, port, username, password, private_key,
-		       private_key_passphrase, proxy_host, proxy_port, proxy_username,
-		       proxy_password, jump_connection_ids, default_dir, created_at, updated_at
-		FROM ssh_connections WHERE id = ?`, id)
+		SELECT s.id, s.name, s.host, s.port, s.username, s.password, s.private_key,
+		       s.private_key_passphrase, s.proxy_host, s.proxy_port, s.proxy_username,
+		       s.proxy_password, s.jump_connection_ids, s.default_dir,
+		       s.group_id, COALESCE(g.name, ''), s.created_at, s.updated_at
+		FROM ssh_connections s
+		LEFT JOIN groups g ON g.id = s.group_id
+		WHERE s.id = ?`, id)
 
 	var p model.SSHProfile
 	var password, privateKey, passphrase, proxyPassword []byte
 	var createdAt, updatedAt string
 	err := row.Scan(&p.ID, &p.Name, &p.Host, &p.Port, &p.Username,
 		&password, &privateKey, &passphrase, &p.ProxyHost, &p.ProxyPort, &p.ProxyUsername,
-		&proxyPassword, &p.JumpConnectionIDs, &p.DefaultDir, &createdAt, &updatedAt)
+		&proxyPassword, &p.JumpConnectionIDs, &p.DefaultDir,
+		&p.GroupID, &p.GroupName, &createdAt, &updatedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return model.SSHProfile{}, ErrNotFound
 	}
@@ -266,14 +296,18 @@ func (s *Store) UpdateSSH(ctx context.Context, p model.SSHProfile) error {
 	}
 	defer tx.Rollback()
 
+	if err := validateGroupID(ctx, tx, p.GroupID); err != nil {
+		return err
+	}
+
 	ts := nowUTC()
 	res, err := tx.ExecContext(ctx, `
 		UPDATE ssh_connections
 		SET name=?, host=?, port=?, username=?, proxy_host=?, proxy_port=?,
-		    proxy_username=?, jump_connection_ids=?, default_dir=?, updated_at=?
+		    proxy_username=?, jump_connection_ids=?, default_dir=?, group_id=?, updated_at=?
 		WHERE id=?`,
 		p.Name, p.Host, p.Port, p.Username, p.ProxyHost, p.ProxyPort, p.ProxyUsername,
-		p.JumpConnectionIDs, p.DefaultDir, ts, p.ID)
+		p.JumpConnectionIDs, p.DefaultDir, p.GroupID, ts, p.ID)
 	if err != nil {
 		if isUniqueViolation(err) {
 			return ErrDuplicate
@@ -390,12 +424,16 @@ func (s *Store) CreateDB(ctx context.Context, p model.DBProfile) (model.DBProfil
 	}
 	defer tx.Rollback()
 
+	if err := validateGroupID(ctx, tx, p.GroupID); err != nil {
+		return model.DBProfile{}, err
+	}
+
 	ts := nowUTC()
 	res, err := tx.ExecContext(ctx, `
 		INSERT INTO db_connections
-			(name, host, port, username, database, ssh_connection_id, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-		p.Name, p.Host, p.Port, p.Username, p.Database, p.SSHConnectionID, ts, ts)
+			(name, host, port, username, database, ssh_connection_id, group_id, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		p.Name, p.Host, p.Port, p.Username, p.Database, p.SSHConnectionID, p.GroupID, ts, ts)
 	if err != nil {
 		if isUniqueViolation(err) {
 			return model.DBProfile{}, ErrDuplicate
@@ -430,15 +468,17 @@ func (s *Store) CreateDB(ctx context.Context, p model.DBProfile) (model.DBProfil
 
 func (s *Store) GetDB(ctx context.Context, id int64) (model.DBProfile, error) {
 	row := s.db.QueryRowContext(ctx, `
-		SELECT id, name, host, port, username, password, database, ssh_connection_id,
-		       created_at, updated_at
-		FROM db_connections WHERE id = ?`, id)
+		SELECT d.id, d.name, d.host, d.port, d.username, d.password, d.database, d.ssh_connection_id,
+		       d.group_id, COALESCE(g.name, ''), d.created_at, d.updated_at
+		FROM db_connections d
+		LEFT JOIN groups g ON g.id = d.group_id
+		WHERE d.id = ?`, id)
 
 	var p model.DBProfile
 	var password []byte
 	var createdAt, updatedAt string
 	err := row.Scan(&p.ID, &p.Name, &p.Host, &p.Port, &p.Username, &password,
-		&p.Database, &p.SSHConnectionID, &createdAt, &updatedAt)
+		&p.Database, &p.SSHConnectionID, &p.GroupID, &p.GroupName, &createdAt, &updatedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return model.DBProfile{}, ErrNotFound
 	}
@@ -503,12 +543,16 @@ func (s *Store) UpdateDB(ctx context.Context, p model.DBProfile) error {
 	}
 	defer tx.Rollback()
 
+	if err := validateGroupID(ctx, tx, p.GroupID); err != nil {
+		return err
+	}
+
 	ts := nowUTC()
 	res, err := tx.ExecContext(ctx, `
 		UPDATE db_connections
-		SET name=?, host=?, port=?, username=?, database=?, ssh_connection_id=?, updated_at=?
+		SET name=?, host=?, port=?, username=?, database=?, ssh_connection_id=?, group_id=?, updated_at=?
 		WHERE id=?`,
-		p.Name, p.Host, p.Port, p.Username, p.Database, p.SSHConnectionID, ts, p.ID)
+		p.Name, p.Host, p.Port, p.Username, p.Database, p.SSHConnectionID, p.GroupID, ts, p.ID)
 	if err != nil {
 		if isUniqueViolation(err) {
 			return ErrDuplicate

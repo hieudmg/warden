@@ -1,10 +1,11 @@
 import { useState, type FormEvent } from "react"
-import type { DBConnection, DBConnectionRequest, SSHConnection } from "@/api/types"
+import type { DBConnection, DBConnectionRequest, Group, SSHConnection } from "@/api/types"
 import { Button } from "@/components/ui/button"
 import { DialogFooter } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import { SSHProfileCombobox } from "@/components/ssh-profile-combobox"
+import { SSHProfileCombobox, type SSHProfileOption } from "@/components/ssh-profile-combobox"
+import { jumpOptionLabel } from "../ssh/jump-route"
 
 /** Controlled DB form state. The password is always blank on open because
  * list/get responses are redacted; only a literal empty string serializes
@@ -18,6 +19,7 @@ export interface DBFormState {
   password: string
   database: string
   sshConnectionID: string
+  groupID: string
 }
 
 export function emptyDBForm(): DBFormState {
@@ -29,6 +31,7 @@ export function emptyDBForm(): DBFormState {
     password: "",
     database: "",
     sshConnectionID: "0",
+    groupID: "0",
   }
 }
 
@@ -41,6 +44,7 @@ export function dbFormFromConnection(connection: DBConnection): DBFormState {
     password: "",
     database: connection.database,
     sshConnectionID: String(connection.ssh_connection_id),
+    groupID: String(connection.group_id),
   }
 }
 
@@ -55,6 +59,7 @@ export function toDBRequest(form: DBFormState): DBConnectionRequest {
     password: form.password === "" ? null : form.password,
     database: form.database,
     ssh_connection_id: Number(form.sshConnectionID),
+    group_id: Number(form.groupID),
   }
 }
 
@@ -75,8 +80,23 @@ function sshOptions(sshProfiles: readonly SSHConnection[], currentID: number): S
   for (const profile of sshProfiles) {
     options.push({
       value: String(profile.id),
-      label: `${profile.name} — ${profile.host}:${profile.port}`,
+      label: jumpOptionLabel(profile),
     })
+  }
+  return options
+}
+
+/** Select options in order: None (ungrouped), the current missing value
+ * when nonzero and absent from the group list, then existing groups in API
+ * order. A saved nonzero ID always renders as a Missing option so the form
+ * never silently drops an assignment it cannot resolve. */
+function groupOptions(groups: readonly Group[], currentID: number): SSHProfileOption[] {
+  const options: SSHProfileOption[] = [{ value: "0", label: "None" }]
+  if (currentID !== 0 && !groups.some(group => group.id === currentID)) {
+    options.push({ value: String(currentID), label: `Missing group #${currentID}` })
+  }
+  for (const group of groups) {
+    options.push({ value: String(group.id), label: group.name })
   }
   return options
 }
@@ -86,13 +106,15 @@ export interface DBFormProps {
   connection: DBConnection | null
   /** Existing SSH profiles backing the SSH select options. */
   sshProfiles: readonly SSHConnection[]
+  /** Existing connection groups backing the group select options. */
+  groups: readonly Group[]
   pending: boolean
   error: string | null
   onSubmit: (request: DBConnectionRequest) => void
   onCancel: () => void
 }
 
-export function DBForm({ connection, sshProfiles, pending, error, onSubmit, onCancel }: DBFormProps) {
+export function DBForm({ connection, sshProfiles, groups, pending, error, onSubmit, onCancel }: DBFormProps) {
   const [form, setForm] = useState<DBFormState>(() =>
     connection ? dbFormFromConnection(connection) : emptyDBForm(),
   )
@@ -105,6 +127,7 @@ export function DBForm({ connection, sshProfiles, pending, error, onSubmit, onCa
   }
 
   const options = sshOptions(sshProfiles, Number(form.sshConnectionID))
+  const groupSelectOptions = groupOptions(groups, Number(form.groupID))
 
   return (
     <form onSubmit={handleSubmit} autoComplete="off" className="grid gap-3">
@@ -115,6 +138,18 @@ export function DBForm({ connection, sshProfiles, pending, error, onSubmit, onCa
           value={form.name}
           onChange={event => set("name", event.target.value)}
           required
+        />
+      </div>
+      <div className="grid gap-1.5">
+        <Label htmlFor="db-group">Group</Label>
+        <SSHProfileCombobox
+          id="db-group"
+          value={form.groupID}
+          options={groupSelectOptions}
+          placeholder="None"
+          searchPlaceholder="Search groups"
+          emptyLabel="No groups found."
+          onValueChange={value => set("groupID", value)}
         />
       </div>
       <div className="flex items-end gap-2">

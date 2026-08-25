@@ -65,6 +65,7 @@ describe("api client", () => {
       proxy_password: null,
       jump_connection_ids: "[]",
       default_dir: "",
+      group_id: 0,
     }
     fetchMock.mockResolvedValueOnce(jsonResponse({ id: 1 }))
     await api.createSSH(payload)

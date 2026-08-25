@@ -1,5 +1,5 @@
 import { useState, type FormEvent } from "react"
-import type { SSHConnection, SSHConnectionRequest } from "@/api/types"
+import type { Group, SSHConnection, SSHConnectionRequest } from "@/api/types"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { DialogFooter } from "@/components/ui/dialog"
@@ -8,6 +8,7 @@ import { Label } from "@/components/ui/label"
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
 import { Separator } from "@/components/ui/separator"
 import { Textarea } from "@/components/ui/textarea"
+import { SSHProfileCombobox, type SSHProfileOption } from "@/components/ssh-profile-combobox"
 import { parseJumpRoute, serializeJumpRoute } from "./jump-route"
 import { JumpRouteField } from "./jump-route-field"
 
@@ -31,6 +32,7 @@ export interface SSHFormState {
   proxyPassword: string
   jumpIDs: number[]
   defaultDir: string
+  groupID: string
 }
 
 export function emptySSHForm(): SSHFormState {
@@ -49,6 +51,7 @@ export function emptySSHForm(): SSHFormState {
     proxyPassword: "",
     jumpIDs: [],
     defaultDir: "",
+    groupID: "0",
   }
 }
 
@@ -69,6 +72,7 @@ export function sshFormFromConnection(connection: SSHConnection): SSHFormState {
     proxyPassword: "",
     jumpIDs: parseJumpRoute(connection.jump_connection_ids),
     defaultDir: connection.default_dir,
+    groupID: String(connection.group_id),
   }
 }
 
@@ -92,7 +96,23 @@ export function toSSHRequest(form: SSHFormState): SSHConnectionRequest {
     proxy_password: nullableSecret(form.proxyPassword),
     jump_connection_ids: serializeJumpRoute(form.jumpIDs),
     default_dir: form.defaultDir,
+    group_id: Number(form.groupID),
   }
+}
+
+/** Select options in order: None (ungrouped), the current missing value
+ * when nonzero and absent from the group list, then existing groups in API
+ * order. A saved nonzero ID always renders as a Missing option so the form
+ * never silently drops an assignment it cannot resolve. */
+function groupOptions(groups: readonly Group[], currentID: number): SSHProfileOption[] {
+  const options: SSHProfileOption[] = [{ value: "0", label: "None" }]
+  if (currentID !== 0 && !groups.some(group => group.id === currentID)) {
+    options.push({ value: String(currentID), label: `Missing group #${currentID}` })
+  }
+  for (const group of groups) {
+    options.push({ value: String(group.id), label: group.name })
+  }
+  return options
 }
 
 export interface SSHFormProps {
@@ -100,19 +120,23 @@ export interface SSHFormProps {
   connection: SSHConnection | null
   /** Existing SSH profiles backing the jump-route Add options and labels. */
   profiles: readonly SSHConnection[]
+  /** Existing connection groups backing the group select options. */
+  groups: readonly Group[]
   pending: boolean
   error: string | null
   onSubmit: (request: SSHConnectionRequest) => void
   onCancel: () => void
 }
 
-export function SSHForm({ connection, profiles, pending, error, onSubmit, onCancel }: SSHFormProps) {
+export function SSHForm({ connection, profiles, groups, pending, error, onSubmit, onCancel }: SSHFormProps) {
   const [form, setForm] = useState<SSHFormState>(() =>
     connection ? sshFormFromConnection(connection) : emptySSHForm(),
   )
   const [passthroughOpen, setPassthroughOpen] = useState(false)
   const set = <K extends keyof SSHFormState>(key: K, value: SSHFormState[K]) =>
     setForm(current => ({ ...current, [key]: value }))
+
+  const groupSelectOptions = groupOptions(groups, Number(form.groupID))
 
   const handleSubmit = (event: FormEvent) => {
     event.preventDefault()
@@ -128,6 +152,18 @@ export function SSHForm({ connection, profiles, pending, error, onSubmit, onCanc
           value={form.name}
           onChange={event => set("name", event.target.value)}
           required
+        />
+      </div>
+      <div className="grid gap-1.5">
+        <Label htmlFor="ssh-group">Group</Label>
+        <SSHProfileCombobox
+          id="ssh-group"
+          value={form.groupID}
+          options={groupSelectOptions}
+          placeholder="None"
+          searchPlaceholder="Search groups"
+          emptyLabel="No groups found."
+          onValueChange={value => set("groupID", value)}
         />
       </div>
       <div className="rounded-lg border">

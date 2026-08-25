@@ -1,6 +1,6 @@
 import { useRef, useState } from "react"
 import { api } from "@/api/client"
-import type { DBConnection, DBConnectionRequest, DependentsResponse, SSHConnection } from "@/api/types"
+import type { DBConnection, DBConnectionRequest, DependentsResponse, Group, SSHConnection } from "@/api/types"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import {
@@ -26,6 +26,8 @@ import { DBForm } from "./db-form"
 export interface DBTabProps {
   resource: ListResource<DBConnection>
   sshProfiles: readonly SSHConnection[]
+  /** Groups backing the form selector. */
+  groups: readonly Group[]
   notify: (message: string, kind: "success" | "error") => void
 }
 
@@ -42,6 +44,14 @@ function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
 }
 
+/** Group display for one row: the name, (Ungrouped), or a Missing marker
+ * for an externally corrupted nonzero reference. */
+function groupCell(connection: DBConnection): string {
+  if (connection.group_name) return connection.group_name
+  if (connection.group_id === 0) return "(Ungrouped)"
+  return `Missing group #${connection.group_id}`
+}
+
 /** SSH relationship display for one row: Direct, the profile name when
  * resolvable, or a visible Missing marker for a deleted profile. */
 function sshCell(connection: DBConnection, profiles: readonly SSHConnection[]): string {
@@ -50,7 +60,7 @@ function sshCell(connection: DBConnection, profiles: readonly SSHConnection[]): 
   return profile ? profile.name : `Missing SSH #${connection.ssh_connection_id}`
 }
 
-export function DBTab({ resource, sshProfiles, notify }: DBTabProps) {
+export function DBTab({ resource, sshProfiles, groups, notify }: DBTabProps) {
   const [formDialog, setFormDialog] = useState<FormDialogState | null>(null)
   const [pending, setPending] = useState(false)
   const [formError, setFormError] = useState<string | null>(null)
@@ -158,6 +168,7 @@ export function DBTab({ resource, sshProfiles, notify }: DBTabProps) {
           <TableHeader>
             <TableRow>
               <TableHead>Name</TableHead>
+              <TableHead>Group</TableHead>
               <TableHead>Host</TableHead>
               <TableHead>Username</TableHead>
               <TableHead>Auth</TableHead>
@@ -170,6 +181,13 @@ export function DBTab({ resource, sshProfiles, notify }: DBTabProps) {
             {resource.data.map(connection => (
               <TableRow key={connection.id}>
                 <TableCell className="font-medium">{connection.name}</TableCell>
+                <TableCell>
+                  {connection.group_id === 0 && !connection.group_name ? (
+                    <span className="text-sm text-muted-foreground">(Ungrouped)</span>
+                  ) : (
+                    groupCell(connection)
+                  )}
+                </TableCell>
                 <TableCell>
                   {connection.host}:{connection.port}
                 </TableCell>
@@ -236,6 +254,7 @@ export function DBTab({ resource, sshProfiles, notify }: DBTabProps) {
               key={formDialog.mode === "edit" ? formDialog.connection.id : "new"}
               connection={formDialog.mode === "edit" ? formDialog.connection : null}
               sshProfiles={sshProfiles}
+              groups={groups}
               pending={pending}
               error={formError}
               onSubmit={request => void handleSubmit(request)}

@@ -28,6 +28,8 @@ type SSHProfile struct {
 	// Empty means no prefix. Validation lives in store/handlers: must be
 	// an absolute path with no path-traversal or control characters.
 	DefaultDir        string
+	GroupID           int64
+	GroupName         string
 	CreatedAt         time.Time
 	UpdatedAt         time.Time
 }
@@ -46,6 +48,8 @@ type DBProfile struct {
 	Password        []byte
 	Database        string
 	SSHConnectionID int64
+	GroupID         int64
+	GroupName       string
 	CreatedAt       time.Time
 	UpdatedAt       time.Time
 }
@@ -60,6 +64,14 @@ type DependentRef struct {
 // profiles whose jump route includes it and DB profiles whose
 // SSHConnectionID equals it.
 type SSHDependents struct {
+	SSH []DependentRef
+	DB  []DependentRef
+}
+
+// GroupDependents lists profiles referencing a group id: SSH profiles and
+// DB profiles whose group_id equals it. It is the warning payload shown
+// before group deletion; deletion itself is never blocked.
+type GroupDependents struct {
 	SSH []DependentRef
 	DB  []DependentRef
 }

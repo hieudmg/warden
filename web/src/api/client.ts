@@ -2,6 +2,8 @@ import type {
   DBConnection,
   DBConnectionRequest,
   DependentsResponse,
+  Group,
+  GroupRequest,
   Project,
   ProjectRequest,
   Report,
@@ -112,6 +114,20 @@ export const api = {
     request<void>(`/api/v1/db-connections/${id}`, { method: "DELETE" }).then(() => undefined),
   dbDependents: (id: number): Promise<DependentsResponse> =>
     request<DependentsResponse>(`/api/v1/db-connections/${id}/dependents`) as Promise<DependentsResponse>,
+
+  // Connection groups
+  listGroups: (signal?: AbortSignal): Promise<Group[]> =>
+    request<Group[]>("/api/v1/groups", { signal }) as Promise<Group[]>,
+  getGroup: (id: number): Promise<Group> =>
+    request<Group>(`/api/v1/groups/${id}`) as Promise<Group>,
+  createGroup: (payload: GroupRequest): Promise<Group> =>
+    request<Group>("/api/v1/groups", { method: "POST", json: payload }) as Promise<Group>,
+  updateGroup: (id: number, payload: GroupRequest): Promise<Group> =>
+    request<Group>(`/api/v1/groups/${id}`, { method: "PUT", json: payload }) as Promise<Group>,
+  deleteGroup: (id: number): Promise<void> =>
+    request<void>(`/api/v1/groups/${id}`, { method: "DELETE" }).then(() => undefined),
+  groupDependents: (id: number): Promise<DependentsResponse> =>
+    request<DependentsResponse>(`/api/v1/groups/${id}/dependents`) as Promise<DependentsResponse>,
 
   // Projects and reports
   listProjects: (signal?: AbortSignal): Promise<Project[]> =>

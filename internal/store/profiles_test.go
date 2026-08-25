@@ -505,3 +505,145 @@ func TestDBDuplicateNameRejected(t *testing.T) {
 		t.Fatal("duplicate DB name accepted")
 	}
 }
+
+func TestSSHGroupRoundTripAndClear(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	group, err := s.CreateGroup(ctx, model.Group{Name: "prod"})
+	if err != nil {
+		t.Fatalf("CreateGroup: %v", err)
+	}
+	input := SSHProfileForTest("web", "[]")
+	input.GroupID = group.ID
+	created, err := s.CreateSSH(ctx, input)
+	if err != nil {
+		t.Fatalf("CreateSSH: %v", err)
+	}
+	got, err := s.GetSSH(ctx, created.ID)
+	if err != nil {
+		t.Fatalf("GetSSH: %v", err)
+	}
+	if got.GroupID != group.ID || got.GroupName != "prod" {
+		t.Fatalf("group = %d/%q, want %d/%q", got.GroupID, got.GroupName, group.ID, "prod")
+	}
+	got.GroupID = 0
+	if err := s.UpdateSSH(ctx, got); err != nil {
+		t.Fatalf("UpdateSSH: %v", err)
+	}
+	got, err = s.GetSSH(ctx, created.ID)
+	if err != nil {
+		t.Fatalf("GetSSH after clear: %v", err)
+	}
+	if got.GroupID != 0 || got.GroupName != "" {
+		t.Fatalf("group = %d/%q, want 0/\"\"", got.GroupID, got.GroupName)
+	}
+}
+
+func TestDBGroupRoundTripAndClear(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	group, err := s.CreateGroup(ctx, model.Group{Name: "prod"})
+	if err != nil {
+		t.Fatalf("CreateGroup: %v", err)
+	}
+	input := DBProfileForTest("appdb", 0)
+	input.GroupID = group.ID
+	created, err := s.CreateDB(ctx, input)
+	if err != nil {
+		t.Fatalf("CreateDB: %v", err)
+	}
+	got, err := s.GetDB(ctx, created.ID)
+	if err != nil {
+		t.Fatalf("GetDB: %v", err)
+	}
+	if got.GroupID != group.ID || got.GroupName != "prod" {
+		t.Fatalf("group = %d/%q, want %d/%q", got.GroupID, got.GroupName, group.ID, "prod")
+	}
+	got.GroupID = 0
+	if err := s.UpdateDB(ctx, got); err != nil {
+		t.Fatalf("UpdateDB: %v", err)
+	}
+	got, err = s.GetDB(ctx, created.ID)
+	if err != nil {
+		t.Fatalf("GetDB after clear: %v", err)
+	}
+	if got.GroupID != 0 || got.GroupName != "" {
+		t.Fatalf("group = %d/%q, want 0/\"\"", got.GroupID, got.GroupName)
+	}
+}
+
+func TestSSHGroupAssignmentValidation(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	for _, tc := range []struct {
+		name    string
+		groupID int64
+	}{
+		{"negative", -1},
+		{"nonexistent", 999999},
+	} {
+		p := SSHProfileForTest("gv-"+tc.name, "[]")
+		p.GroupID = tc.groupID
+		if _, err := s.CreateSSH(ctx, p); !errors.Is(err, ErrValidation) {
+			t.Errorf("CreateSSH(group_id=%d) error = %v, want ErrValidation", tc.groupID, err)
+		}
+	}
+}
+
+func TestDBGroupAssignmentValidation(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	for _, tc := range []struct {
+		name    string
+		groupID int64
+	}{
+		{"negative", -1},
+		{"nonexistent", 999999},
+	} {
+		p := DBProfileForTest("gv-"+tc.name, 0)
+		p.GroupID = tc.groupID
+		if _, err := s.CreateDB(ctx, p); !errors.Is(err, ErrValidation) {
+			t.Errorf("CreateDB(group_id=%d) error = %v, want ErrValidation", tc.groupID, err)
+		}
+	}
+}
+
+func TestSSHGroupOrphanedReferenceTolerated(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	created, err := s.CreateSSH(ctx, SSHProfileForTest("orphan", "[]"))
+	if err != nil {
+		t.Fatalf("CreateSSH: %v", err)
+	}
+	if _, err := s.db.ExecContext(ctx,
+		"UPDATE ssh_connections SET group_id=999999 WHERE id=?", created.ID); err != nil {
+		t.Fatal(err)
+	}
+	got, err := s.GetSSH(ctx, created.ID)
+	if err != nil {
+		t.Fatalf("GetSSH with orphaned group: %v", err)
+	}
+	if got.GroupID != 999999 || got.GroupName != "" {
+		t.Errorf("group = %d/%q, want 999999/\"\"", got.GroupID, got.GroupName)
+	}
+}
+
+func TestDBGroupOrphanedReferenceTolerated(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	created, err := s.CreateDB(ctx, DBProfileForTest("orphan-db", 0))
+	if err != nil {
+		t.Fatalf("CreateDB: %v", err)
+	}
+	if _, err := s.db.ExecContext(ctx,
+		"UPDATE db_connections SET group_id=999999 WHERE id=?", created.ID); err != nil {
+		t.Fatal(err)
+	}
+	got, err := s.GetDB(ctx, created.ID)
+	if err != nil {
+		t.Fatalf("GetDB with orphaned group: %v", err)
+	}
+	if got.GroupID != 999999 || got.GroupName != "" {
+		t.Errorf("group = %d/%q, want 999999/\"\"", got.GroupID, got.GroupName)
+	}
+}

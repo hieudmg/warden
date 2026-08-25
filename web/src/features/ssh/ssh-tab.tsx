@@ -1,6 +1,6 @@
 import { useRef, useState } from "react"
 import { api } from "@/api/client"
-import type { DependentsResponse, SSHConnection, SSHConnectionRequest } from "@/api/types"
+import type { DependentsResponse, Group, SSHConnection, SSHConnectionRequest } from "@/api/types"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import {
@@ -26,6 +26,8 @@ import { SSHForm } from "./ssh-form"
 
 export interface SSHTabProps {
   resource: ListResource<SSHConnection>
+  /** Groups backing the form selector. */
+  groups: readonly Group[]
   notify: (message: string, kind: "success" | "error") => void
 }
 
@@ -42,6 +44,14 @@ function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
 }
 
+/** Group display for one row: the name, (Ungrouped), or a Missing marker
+ * for an externally corrupted nonzero reference. */
+function groupCell(connection: SSHConnection): string {
+  if (connection.group_name) return connection.group_name
+  if (connection.group_id === 0) return "(Ungrouped)"
+  return `Missing group #${connection.group_id}`
+}
+
 /** Jump-route display labels for one row; self-references are visibly marked. */
 function jumpRouteLabels(connection: SSHConnection, profiles: readonly SSHConnection[]): string {
   const ids = parseJumpRoute(connection.jump_connection_ids)
@@ -49,7 +59,7 @@ function jumpRouteLabels(connection: SSHConnection, profiles: readonly SSHConnec
   return ids.map(id => jumpLabel(id, profiles, connection.id)).join(", ")
 }
 
-export function SSHTab({ resource, notify }: SSHTabProps) {
+export function SSHTab({ resource, groups, notify }: SSHTabProps) {
   const [formDialog, setFormDialog] = useState<FormDialogState | null>(null)
   const [pending, setPending] = useState(false)
   const [formError, setFormError] = useState<string | null>(null)
@@ -157,6 +167,7 @@ export function SSHTab({ resource, notify }: SSHTabProps) {
           <TableHeader>
             <TableRow>
               <TableHead>Name</TableHead>
+              <TableHead>Group</TableHead>
               <TableHead>Host</TableHead>
               <TableHead>Username</TableHead>
               <TableHead>Auth</TableHead>
@@ -170,6 +181,13 @@ export function SSHTab({ resource, notify }: SSHTabProps) {
             {resource.data.map(connection => (
               <TableRow key={connection.id}>
                 <TableCell className="font-medium">{connection.name}</TableCell>
+                <TableCell>
+                  {connection.group_id === 0 && !connection.group_name ? (
+                    <span className="text-sm text-muted-foreground">(Ungrouped)</span>
+                  ) : (
+                    groupCell(connection)
+                  )}
+                </TableCell>
                 <TableCell>
                   {connection.host}:{connection.port}
                 </TableCell>
@@ -250,6 +268,7 @@ export function SSHTab({ resource, notify }: SSHTabProps) {
               key={formDialog.mode === "edit" ? formDialog.connection.id : "new"}
               connection={formDialog.mode === "edit" ? formDialog.connection : null}
               profiles={resource.data}
+              groups={groups}
               pending={pending}
               error={formError}
               onSubmit={request => void handleSubmit(request)}

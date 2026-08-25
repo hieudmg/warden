@@ -1,9 +1,20 @@
 import { render, screen, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { describe, expect, test, vi } from "vitest"
-import type { SSHConnection } from "@/api/types"
+import type { Group, SSHConnection } from "@/api/types"
 import { emptySSHForm, sshFormFromConnection, toSSHRequest, type SSHFormState } from "./ssh-form"
 import { SSHForm } from "./ssh-form"
+
+function group(id: number, name: string): Group {
+  return {
+    id,
+    name,
+    ssh_connection_count: 0,
+    db_connection_count: 0,
+    created_at: "2026-08-24T00:00:00Z",
+    updated_at: "2026-08-24T00:00:00Z",
+  }
+}
 
 function connection(overrides: Partial<SSHConnection> = {}): SSHConnection {
   return {
@@ -21,6 +32,7 @@ function connection(overrides: Partial<SSHConnection> = {}): SSHConnection {
     has_proxy_password: true,
     jump_connection_ids: "[2,7,2,0,-4,99]",
     default_dir: "/srv",
+    group_id: 0,
     created_at: "2026-08-24T00:00:00Z",
     updated_at: "2026-08-24T00:00:00Z",
     ...overrides,
@@ -38,6 +50,7 @@ describe("emptySSHForm", () => {
     expect(form.privateKey).toBe("")
     expect(form.privateKeyPassphrase).toBe("")
     expect(form.proxyPassword).toBe("")
+    expect(form.groupID).toBe("0")
   })
 })
 
@@ -61,6 +74,13 @@ describe("sshFormFromConnection", () => {
     expect(form.privateKey).toBe("")
     expect(form.privateKeyPassphrase).toBe("")
     expect(form.proxyPassword).toBe("")
+  })
+
+  test("maps the saved group id to a string value", () => {
+    expect(
+      sshFormFromConnection(connection({ group_id: 5, group_name: "prod" })).groupID,
+    ).toBe("5")
+    expect(sshFormFromConnection(connection({ group_id: 0 })).groupID).toBe("0")
   })
 
   test("infers private-key auth when only a private key is stored", () => {
@@ -102,6 +122,7 @@ describe("toSSHRequest", () => {
       proxyPassword: "",
       jumpIDs: [2, 7, 2, 0, -4, 99],
       defaultDir: "/srv",
+      groupID: "0",
     }
     expect(toSSHRequest(form)).toEqual({
       name: "bastion",
@@ -117,6 +138,7 @@ describe("toSSHRequest", () => {
       proxy_password: null,
       jump_connection_ids: "[2,7,2,0,-4,99]",
       default_dir: "/srv",
+      group_id: 0,
     })
   })
 
@@ -184,6 +206,11 @@ describe("toSSHRequest", () => {
     expect(keyRequest.password).toBeNull()
   })
 
+  test("maps the group select value to a numeric group_id", () => {
+    expect(toSSHRequest({ ...emptySSHForm(), groupID: "5" }).group_id).toBe(5)
+    expect(toSSHRequest({ ...emptySSHForm(), groupID: "0" }).group_id).toBe(0)
+  })
+
   test("serializes jump IDs in visible order and numeric inputs as numbers", () => {
     const form: SSHFormState = {
       ...emptySSHForm(),
@@ -204,6 +231,7 @@ describe("SSHForm", () => {
       <SSHForm
         connection={null}
         profiles={[]}
+        groups={[]}
         pending={false}
         error={null}
         onSubmit={vi.fn()}
@@ -318,11 +346,43 @@ describe("SSHForm", () => {
     expect(document.getElementById("ssh-proxy-password")!.getAttribute("type")).toBeNull()
   })
 
+  test("renders a group selector listing None and the available groups", async () => {
+    const user = userEvent.setup()
+    renderForm({ groups: [group(3, "prod"), group(4, "staging")] })
+
+    await user.click(screen.getByRole("combobox", { name: "Group" }))
+    expect(await screen.findByRole("option", { name: "prod" })).toBeInTheDocument()
+    expect(screen.getByRole("option", { name: "staging" })).toBeInTheDocument()
+    expect(screen.getByRole("option", { name: "None" })).toBeInTheDocument()
+  })
+
+  test("shows Missing group #5 when the saved group is absent from the list", () => {
+    renderForm({ connection: connection({ group_id: 5 }), groups: [] })
+
+    const combobox = screen.getByRole("combobox", { name: "Group" })
+    expect(combobox).toHaveTextContent("Missing group #5")
+  })
+
+  test("selecting a group sends its numeric group_id", async () => {
+    const user = userEvent.setup()
+    const onSubmit = vi.fn()
+    renderForm({ groups: [group(3, "prod")], onSubmit })
+
+    await user.type(screen.getByLabelText("Name"), "bastion")
+    await user.type(screen.getByLabelText("Host"), "10.0.0.1")
+    await user.type(screen.getByLabelText("Username"), "root")
+    await user.click(screen.getByRole("combobox", { name: "Group" }))
+    await user.click(await screen.findByRole("option", { name: "prod" }))
+    await user.click(screen.getByRole("button", { name: "Save" }))
+    expect(onSubmit).toHaveBeenCalledWith(expect.objectContaining({ group_id: 3 }))
+  })
+
   test("renders form errors with role alert", () => {
     render(
       <SSHForm
         connection={null}
         profiles={[]}
+        groups={[]}
         pending={false}
         error="a connection with that name already exists"
         onSubmit={vi.fn()}
