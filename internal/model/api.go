@@ -4,26 +4,28 @@ import "time"
 
 // SSHConnection is the redacted API representation of an SSH profile.
 // Secret values are never serialized; Has* booleans report presence so the
-// UI/CLI can show "password set" without exposing the value.
+// UI/CLI can show "password set" without exposing the value. KeyPairID
+// references a stored key pair when nonzero and KeyPairName is the
+// display-only pair name (empty when the reference is dangling).
 type SSHConnection struct {
-	ID                      int64     `json:"id"`
-	Name                    string    `json:"name"`
-	Host                    string    `json:"host"`
-	Port                    int       `json:"port"`
-	Username                string    `json:"username"`
-	HasPassword             bool      `json:"has_password"`
-	HasPrivateKey           bool      `json:"has_private_key"`
-	HasPrivateKeyPassphrase bool      `json:"has_private_key_passphrase"`
-	ProxyHost               string    `json:"proxy_host,omitempty"`
-	ProxyPort               int       `json:"proxy_port,omitempty"`
-	ProxyUsername           string    `json:"proxy_username,omitempty"`
-	HasProxyPassword        bool      `json:"has_proxy_password"`
-	JumpConnectionIDs       string    `json:"jump_connection_ids"`
-	DefaultDir              string    `json:"default_dir"`
-	GroupID                 int64     `json:"group_id"`
-	GroupName               string    `json:"group_name,omitempty"`
-	CreatedAt               time.Time `json:"created_at"`
-	UpdatedAt               time.Time `json:"updated_at"`
+	ID                int64     `json:"id"`
+	Name              string    `json:"name"`
+	Host              string    `json:"host"`
+	Port              int       `json:"port"`
+	Username          string    `json:"username"`
+	HasPassword       bool      `json:"has_password"`
+	KeyPairID         int64     `json:"key_pair_id"`
+	KeyPairName       string    `json:"key_pair_name,omitempty"`
+	ProxyHost         string    `json:"proxy_host,omitempty"`
+	ProxyPort         int       `json:"proxy_port,omitempty"`
+	ProxyUsername     string    `json:"proxy_username,omitempty"`
+	HasProxyPassword  bool      `json:"has_proxy_password"`
+	JumpConnectionIDs string    `json:"jump_connection_ids"`
+	DefaultDir        string    `json:"default_dir"`
+	GroupID           int64     `json:"group_id"`
+	GroupName         string    `json:"group_name,omitempty"`
+	CreatedAt         time.Time `json:"created_at"`
+	UpdatedAt         time.Time `json:"updated_at"`
 }
 
 // DBConnection is the redacted API representation of a DB profile.
@@ -45,21 +47,21 @@ type DBConnection struct {
 // SSHConnectionRequest is the write payload for creating/updating an SSH
 // profile. Secret fields are pointers: nil means "not provided" (keep the
 // stored value on update, store nothing on create); non-nil replaces.
+// KeyPairID selects a stored key pair; 0 means no stored pair selected.
 type SSHConnectionRequest struct {
-	Name                 string  `json:"name"`
-	Host                 string  `json:"host"`
-	Port                 int     `json:"port"`
-	Username             string  `json:"username"`
-	Password             *string `json:"password"`
-	PrivateKey           *string `json:"private_key"`
-	PrivateKeyPassphrase *string `json:"private_key_passphrase"`
-	ProxyHost            string  `json:"proxy_host"`
-	ProxyPort            int     `json:"proxy_port"`
-	ProxyUsername        string  `json:"proxy_username"`
-	ProxyPassword        *string `json:"proxy_password"`
-	JumpConnectionIDs    string  `json:"jump_connection_ids"`
-	DefaultDir           string  `json:"default_dir"`
-	GroupID              int64   `json:"group_id"`
+	Name              string  `json:"name"`
+	Host              string  `json:"host"`
+	Port              int     `json:"port"`
+	Username          string  `json:"username"`
+	Password          *string `json:"password"`
+	KeyPairID         int64   `json:"key_pair_id"`
+	ProxyHost         string  `json:"proxy_host"`
+	ProxyPort         int     `json:"proxy_port"`
+	ProxyUsername     string  `json:"proxy_username"`
+	ProxyPassword     *string `json:"proxy_password"`
+	JumpConnectionIDs string  `json:"jump_connection_ids"`
+	DefaultDir        string  `json:"default_dir"`
+	GroupID           int64   `json:"group_id"`
 }
 
 // DBConnectionRequest is the write payload for a DB profile.
@@ -98,4 +100,29 @@ type Group struct {
 // GroupRequest is the write payload for creating/renaming a group.
 type GroupRequest struct {
 	Name string `json:"name"`
+}
+
+// KeyPairVault is the single-pair API view returned by an individual vault
+// GET. It intentionally uses string values so the client receives raw
+// public/private/passphrase material for view/edit, unlike the redacted
+// list view. This is the sole API response that discloses key material.
+type KeyPairVault struct {
+	ID                   int64     `json:"id"`
+	Name                 string    `json:"name"`
+	PublicKey            string    `json:"public_key"`
+	PrivateKey           string    `json:"private_key"`
+	PrivateKeyPassphrase string    `json:"private_key_passphrase"`
+	CreatedAt            time.Time `json:"created_at"`
+	UpdatedAt            time.Time `json:"updated_at"`
+}
+
+// KeyPairRequest is the write payload for creating/updating a key pair.
+// Secret fields are pointers so omission on update retains the stored
+// value: nil means "not provided" (keep), non-nil empty string means
+// "explicitly clear".
+type KeyPairRequest struct {
+	Name                 string  `json:"name"`
+	PublicKey            *string `json:"public_key"`
+	PrivateKey           *string `json:"private_key"`
+	PrivateKeyPassphrase *string `json:"private_key_passphrase"`
 }

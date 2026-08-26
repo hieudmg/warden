@@ -5,19 +5,21 @@ import "time"
 // SSHProfile is the domain value for an SSH connection profile.
 // Secret fields hold plaintext values in memory; the store encrypts them
 // at rest with AAD bound to the row id and decrypts them on read.
+// KeyPairID references a stored key pair when nonzero; private-key
+// material itself lives only in the key-pair vault.
 type SSHProfile struct {
-	ID                   int64
-	Name                 string
-	Host                 string
-	Port                 int
-	Username             string
-	Password             []byte
-	PrivateKey           []byte
-	PrivateKeyPassphrase []byte
-	ProxyHost            string
-	ProxyPort            int
-	ProxyUsername        string
-	ProxyPassword        []byte
+	ID            int64
+	Name          string
+	Host          string
+	Port          int
+	Username      string
+	Password      []byte
+	KeyPairID     int64
+	KeyPairName   string
+	ProxyHost     string
+	ProxyPort     int
+	ProxyUsername string
+	ProxyPassword []byte
 	// JumpConnectionIDs is the raw JSON integer-array text stored on the row,
 	// e.g. `[12,4]`. Write operations validate JSON syntax only; logical
 	// resolution (missing ids, self-reference, cycles) happens at
@@ -27,11 +29,11 @@ type SSHProfile struct {
 	// that xssh prefixes to the remote shell command (`cd <dir> && exec ...`).
 	// Empty means no prefix. Validation lives in store/handlers: must be
 	// an absolute path with no path-traversal or control characters.
-	DefaultDir        string
-	GroupID           int64
-	GroupName         string
-	CreatedAt         time.Time
-	UpdatedAt         time.Time
+	DefaultDir string
+	GroupID    int64
+	GroupName  string
+	CreatedAt  time.Time
+	UpdatedAt  time.Time
 }
 
 // DBProfile is the domain value for a MySQL/MariaDB connection profile.
@@ -74,4 +76,32 @@ type SSHDependents struct {
 type GroupDependents struct {
 	SSH []DependentRef
 	DB  []DependentRef
+}
+
+// KeyPair is the domain value for a stored SSH key pair. Public key,
+// private key, and private-key passphrase are independently optional and
+// hold plaintext values in memory; the store encrypts them at rest with AAD
+// bound to the pair id and decrypts them on read. Editing a pair changes
+// the credentials used by every SSH connection referencing it.
+type KeyPair struct {
+	ID                   int64
+	Name                 string
+	PublicKey            []byte
+	PrivateKey           []byte
+	PrivateKeyPassphrase []byte
+	CreatedAt            time.Time
+	UpdatedAt            time.Time
+}
+
+// KeyPairSummary is the metadata-only view of a key pair used by list APIs.
+// Has* flags report field presence so list payloads never carry raw key
+// material; only a single-pair vault GET discloses values.
+type KeyPairSummary struct {
+	ID                      int64     `json:"id"`
+	Name                    string    `json:"name"`
+	HasPublicKey            bool      `json:"has_public_key"`
+	HasPrivateKey           bool      `json:"has_private_key"`
+	HasPrivateKeyPassphrase bool      `json:"has_private_key_passphrase"`
+	CreatedAt               time.Time `json:"created_at"`
+	UpdatedAt               time.Time `json:"updated_at"`
 }

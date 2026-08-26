@@ -125,9 +125,6 @@ func (s *Store) decryptSecret(aad []byte, blob []byte) ([]byte, error) {
 // fields are encrypted so AAD can bind each ciphertext to its stable
 // `warden/ssh/<id>/<field>` location.
 func (s *Store) CreateSSH(ctx context.Context, p model.SSHProfile) (model.SSHProfile, error) {
-	if err := normalizeSSHAuthentication(&p); err != nil {
-		return model.SSHProfile{}, fmt.Errorf("%w: %v", ErrValidation, err)
-	}
 	if err := validateJumpIDs(p.JumpConnectionIDs); err != nil {
 		return model.SSHProfile{}, fmt.Errorf("%w: %v", ErrValidation, err)
 	}
@@ -168,14 +165,6 @@ func (s *Store) CreateSSH(ctx context.Context, p model.SSHProfile) (model.SSHPro
 	if err != nil {
 		return model.SSHProfile{}, err
 	}
-	privateKey, err := s.encryptSecret(sshAAD(id, "private_key"), p.PrivateKey)
-	if err != nil {
-		return model.SSHProfile{}, err
-	}
-	passphrase, err := s.encryptSecret(sshAAD(id, "private_key_passphrase"), p.PrivateKeyPassphrase)
-	if err != nil {
-		return model.SSHProfile{}, err
-	}
 	proxyPassword, err := s.encryptSecret(sshAAD(id, "proxy_password"), p.ProxyPassword)
 	if err != nil {
 		return model.SSHProfile{}, err
@@ -183,9 +172,9 @@ func (s *Store) CreateSSH(ctx context.Context, p model.SSHProfile) (model.SSHPro
 
 	if _, err := tx.ExecContext(ctx, `
 		UPDATE ssh_connections
-		SET password=?, private_key=?, private_key_passphrase=?, proxy_password=?
+		SET password=?, proxy_password=?
 		WHERE id=?`,
-		password, privateKey, passphrase, proxyPassword, id); err != nil {
+		password, proxyPassword, id); err != nil {
 		return model.SSHProfile{}, fmt.Errorf("store secrets: %w", err)
 	}
 
@@ -203,8 +192,8 @@ func (s *Store) CreateSSH(ctx context.Context, p model.SSHProfile) (model.SSHPro
 
 func (s *Store) GetSSH(ctx context.Context, id int64) (model.SSHProfile, error) {
 	row := s.db.QueryRowContext(ctx, `
-		SELECT s.id, s.name, s.host, s.port, s.username, s.password, s.private_key,
-		       s.private_key_passphrase, s.proxy_host, s.proxy_port, s.proxy_username,
+		SELECT s.id, s.name, s.host, s.port, s.username, s.password,
+		       s.proxy_host, s.proxy_port, s.proxy_username,
 		       s.proxy_password, s.jump_connection_ids, s.default_dir,
 		       s.group_id, COALESCE(g.name, ''), s.created_at, s.updated_at
 		FROM ssh_connections s
@@ -212,10 +201,10 @@ func (s *Store) GetSSH(ctx context.Context, id int64) (model.SSHProfile, error) 
 		WHERE s.id = ?`, id)
 
 	var p model.SSHProfile
-	var password, privateKey, passphrase, proxyPassword []byte
+	var password, proxyPassword []byte
 	var createdAt, updatedAt string
 	err := row.Scan(&p.ID, &p.Name, &p.Host, &p.Port, &p.Username,
-		&password, &privateKey, &passphrase, &p.ProxyHost, &p.ProxyPort, &p.ProxyUsername,
+		&password, &p.ProxyHost, &p.ProxyPort, &p.ProxyUsername,
 		&proxyPassword, &p.JumpConnectionIDs, &p.DefaultDir,
 		&p.GroupID, &p.GroupName, &createdAt, &updatedAt)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -227,12 +216,6 @@ func (s *Store) GetSSH(ctx context.Context, id int64) (model.SSHProfile, error) 
 
 	if p.Password, err = s.decryptSecret(sshAAD(id, "password"), password); err != nil {
 		return model.SSHProfile{}, fmt.Errorf("decrypt password for %d: %w", id, err)
-	}
-	if p.PrivateKey, err = s.decryptSecret(sshAAD(id, "private_key"), privateKey); err != nil {
-		return model.SSHProfile{}, fmt.Errorf("decrypt private key for %d: %w", id, err)
-	}
-	if p.PrivateKeyPassphrase, err = s.decryptSecret(sshAAD(id, "private_key_passphrase"), passphrase); err != nil {
-		return model.SSHProfile{}, fmt.Errorf("decrypt passphrase for %d: %w", id, err)
 	}
 	if p.ProxyPassword, err = s.decryptSecret(sshAAD(id, "proxy_password"), proxyPassword); err != nil {
 		return model.SSHProfile{}, fmt.Errorf("decrypt proxy password for %d: %w", id, err)
@@ -286,9 +269,6 @@ func (s *Store) UpdateSSH(ctx context.Context, p model.SSHProfile) error {
 	if p.ID == 0 {
 		return errors.New("update ssh_connection requires id")
 	}
-	if err := normalizeSSHAuthentication(&p); err != nil {
-		return fmt.Errorf("%w: %v", ErrValidation, err)
-	}
 	if err := validateJumpIDs(p.JumpConnectionIDs); err != nil {
 		return fmt.Errorf("%w: %v", ErrValidation, err)
 	}
@@ -326,26 +306,11 @@ func (s *Store) UpdateSSH(ctx context.Context, p model.SSHProfile) error {
 		return ErrNotFound
 	}
 
-	if len(p.Password) > 0 {
-		if _, err := tx.ExecContext(ctx,
-			"UPDATE ssh_connections SET private_key=NULL, private_key_passphrase=NULL WHERE id=?", p.ID); err != nil {
-			return fmt.Errorf("clear private key authentication: %w", err)
-		}
-	}
-	if len(p.PrivateKey) > 0 {
-		if _, err := tx.ExecContext(ctx,
-			"UPDATE ssh_connections SET password=NULL WHERE id=?", p.ID); err != nil {
-			return fmt.Errorf("clear password authentication: %w", err)
-		}
-	}
-
 	updates := []struct {
 		field     string
 		plaintext []byte
 	}{
 		{"password", p.Password},
-		{"private_key", p.PrivateKey},
-		{"private_key_passphrase", p.PrivateKeyPassphrase},
 		{"proxy_password", p.ProxyPassword},
 	}
 	for _, u := range updates {
@@ -617,19 +582,6 @@ func sshAAD(id int64, field string) []byte {
 
 func dbAAD(id int64, field string) []byte {
 	return []byte(fmt.Sprintf("warden/db/%d/%s", id, field))
-}
-
-// normalizeSSHAuthentication rejects conflicting credentials and removes a
-// passphrase whenever password authentication is selected.
-func normalizeSSHAuthentication(p *model.SSHProfile) error {
-	if len(p.Password) > 0 && len(p.PrivateKey) > 0 {
-		return errors.New("password and private_key are mutually exclusive")
-	}
-	if len(p.Password) > 0 {
-		p.PrivateKey = nil
-		p.PrivateKeyPassphrase = nil
-	}
-	return nil
 }
 
 func validateSSHMetadata(p model.SSHProfile) error {

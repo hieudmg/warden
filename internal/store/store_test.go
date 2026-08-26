@@ -1,6 +1,7 @@
 package store
 
 import (
+	"bytes"
 	"context"
 	"crypto/rand"
 	"database/sql"
@@ -154,8 +155,9 @@ func TestSecretColumnsAreBLOB(t *testing.T) {
 	ctx := context.Background()
 
 	wantBlob := map[string][]string{
-		"ssh_connections": {"password", "private_key", "private_key_passphrase", "proxy_password"},
+		"ssh_connections": {"password", "proxy_password"},
 		"db_connections":  {"password"},
+		"key_pairs":       {"public_key", "private_key", "private_key_passphrase"},
 	}
 	for table, columns := range wantBlob {
 		rows, err := s.db.QueryContext(ctx, "PRAGMA table_info("+table+")")
@@ -228,6 +230,127 @@ func TestDBSSHReferenceHasNoForeignKey(t *testing.T) {
 	}
 	if got.SSHConnectionID != ssh.ID {
 		t.Errorf("DB row SSHConnectionID = %d, want preserved %d", got.SSHConnectionID, ssh.ID)
+	}
+}
+
+// TestOpenMigratesSSHKeysToKeyPairReferences proves migration 004 rebuilds
+// ssh_connections: legacy per-connection private-key ciphertext columns are
+// dropped (key material is intentionally destroyed), key_pair_id defaults to
+// 0, and all other SSH data (password, proxy fields, jump ids, default dir,
+// group) survives. The prior schema is seeded from the embedded migration
+// files and schema_migrations is stamped at version 3 so Open applies only
+// 004.
+func TestOpenMigratesSSHKeysToKeyPairReferences(t *testing.T) {
+	var key [32]byte
+	if _, err := rand.Read(key[:]); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(t.TempDir(), "warden.db")
+	db, err := sql.Open("sqlite", sqliteDSN(path))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"001_initial.up.sql", "002_default_dir.up.sql", "003_groups.up.sql"} {
+		statement, err := migrations.FS.ReadFile(name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := db.Exec(string(statement)); err != nil {
+			t.Fatalf("apply %s: %v", name, err)
+		}
+	}
+	if _, err := db.Exec("CREATE TABLE schema_migrations (version uint64, dirty bool)"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec("INSERT INTO schema_migrations (version, dirty) VALUES (3, false)"); err != nil {
+		t.Fatal(err)
+	}
+
+	ts := time.Now().UTC().Format(time.RFC3339Nano)
+	oldPassword := []byte("encrypted-password-blob")
+	legacyKey := []byte("encrypted-private-key-blob")
+	legacyPassphrase := []byte("encrypted-passphrase-blob")
+	oldGroupID := int64(7)
+	if _, err := db.Exec(`INSERT INTO ssh_connections
+		(name, host, port, username, password, private_key, private_key_passphrase,
+		 proxy_host, proxy_port, proxy_username, proxy_password, jump_connection_ids,
+		 default_dir, group_id, created_at, updated_at)
+		VALUES ('ssh', 'h', 22, 'u', ?, ?, ?, 'proxy', 3128, 'pu', ?, '[1, 2]', '/srv/app', ?, ?, ?)`,
+		oldPassword, legacyKey, legacyPassphrase, []byte("encrypted-proxy-blob"),
+		oldGroupID, ts, ts); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	s, err := Open(context.Background(), path, key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	ctx := context.Background()
+
+	var password []byte
+	var keyPairID, groupID int64
+	err = s.db.QueryRow(`SELECT password, key_pair_id, group_id FROM ssh_connections WHERE name='ssh'`).
+		Scan(&password, &keyPairID, &groupID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(password, oldPassword) || keyPairID != 0 || groupID != oldGroupID {
+		t.Fatalf("migrated ssh = password:%x keyPair:%d group:%d", password, keyPairID, groupID)
+	}
+
+	var proxyHost, jumpIDs, defaultDir string
+	var proxyPort int
+	if err := s.db.QueryRowContext(ctx, `SELECT proxy_host, proxy_port, jump_connection_ids, default_dir FROM ssh_connections WHERE name='ssh'`).
+		Scan(&proxyHost, &proxyPort, &jumpIDs, &defaultDir); err != nil {
+		t.Fatal(err)
+	}
+	if proxyHost != "proxy" || proxyPort != 3128 || jumpIDs != "[1, 2]" || defaultDir != "/srv/app" {
+		t.Fatalf("migrated ssh metadata = proxy:%s:%d jump:%s dir:%s", proxyHost, proxyPort, jumpIDs, defaultDir)
+	}
+
+	// Legacy key columns are gone; key_pair_id is present.
+	cols := map[string]bool{}
+	rows, err := s.db.QueryContext(ctx, "PRAGMA table_info(ssh_connections)")
+	if err != nil {
+		t.Fatalf("PRAGMA table_info(ssh_connections): %v", err)
+	}
+	for rows.Next() {
+		var cid int
+		var name, typ string
+		var notNull, pk int
+		var dflt sql.NullString
+		if err := rows.Scan(&cid, &name, &typ, &notNull, &dflt, &pk); err != nil {
+			t.Fatalf("scan table_info: %v", err)
+		}
+		cols[name] = true
+	}
+	rows.Close()
+	if cols["private_key"] || cols["private_key_passphrase"] {
+		t.Errorf("legacy key columns still present after migration 004: private_key=%v private_key_passphrase=%v",
+			cols["private_key"], cols["private_key_passphrase"])
+	}
+	if !cols["key_pair_id"] {
+		t.Error("ssh_connections.key_pair_id missing after migration 004")
+	}
+
+	var tableName string
+	if err := s.db.QueryRowContext(ctx, "SELECT name FROM sqlite_master WHERE type='table' AND name='key_pairs'").Scan(&tableName); err != nil {
+		t.Errorf("key_pairs table missing: %v", err)
+	}
+	for _, idx := range []string{"idx_ssh_connections_group_id", "idx_ssh_connections_key_pair_id"} {
+		var idxName string
+		if err := s.db.QueryRowContext(ctx, "SELECT name FROM sqlite_master WHERE type='index' AND name=?", idx).Scan(&idxName); err != nil {
+			t.Errorf("index %q missing: %v", idx, err)
+		}
+	}
+
+	// Legacy private ciphertext cannot be selected: the column no longer exists.
+	if err := s.db.QueryRowContext(ctx, "SELECT private_key FROM ssh_connections WHERE name='ssh'").Scan(new([]byte)); err == nil {
+		t.Error("select of dropped private_key column succeeded")
 	}
 }
 
