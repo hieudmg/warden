@@ -13,6 +13,7 @@ import { useListResource } from "@/hooks/use-list-resource"
 import { SSHTab } from "@/features/ssh/ssh-tab"
 import { DBTab } from "@/features/db/db-tab"
 import { GroupsTab } from "@/features/groups/groups-tab"
+import { KeyPairsTab } from "@/features/key-pairs/key-pairs-tab"
 import { ProjectsReportsTab } from "@/features/projects/projects-reports-tab"
 
 export interface NotificationItem {
@@ -58,6 +59,7 @@ export function App() {
   const db = useListResource(api.listDB)
   const groups = useListResource(api.listGroups)
   const projects = useListResource(api.listProjects)
+  const keyPairs = useListResource(api.listKeyPairs)
 
   const [notifications, setNotifications] = useState<NotificationItem[]>([])
   const nextNotificationID = useRef(1)
@@ -85,6 +87,7 @@ export function App() {
           <TabsTrigger value="ssh">SSH</TabsTrigger>
           <TabsTrigger value="db">Databases</TabsTrigger>
           <TabsTrigger value="groups">Groups</TabsTrigger>
+          <TabsTrigger value="key-pairs">Key Pairs</TabsTrigger>
           <TabsTrigger value="projects">Projects &amp; Reports</TabsTrigger>
         </TabsList>
         <TabsContent value="ssh">
@@ -95,6 +98,9 @@ export function App() {
         </TabsContent>
         <TabsContent value="groups">
           <GroupsTab resource={groups} notify={notify} />
+        </TabsContent>
+        <TabsContent value="key-pairs">
+          <KeyPairsTab resource={keyPairs} notify={notify} />
         </TabsContent>
         <TabsContent value="projects">
           <ProjectsReportsTab resource={projects} notify={notify} />

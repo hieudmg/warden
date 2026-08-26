@@ -56,6 +56,34 @@ export interface GroupRequest {
   name: string
 }
 
+// Key pairs. Summary is the metadata-only view: presence flags, never raw
+// key material. Vault is the single-pair GET view that discloses raw
+// public/private/passphrase values. Request secret fields are string | null:
+// null means "not provided" (keep the stored value on update); a non-null
+// empty string explicitly clears.
+export interface KeyPairSummary {
+  id: number
+  name: string
+  has_public_key: boolean
+  has_private_key: boolean
+  has_private_key_passphrase: boolean
+  created_at: string
+  updated_at: string
+}
+
+export interface KeyPairVault extends KeyPairSummary {
+  public_key: string
+  private_key: string
+  private_key_passphrase: string
+}
+
+export interface KeyPairRequest {
+  name: string
+  public_key: string | null
+  private_key: string | null
+  private_key_passphrase: string | null
+}
+
 export interface Report {
   id: number
   project: string

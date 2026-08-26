@@ -4,7 +4,7 @@ import { useState } from "react"
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest"
 import { App, Notifications } from "./app"
 import { api } from "@/api/client"
-import type { SSHConnection, DBConnection, Group, Project } from "./api/types"
+import type { SSHConnection, DBConnection, Group, KeyPairSummary, Project } from "./api/types"
 
 vi.mock("@/api/client", () => ({
   api: {
@@ -12,6 +12,7 @@ vi.mock("@/api/client", () => ({
     listDB: vi.fn(),
     listGroups: vi.fn(),
     listProjects: vi.fn(),
+    listKeyPairs: vi.fn(),
     createSSH: vi.fn(),
     updateSSH: vi.fn(),
     deleteSSH: vi.fn(),
@@ -24,6 +25,11 @@ vi.mock("@/api/client", () => ({
     updateGroup: vi.fn(),
     deleteGroup: vi.fn(),
     groupDependents: vi.fn(),
+    getKeyPair: vi.fn(),
+    createKeyPair: vi.fn(),
+    updateKeyPair: vi.fn(),
+    deleteKeyPair: vi.fn(),
+    keyPairDependents: vi.fn(),
     listReports: vi.fn(),
     createProject: vi.fn(),
     createReport: vi.fn(),
@@ -85,11 +91,24 @@ function group(id: number, name: string): Group {
   }
 }
 
+function keyPair(id: number): KeyPairSummary {
+  return {
+    id,
+    name: `pair-${id}`,
+    has_public_key: true,
+    has_private_key: true,
+    has_private_key_passphrase: false,
+    created_at: "2026-08-26T00:00:00Z",
+    updated_at: "2026-08-26T00:00:00Z",
+  }
+}
+
 beforeEach(() => {
   mockedAPI.listSSH.mockReset().mockResolvedValue([sshConnection(1)])
   mockedAPI.listDB.mockReset().mockResolvedValue([dbConnection(1)])
   mockedAPI.listGroups.mockReset().mockResolvedValue([group(1, "prod")])
   mockedAPI.listProjects.mockReset().mockResolvedValue([project(1)])
+  mockedAPI.listKeyPairs.mockReset().mockResolvedValue([keyPair(1)])
   mockedAPI.listReports.mockReset().mockResolvedValue([])
   mockedAPI.createProject.mockReset().mockResolvedValue({ id: 2, name: "project-2" })
   mockedAPI.createReport.mockReset().mockResolvedValue({
@@ -112,21 +131,24 @@ describe("App", () => {
     const sshTab = screen.getByRole("tab", { name: "SSH" })
     const dbTab = screen.getByRole("tab", { name: "Databases" })
     const groupsTab = screen.getByRole("tab", { name: "Groups" })
+    const keyPairsTab = screen.getByRole("tab", { name: "Key Pairs" })
     const projectsTab = screen.getByRole("tab", { name: "Projects & Reports" })
 
     expect(sshTab).toHaveAttribute("aria-selected", "true")
     expect(dbTab).toHaveAttribute("aria-selected", "false")
     expect(groupsTab).toHaveAttribute("aria-selected", "false")
+    expect(keyPairsTab).toHaveAttribute("aria-selected", "false")
     expect(projectsTab).toHaveAttribute("aria-selected", "false")
   })
 
-  test("loads all four list resources concurrently on mount", async () => {
+  test("loads all five list resources concurrently on mount", async () => {
     render(<App />)
 
     expect(mockedAPI.listSSH).toHaveBeenCalledTimes(1)
     expect(mockedAPI.listDB).toHaveBeenCalledTimes(1)
     expect(mockedAPI.listGroups).toHaveBeenCalledTimes(1)
     expect(mockedAPI.listProjects).toHaveBeenCalledTimes(1)
+    expect(mockedAPI.listKeyPairs).toHaveBeenCalledTimes(1)
   })
 
   test("switches between module tabs by accessible tab roles", async () => {
@@ -136,6 +158,7 @@ describe("App", () => {
     const sshTab = screen.getByRole("tab", { name: "SSH" })
     const dbTab = screen.getByRole("tab", { name: "Databases" })
     const groupsTab = screen.getByRole("tab", { name: "Groups" })
+    const keyPairsTab = screen.getByRole("tab", { name: "Key Pairs" })
     const projectsTab = screen.getByRole("tab", { name: "Projects & Reports" })
 
     await user.click(dbTab)
@@ -146,9 +169,13 @@ describe("App", () => {
     expect(groupsTab).toHaveAttribute("aria-selected", "true")
     expect(dbTab).toHaveAttribute("aria-selected", "false")
 
+    await user.click(keyPairsTab)
+    expect(keyPairsTab).toHaveAttribute("aria-selected", "true")
+    expect(groupsTab).toHaveAttribute("aria-selected", "false")
+
     await user.click(projectsTab)
     expect(projectsTab).toHaveAttribute("aria-selected", "true")
-    expect(groupsTab).toHaveAttribute("aria-selected", "false")
+    expect(keyPairsTab).toHaveAttribute("aria-selected", "false")
   })
 
   test("switches tabs with arrow keys following Radix behavior", async () => {
@@ -158,6 +185,7 @@ describe("App", () => {
     const sshTab = screen.getByRole("tab", { name: "SSH" })
     const dbTab = screen.getByRole("tab", { name: "Databases" })
     const groupsTab = screen.getByRole("tab", { name: "Groups" })
+    const keyPairsTab = screen.getByRole("tab", { name: "Key Pairs" })
     const projectsTab = screen.getByRole("tab", { name: "Projects & Reports" })
 
     sshTab.focus()
@@ -170,12 +198,20 @@ describe("App", () => {
     expect(dbTab).toHaveAttribute("aria-selected", "false")
 
     await user.keyboard("{ArrowRight}")
-    expect(projectsTab).toHaveAttribute("aria-selected", "true")
+    expect(keyPairsTab).toHaveAttribute("aria-selected", "true")
     expect(groupsTab).toHaveAttribute("aria-selected", "false")
+
+    await user.keyboard("{ArrowRight}")
+    expect(projectsTab).toHaveAttribute("aria-selected", "true")
+    expect(keyPairsTab).toHaveAttribute("aria-selected", "false")
+
+    await user.keyboard("{ArrowLeft}")
+    expect(keyPairsTab).toHaveAttribute("aria-selected", "true")
+    expect(projectsTab).toHaveAttribute("aria-selected", "false")
 
     await user.keyboard("{ArrowLeft}")
     expect(groupsTab).toHaveAttribute("aria-selected", "true")
-    expect(projectsTab).toHaveAttribute("aria-selected", "false")
+    expect(keyPairsTab).toHaveAttribute("aria-selected", "false")
   })
 
   test("renders group rows when the Groups tab is active", async () => {
@@ -185,6 +221,16 @@ describe("App", () => {
     await user.click(screen.getByRole("tab", { name: "Groups" }))
     expect(await screen.findByText("prod")).toBeInTheDocument()
     expect(screen.getByText("SSH 0 · DB 0")).toBeInTheDocument()
+  })
+
+  test("renders key-pair rows when the Key Pairs tab is active", async () => {
+    const user = userEvent.setup()
+    render(<App />)
+
+    expect(mockedAPI.listKeyPairs).toHaveBeenCalledTimes(1)
+    await user.click(screen.getByRole("tab", { name: "Key Pairs" }))
+    expect(await screen.findByRole("heading", { name: "Key pairs" })).toBeInTheDocument()
+    expect(await screen.findByText("pair-1")).toBeInTheDocument()
   })
 })
 

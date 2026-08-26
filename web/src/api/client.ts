@@ -4,6 +4,9 @@ import type {
   DependentsResponse,
   Group,
   GroupRequest,
+  KeyPairRequest,
+  KeyPairSummary,
+  KeyPairVault,
   Project,
   ProjectRequest,
   Report,
@@ -128,6 +131,20 @@ export const api = {
     request<void>(`/api/v1/groups/${id}`, { method: "DELETE" }).then(() => undefined),
   groupDependents: (id: number): Promise<DependentsResponse> =>
     request<DependentsResponse>(`/api/v1/groups/${id}/dependents`) as Promise<DependentsResponse>,
+
+  // Key pairs
+  listKeyPairs: (signal?: AbortSignal): Promise<KeyPairSummary[]> =>
+    request<KeyPairSummary[]>("/api/v1/key-pairs", { signal }) as Promise<KeyPairSummary[]>,
+  getKeyPair: (id: number): Promise<KeyPairVault> =>
+    request<KeyPairVault>(`/api/v1/key-pairs/${id}`) as Promise<KeyPairVault>,
+  createKeyPair: (payload: KeyPairRequest): Promise<KeyPairSummary> =>
+    request<KeyPairSummary>("/api/v1/key-pairs", { method: "POST", json: payload }) as Promise<KeyPairSummary>,
+  updateKeyPair: (id: number, payload: KeyPairRequest): Promise<KeyPairSummary> =>
+    request<KeyPairSummary>(`/api/v1/key-pairs/${id}`, { method: "PUT", json: payload }) as Promise<KeyPairSummary>,
+  deleteKeyPair: (id: number): Promise<void> =>
+    request<void>(`/api/v1/key-pairs/${id}`, { method: "DELETE" }).then(() => undefined),
+  keyPairDependents: (id: number): Promise<DependentsResponse> =>
+    request<DependentsResponse>(`/api/v1/key-pairs/${id}/dependents`) as Promise<DependentsResponse>,
 
   // Projects and reports
   listProjects: (signal?: AbortSignal): Promise<Project[]> =>

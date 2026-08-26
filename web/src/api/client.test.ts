@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, test, vi } from "vitest"
 import { api, ApiError } from "./client"
-import type { SSHConnectionRequest } from "./types"
+import type { KeyPairRequest, SSHConnectionRequest } from "./types"
 
 afterEach(() => {
   vi.unstubAllGlobals()
@@ -103,5 +103,136 @@ describe("api client", () => {
     expect(error.code).toBe("conflict")
     expect(error.message).toBe("name exists")
     expect(error.status).toBe(409)
+  })
+
+  test("lists key pairs from the metadata-only endpoint", async () => {
+    const pairs = [
+      {
+        id: 1,
+        name: "prod",
+        has_public_key: true,
+        has_private_key: true,
+        has_private_key_passphrase: false,
+        created_at: "2026-08-26T00:00:00Z",
+        updated_at: "2026-08-26T00:00:00Z",
+      },
+    ]
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(jsonResponse(pairs)))
+    const result = await api.listKeyPairs()
+    expect(vi.mocked(fetch).mock.calls[0][0]).toBe("/api/v1/key-pairs")
+    expect(result).toEqual(pairs)
+  })
+
+  test("GET key pair returns the vault with raw material", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        jsonResponse({
+          id: 1,
+          name: "prod",
+          public_key: "PUBLIC-KEY-MATERIAL",
+          private_key: "PRIVATE-KEY-MATERIAL",
+          private_key_passphrase: "PHRASE-MATERIAL",
+          created_at: "2026-08-26T00:00:00Z",
+          updated_at: "2026-08-26T00:00:00Z",
+        }),
+      ),
+    )
+    const vault = await api.getKeyPair(1)
+    expect(vi.mocked(fetch).mock.calls[0][0]).toBe("/api/v1/key-pairs/1")
+    expect(vault.id).toBe(1)
+    expect(vault.name).toBe("prod")
+    expect(vault.public_key).toBe("PUBLIC-KEY-MATERIAL")
+    expect(vault.private_key).toBe("PRIVATE-KEY-MATERIAL")
+    expect(vault.private_key_passphrase).toBe("PHRASE-MATERIAL")
+  })
+
+  test("creates a key pair with nullable secret fields", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValue(
+        jsonResponse(
+          {
+            id: 1,
+            name: "prod",
+            has_public_key: true,
+            has_private_key: false,
+            has_private_key_passphrase: false,
+            created_at: "2026-08-26T00:00:00Z",
+            updated_at: "2026-08-26T00:00:00Z",
+          },
+          201,
+        ),
+      )
+    vi.stubGlobal("fetch", fetchMock)
+    const payload: KeyPairRequest = {
+      name: "prod",
+      public_key: "PUBLIC-KEY-MATERIAL",
+      private_key: null,
+      private_key_passphrase: null,
+    }
+    await api.createKeyPair(payload)
+    expect(fetchMock.mock.calls[0][0]).toBe("/api/v1/key-pairs")
+    expect(fetchMock.mock.calls[0][1]?.method).toBe("POST")
+    expect(JSON.parse(fetchMock.mock.calls[0][1]?.body as string)).toEqual(payload)
+  })
+
+  test("updates a key pair with an explicit empty clear value", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValue(
+        jsonResponse({
+          id: 1,
+          name: "prod",
+          has_public_key: true,
+          has_private_key: false,
+          has_private_key_passphrase: false,
+          created_at: "2026-08-26T00:00:00Z",
+          updated_at: "2026-08-26T00:00:00Z",
+        }),
+      )
+    vi.stubGlobal("fetch", fetchMock)
+    const payload: KeyPairRequest = {
+      name: "prod",
+      public_key: null,
+      private_key: "",
+      private_key_passphrase: null,
+    }
+    await api.updateKeyPair(1, payload)
+    expect(fetchMock.mock.calls[0][0]).toBe("/api/v1/key-pairs/1")
+    expect(fetchMock.mock.calls[0][1]?.method).toBe("PUT")
+    expect(JSON.parse(fetchMock.mock.calls[0][1]?.body as string)).toEqual(payload)
+  })
+
+  test("deletes a key pair via 204", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(null, { status: 204 })))
+    await expect(api.deleteKeyPair(3)).resolves.toBeUndefined()
+    expect(vi.mocked(fetch).mock.calls[0][0]).toBe("/api/v1/key-pairs/3")
+    expect(vi.mocked(fetch).mock.calls[0][1]?.method).toBe("DELETE")
+  })
+
+  test("lists key-pair dependents", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(jsonResponse({ ssh: [{ id: 2, name: "jump-a" }], db: [] })),
+    )
+    const dependents = await api.keyPairDependents(1)
+    expect(vi.mocked(fetch).mock.calls[0][0]).toBe("/api/v1/key-pairs/1/dependents")
+    expect(dependents).toEqual({ ssh: [{ id: 2, name: "jump-a" }], db: [] })
+  })
+
+  test("surfaces ApiError on a duplicate key-pair name", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        jsonResponse(
+          { code: "conflict", message: "a key pair with that name already exists" },
+          409,
+        ),
+      ),
+    )
+    await expect(
+      api.createKeyPair({ name: "dup", public_key: null, private_key: null, private_key_passphrase: null }),
+    ).rejects.toMatchObject({ name: "ApiError", code: "conflict", status: 409 })
   })
 })
