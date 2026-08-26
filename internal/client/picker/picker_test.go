@@ -208,16 +208,32 @@ func fieldsText(fields []Field) string {
 func TestFormatConnectionRedactsSecretsAndShowsAllFields(t *testing.T) {
 	c := model.SSHConnection{
 		ID: 7, Name: "prod", Host: "db.example.test", Port: 2222, Username: "deploy",
-		HasPassword: true, HasPrivateKey: false, HasPrivateKeyPassphrase: true,
+		HasPassword: true, KeyPairID: 11, KeyPairName: "deploy-key",
 		ProxyHost: "proxy.example.test", ProxyPort: 8080, ProxyUsername: "proxy-user",
 		HasProxyPassword: true, JumpConnectionIDs: "[1,2]", DefaultDir: "/srv/app",
 		GroupID: 3, GroupName: "prod",
 	}
 	output := fieldsText(FormatConnection(c))
-	for _, want := range []string{"ID", "prod", "Host", "db.example.test", "Password", "[configured]", "Private key", "[not configured]", "Proxy password", "Jump connection IDs", "Default directory", "Group: prod"} {
+	for _, want := range []string{"ID", "prod", "Host", "db.example.test", "Password", "[configured]", "Key pair", "deploy-key", "Proxy password", "Jump connection IDs", "Default directory", "Group: prod"} {
 		if !strings.Contains(output, want) {
 			t.Fatalf("preview missing %q: %q", want, output)
 		}
+	}
+	for _, obsolete := range []string{"Private key", "Private-key passphrase"} {
+		if strings.Contains(output, obsolete) {
+			t.Fatalf("preview renders obsolete field %q: %q", obsolete, output)
+		}
+	}
+}
+
+func TestFormatConnectionMissingKeyPairReference(t *testing.T) {
+	c := model.SSHConnection{ID: 7, KeyPairID: 9}
+	output := fieldsText(FormatConnection(c))
+	if !strings.Contains(output, "Key pair: Missing key pair #9") {
+		t.Fatalf("preview missing dangling key-pair marker: %q", output)
+	}
+	if strings.Contains(output, "PRIVATE-KEY-MATERIAL") || strings.Contains(output, "PHRASE-MATERIAL") {
+		t.Fatalf("preview renders key material: %q", output)
 	}
 }
 

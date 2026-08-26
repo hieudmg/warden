@@ -99,6 +99,322 @@ func TestCreateSSH(t *testing.T) {
 	}
 }
 
+func TestKeyPairListRedactsVaultMaterial(t *testing.T) {
+	mux, s, _ := newTestAPI(t)
+	ctx := context.Background()
+	for _, name := range []string{"alpha", "beta"} {
+		if _, err := s.CreateKeyPair(ctx, model.KeyPair{
+			Name:                 name,
+			PublicKey:            []byte("PUBLIC-KEY-MATERIAL-" + name),
+			PrivateKey:           []byte("PRIVATE-KEY-MATERIAL-" + name),
+			PrivateKeyPassphrase: []byte("PHRASE-MATERIAL-" + name),
+		}); err != nil {
+			t.Fatalf("CreateKeyPair(%s): %v", name, err)
+		}
+	}
+
+	rec := doRequest(t, mux, "GET", "/api/v1/key-pairs", "")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body=%s", rec.Code, rec.Body.String())
+	}
+	body := rec.Body.String()
+	for _, secret := range []string{"PUBLIC-KEY-MATERIAL", "PRIVATE-KEY-MATERIAL", "PHRASE-MATERIAL"} {
+		if strings.Contains(body, secret) {
+			t.Errorf("list response leaks %s: %s", secret, body)
+		}
+	}
+	if strings.Contains(body, `"public_key":"`) || strings.Contains(body, `"private_key":"`) {
+		t.Errorf("list response carries a raw key field: %s", body)
+	}
+	if !strings.Contains(body, `"name":"alpha"`) ||
+		!strings.Contains(body, `"has_public_key":true`) ||
+		!strings.Contains(body, `"has_private_key":true`) ||
+		!strings.Contains(body, `"has_private_key_passphrase":true`) {
+		t.Errorf("list response missing presence metadata: %s", body)
+	}
+}
+
+func TestGetKeyPairReturnsVaultMaterial(t *testing.T) {
+	mux, s, _ := newTestAPI(t)
+	ctx := context.Background()
+	created, err := s.CreateKeyPair(ctx, model.KeyPair{
+		Name: "vault", PublicKey: []byte("PUBLIC-KEY-EXACT"),
+		PrivateKey: []byte("PRIVATE-KEY-EXACT"), PrivateKeyPassphrase: []byte("PHRASE-EXACT"),
+	})
+	if err != nil {
+		t.Fatalf("CreateKeyPair: %v", err)
+	}
+
+	rec := doRequest(t, mux, "GET", fmt.Sprintf("/api/v1/key-pairs/%d", created.ID), "")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body=%s", rec.Code, rec.Body.String())
+	}
+	body := rec.Body.String()
+	for _, want := range []string{
+		`"public_key":"PUBLIC-KEY-EXACT"`,
+		`"private_key":"PRIVATE-KEY-EXACT"`,
+		`"private_key_passphrase":"PHRASE-EXACT"`,
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("vault GET missing %s: %s", want, body)
+		}
+	}
+
+	// A missing pair maps to the standard store error envelope.
+	rec = doRequest(t, mux, "GET", "/api/v1/key-pairs/999999", "")
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, want 404, body=%s", rec.Code, rec.Body.String())
+	}
+	var e struct {
+		Code string `json:"code"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &e); err != nil {
+		t.Fatalf("decode error body: %v", err)
+	}
+	if e.Code != "not_found" {
+		t.Errorf("error code = %q, want not_found", e.Code)
+	}
+}
+
+func TestKeyPairCreateUpdateAndClear(t *testing.T) {
+	mux, s, path := newTestAPI(t)
+	ctx := context.Background()
+
+	// Unknown JSON field is rejected with 400 invalid_request.
+	body := `{"name":"pair-a","private_key":"PRIVATE-KEY-MATERIAL","bogus":1}`
+	rec := doRequest(t, mux, "POST", "/api/v1/key-pairs", body)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("unknown field status = %d, want 400, body=%s", rec.Code, rec.Body.String())
+	}
+	var e struct {
+		Code string `json:"code"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &e); err != nil {
+		t.Fatalf("decode error body: %v", err)
+	}
+	if e.Code != "invalid_request" {
+		t.Errorf("error code = %q, want invalid_request", e.Code)
+	}
+
+	// Create stores all three values but the response is metadata-only.
+	body = `{"name":"pair-a","public_key":"PUBLIC-KEY-A","private_key":"PRIVATE-KEY-A","private_key_passphrase":"PHRASE-A"}`
+	rec = doRequest(t, mux, "POST", "/api/v1/key-pairs", body)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("create status = %d, body=%s", rec.Code, rec.Body.String())
+	}
+	respBody := rec.Body.String()
+	if strings.Contains(respBody, "PRIVATE-KEY-A") || strings.Contains(respBody, "PHRASE-A") {
+		t.Errorf("create response leaks key material: %s", respBody)
+	}
+	var created model.KeyPairSummary
+	if err := json.Unmarshal(rec.Body.Bytes(), &created); err != nil {
+		t.Fatalf("decode create response: %v", err)
+	}
+	if created.ID == 0 || !created.HasPublicKey || !created.HasPrivateKey || !created.HasPrivateKeyPassphrase {
+		t.Errorf("create response missing presence metadata: %+v", created)
+	}
+
+	// Audit records only resource identifiers, never raw request values.
+	auditEv := lastAuditEvent(t, path)
+	if auditEv.Operation != "key_pair.create" || auditEv.ResourceType != "key_pair" ||
+		auditEv.ResourceID != strconv.FormatInt(created.ID, 10) {
+		t.Errorf("audit = %q/%q/%q, want key_pair.create/key_pair/%d", auditEv.Operation, auditEv.ResourceType, auditEv.ResourceID, created.ID)
+	}
+	if strings.Contains(auditEv.Error, "PRIVATE-KEY-A") || strings.Contains(auditEv.Metadata, "PRIVATE-KEY-A") {
+		t.Errorf("audit carries raw request value: %+v", auditEv)
+	}
+
+	// Duplicate name maps to 409 conflict.
+	body = `{"name":"pair-a","public_key":"pub-a","private_key":"PRIVATE-KEY-A","private_key_passphrase":"PHRASE-A"}`
+	rec = doRequest(t, mux, "POST", "/api/v1/key-pairs", body)
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("duplicate status = %d, want 409, body=%s", rec.Code, rec.Body.String())
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &e); err != nil {
+		t.Fatalf("decode error body: %v", err)
+	}
+	if e.Code != "conflict" {
+		t.Errorf("error code = %q, want conflict", e.Code)
+	}
+
+	// Update: omitted secrets retain stored values, an explicit empty
+	// string clears. The response stays metadata-only.
+	body = fmt.Sprintf(`{"name":"pair-a-renamed","private_key_passphrase":""}`)
+	rec = doRequest(t, mux, "PUT", fmt.Sprintf("/api/v1/key-pairs/%d", created.ID), body)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("update status = %d, body=%s", rec.Code, rec.Body.String())
+	}
+	if strings.Contains(rec.Body.String(), "PRIVATE-KEY-A") {
+		t.Errorf("update response leaks key material: %s", rec.Body.String())
+	}
+	got, err := s.GetKeyPair(ctx, created.ID)
+	if err != nil {
+		t.Fatalf("GetKeyPair after update: %v", err)
+	}
+	if got.Name != "pair-a-renamed" {
+		t.Errorf("name = %q, want pair-a-renamed", got.Name)
+	}
+	if string(got.PublicKey) != "PUBLIC-KEY-A" || string(got.PrivateKey) != "PRIVATE-KEY-A" {
+		t.Errorf("omitted secrets were not retained: public=%q private=%q", got.PublicKey, got.PrivateKey)
+	}
+	if len(got.PrivateKeyPassphrase) != 0 {
+		t.Errorf("passphrase = %q, want cleared by empty string", got.PrivateKeyPassphrase)
+	}
+}
+
+func TestKeyPairDeleteWarnsButLeavesSSHReference(t *testing.T) {
+	mux, s, path := newTestAPI(t)
+	ctx := context.Background()
+	pair, err := s.CreateKeyPair(ctx, model.KeyPair{Name: "doomed", PrivateKey: []byte("key-material")})
+	if err != nil {
+		t.Fatalf("CreateKeyPair: %v", err)
+	}
+	sshConn, err := s.CreateSSH(ctx, model.SSHProfile{
+		Name: "ref", Host: "h.invalid", Port: 22, Username: "u",
+		KeyPairID: pair.ID, JumpConnectionIDs: "[]",
+	})
+	if err != nil {
+		t.Fatalf("CreateSSH: %v", err)
+	}
+
+	// Dependents warn about the SSH reference before deletion.
+	rec := doRequest(t, mux, "GET", fmt.Sprintf("/api/v1/key-pairs/%d/dependents", pair.ID), "")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("dependents status = %d, body=%s", rec.Code, rec.Body.String())
+	}
+	body := rec.Body.String()
+	if !strings.Contains(body, `"ssh":[{"id":`+strconv.FormatInt(sshConn.ID, 10)) {
+		t.Errorf("dependents response missing ssh reference: %s", body)
+	}
+	if !strings.Contains(body, `"db":[]`) {
+		t.Errorf("dependents response missing empty db array: %s", body)
+	}
+	if strings.Contains(body, "key-material") {
+		t.Errorf("dependents response leaks key material: %s", body)
+	}
+
+	// Deletion proceeds and leaves the SSH reference dangling.
+	rec = doRequest(t, mux, "DELETE", fmt.Sprintf("/api/v1/key-pairs/%d", pair.ID), "")
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("delete status = %d, want 204, body=%s", rec.Code, rec.Body.String())
+	}
+	auditEv := lastAuditEvent(t, path)
+	if auditEv.Operation != "key_pair.delete" || auditEv.ResourceID != strconv.FormatInt(pair.ID, 10) {
+		t.Errorf("audit = %q/%q, want key_pair.delete/%d", auditEv.Operation, auditEv.ResourceID, pair.ID)
+	}
+
+	got, err := s.GetSSH(ctx, sshConn.ID)
+	if err != nil {
+		t.Fatalf("GetSSH after pair deletion: %v", err)
+	}
+	if got.KeyPairID != pair.ID {
+		t.Errorf("SSH key_pair_id = %d after pair deletion, want dangling %d", got.KeyPairID, pair.ID)
+	}
+
+	// Deleting the already-deleted pair maps to 404.
+	rec = doRequest(t, mux, "DELETE", fmt.Sprintf("/api/v1/key-pairs/%d", pair.ID), "")
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("second delete status = %d, want 404, body=%s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestSSHHandlersAcceptKeyPairAndRejectPasswordConflict(t *testing.T) {
+	mux, s, path := newTestAPI(t)
+	ctx := context.Background()
+	full, err := s.CreateKeyPair(ctx, model.KeyPair{Name: "full", PrivateKey: []byte("key-material")})
+	if err != nil {
+		t.Fatalf("CreateKeyPair full: %v", err)
+	}
+	publicOnly, err := s.CreateKeyPair(ctx, model.KeyPair{Name: "public-only", PublicKey: []byte("pub")})
+	if err != nil {
+		t.Fatalf("CreateKeyPair public-only: %v", err)
+	}
+
+	// Create with a stored key pair succeeds and never returns material.
+	body := fmt.Sprintf(`{"name":"keyed","host":"h.invalid","port":22,"username":"u","key_pair_id":%d,"jump_connection_ids":"[]"}`, full.ID)
+	rec := doRequest(t, mux, "POST", "/api/v1/ssh-connections", body)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("create status = %d, body=%s", rec.Code, rec.Body.String())
+	}
+	respBody := rec.Body.String()
+	if strings.Contains(respBody, "key-material") {
+		t.Errorf("create response leaks key material: %s", respBody)
+	}
+	if !strings.Contains(respBody, `"key_pair_id":`+strconv.FormatInt(full.ID, 10)) ||
+		!strings.Contains(respBody, `"key_pair_name":"full"`) {
+		t.Errorf("create response missing key-pair reference: %s", respBody)
+	}
+	if strings.Contains(respBody, `"has_password":true`) {
+		t.Errorf("create response reports a password for a key-pair connection: %s", respBody)
+	}
+	var created model.SSHConnection
+	if err := json.Unmarshal(rec.Body.Bytes(), &created); err != nil {
+		t.Fatalf("decode create response: %v", err)
+	}
+	event := lastAuditEvent(t, path)
+	if event.Operation != "ssh_connection.create" || event.ResourceID != strconv.FormatInt(created.ID, 10) {
+		t.Errorf("audit = %q/%q, want ssh_connection.create/%d", event.Operation, event.ResourceID, created.ID)
+	}
+
+	// Password and key_pair_id together are rejected as validation_error.
+	body = fmt.Sprintf(`{"name":"both","host":"h.invalid","port":22,"username":"u","password":"pw","key_pair_id":%d,"jump_connection_ids":"[]"}`, full.ID)
+	rec = doRequest(t, mux, "POST", "/api/v1/ssh-connections", body)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("conflict status = %d, want 400, body=%s", rec.Code, rec.Body.String())
+	}
+	var e struct {
+		Code string `json:"code"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &e); err != nil {
+		t.Fatalf("decode error body: %v", err)
+	}
+	if e.Code != "validation_error" {
+		t.Errorf("error code = %q, want validation_error", e.Code)
+	}
+	auditErr := lastAuditEvent(t, path)
+	if auditErr.Operation != "ssh_connection.create" || auditErr.Result != "failure" {
+		t.Errorf("audit = %q/%q, want ssh_connection.create/failure", auditErr.Operation, auditErr.Result)
+	}
+	if strings.Contains(auditErr.Error, "key-material") || strings.Contains(auditErr.Error, "\"pw\"") {
+		t.Errorf("audit error leaks request values: %q", auditErr.Error)
+	}
+
+	// A public-only pair cannot be selected for authentication.
+	body = fmt.Sprintf(`{"name":"nokey","host":"h.invalid","port":22,"username":"u","key_pair_id":%d,"jump_connection_ids":"[]"}`, publicOnly.ID)
+	rec = doRequest(t, mux, "POST", "/api/v1/ssh-connections", body)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("public-only status = %d, want 400, body=%s", rec.Code, rec.Body.String())
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &e); err != nil {
+		t.Fatalf("decode error body: %v", err)
+	}
+	if e.Code != "validation_error" {
+		t.Errorf("error code = %q, want validation_error", e.Code)
+	}
+
+	// Update also accepts a stored pair and clears the stored password.
+	upd := createSSH(t, s, "update-me", "[]")
+	body = fmt.Sprintf(`{"name":"update-me","host":"h.invalid","port":22,"username":"u","key_pair_id":%d,"jump_connection_ids":"[]"}`, full.ID)
+	rec = doRequest(t, mux, "PUT", fmt.Sprintf("/api/v1/ssh-connections/%d", upd.ID), body)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("update status = %d, body=%s", rec.Code, rec.Body.String())
+	}
+	respBody = rec.Body.String()
+	if strings.Contains(respBody, `"has_password":true`) {
+		t.Errorf("update response still reports password after pair selection: %s", respBody)
+	}
+	if !strings.Contains(respBody, `"key_pair_name":"full"`) {
+		t.Errorf("update response missing pair name: %s", respBody)
+	}
+	got, err := s.GetSSH(ctx, upd.ID)
+	if err != nil {
+		t.Fatalf("GetSSH after update: %v", err)
+	}
+	if got.KeyPairID != full.ID || len(got.Password) != 0 {
+		t.Errorf("after update: key_pair_id=%d password=%q, want %d with no password", got.KeyPairID, got.Password, full.ID)
+	}
+}
+
 func TestCreateSSHRejectsUnknownField(t *testing.T) {
 	mux, _, _ := newTestAPI(t)
 	body := `{"name":"x","host":"h","port":22,"username":"u","jump_connection_ids":"[]","bogus":1}`

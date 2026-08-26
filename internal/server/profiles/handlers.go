@@ -71,6 +71,13 @@ func (h *Handler) Register(mux *http.ServeMux) {
 	mux.HandleFunc("DELETE /api/v1/groups/{id}", h.deleteGroup)
 	mux.HandleFunc("GET /api/v1/groups/{id}/dependents", h.groupDependents)
 
+	mux.HandleFunc("GET /api/v1/key-pairs", h.listKeyPairs)
+	mux.HandleFunc("POST /api/v1/key-pairs", h.createKeyPair)
+	mux.HandleFunc("GET /api/v1/key-pairs/{id}", h.getKeyPair)
+	mux.HandleFunc("PUT /api/v1/key-pairs/{id}", h.updateKeyPair)
+	mux.HandleFunc("DELETE /api/v1/key-pairs/{id}", h.deleteKeyPair)
+	mux.HandleFunc("GET /api/v1/key-pairs/{id}/dependents", h.keyPairDependents)
+
 	mux.HandleFunc("GET /api/v1/transport/ssh/{id}", h.transportSSH)
 	mux.HandleFunc("GET /api/v1/transport/db/{id}", h.transportDB)
 }

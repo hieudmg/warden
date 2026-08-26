@@ -218,7 +218,7 @@ func TestRunSSHEndToEnd(t *testing.T) {
 	apiSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/api/v1/ssh-connections":
-			io.WriteString(w, fmt.Sprintf(`[{"id":1,"name":"prod","host":%q,"port":%d,"username":"user","has_password":true,"has_private_key":false,"has_private_key_passphrase":false,"proxy_host":"","proxy_port":0,"proxy_username":"","has_proxy_password":false,"jump_connection_ids":"[]"}]`, host, port))
+			io.WriteString(w, fmt.Sprintf(`[{"id":1,"name":"prod","host":%q,"port":%d,"username":"user","has_password":true,"key_pair_id":0,"proxy_host":"","proxy_port":0,"proxy_username":"","has_proxy_password":false,"jump_connection_ids":"[]"}]`, host, port))
 		case "/api/v1/transport/ssh/1":
 			w.Header().Set("Cache-Control", "no-store")
 			io.WriteString(w, fmt.Sprintf(`{"target":{"id":1,"name":"prod","host":%q,"port":%d,"username":"user","password":%q},"jumps":[]}`, host, port, base64.StdEncoding.EncodeToString([]byte("s3cret"))))
@@ -269,7 +269,7 @@ func TestRunSSHPropagatesRemoteExitStatus(t *testing.T) {
 	apiSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/api/v1/ssh-connections":
-			io.WriteString(w, fmt.Sprintf(`[{"id":1,"name":"prod","host":%q,"port":%d,"username":"user","has_password":true,"has_private_key":false,"has_private_key_passphrase":false,"proxy_host":"","proxy_port":0,"proxy_username":"","has_proxy_password":false,"jump_connection_ids":"[]"}]`, host, port))
+			io.WriteString(w, fmt.Sprintf(`[{"id":1,"name":"prod","host":%q,"port":%d,"username":"user","has_password":true,"key_pair_id":0,"proxy_host":"","proxy_port":0,"proxy_username":"","has_proxy_password":false,"jump_connection_ids":"[]"}]`, host, port))
 		case "/api/v1/transport/ssh/1":
 			io.WriteString(w, fmt.Sprintf(`{"target":{"id":1,"name":"prod","host":%q,"port":%d,"username":"user","password":%q},"jumps":[]}`, host, port, base64.StdEncoding.EncodeToString([]byte("s3cret"))))
 		default:
@@ -410,7 +410,7 @@ func TestRunXSSHRequiresInteractiveTerminal(t *testing.T) {
 	apiSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/api/v1/ssh-connections":
-			io.WriteString(w, `[{"id":1,"name":"prod","host":"127.0.0.1","port":22,"username":"user","has_password":true,"has_private_key":false,"has_private_key_passphrase":false,"proxy_host":"","proxy_port":0,"proxy_username":"","has_proxy_password":false,"jump_connection_ids":"[]"}]`)
+			io.WriteString(w, `[{"id":1,"name":"prod","host":"127.0.0.1","port":22,"username":"user","has_password":true,"key_pair_id":0,"proxy_host":"","proxy_port":0,"proxy_username":"","has_proxy_password":false,"jump_connection_ids":"[]"}]`)
 		case "/api/v1/transport/ssh/1":
 			io.WriteString(w, `{"target":{"id":1,"name":"prod","host":"127.0.0.1","port":22,"username":"user","password":"c2VjcmV0"},"jumps":[]}`)
 		default:
@@ -452,7 +452,7 @@ func TestRunXSSHWithoutNameRequiresInteractiveTerminal(t *testing.T) {
 	apiSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/api/v1/ssh-connections":
-			io.WriteString(w, `[{"id":1,"name":"prod","host":"127.0.0.1","port":22,"username":"user","has_password":true,"has_private_key":false,"has_private_key_passphrase":false,"proxy_host":"","proxy_port":0,"proxy_username":"","has_proxy_password":false,"jump_connection_ids":"[]"}]`)
+			io.WriteString(w, `[{"id":1,"name":"prod","host":"127.0.0.1","port":22,"username":"user","has_password":true,"key_pair_id":0,"proxy_host":"","proxy_port":0,"proxy_username":"","has_proxy_password":false,"jump_connection_ids":"[]"}]`)
 		case "/api/v1/transport/ssh/1":
 			t.Errorf("transport bundle requested; picker must fail before bundle fetch")
 		default:

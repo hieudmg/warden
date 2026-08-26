@@ -38,8 +38,7 @@ func FormatConnection(c model.SSHConnection) []Field {
 		{Label: "Port", Value: orNotSetInt(c.Port)},
 		{Label: "Username", Value: orNotSet(c.Username)},
 		{Label: "Password", Value: configured(c.HasPassword)},
-		{Label: "Private key", Value: configured(c.HasPrivateKey)},
-		{Label: "Private-key passphrase", Value: configured(c.HasPrivateKeyPassphrase)},
+		{Label: "Key pair", Value: keyPairValue(c)},
 		{Label: "Proxy host", Value: orNotSet(c.ProxyHost)},
 		{Label: "Proxy port", Value: orNotSetInt(c.ProxyPort)},
 		{Label: "Proxy username", Value: orNotSet(c.ProxyUsername)},
@@ -272,6 +271,20 @@ func clamp(s string, max int) string {
 		return s
 	}
 	return string([]rune(s)[:max])
+}
+
+// keyPairValue renders the connection's stored key-pair reference without
+// disclosing any key material: the pair name when present, a visible
+// missing-reference marker for a nonzero id without a name, and the
+// [not configured] marker when no pair is selected.
+func keyPairValue(c model.SSHConnection) string {
+	if c.KeyPairName != "" {
+		return c.KeyPairName
+	}
+	if c.KeyPairID != 0 {
+		return "Missing key pair #" + strconv.FormatInt(c.KeyPairID, 10)
+	}
+	return "[not configured]"
 }
 
 func configured(has bool) string {
