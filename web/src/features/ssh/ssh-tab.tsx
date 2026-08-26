@@ -27,6 +27,7 @@ import {
   TableRow,
 } from "@/components/ui/table"
 import type { ListResource } from "@/hooks/use-list-resource"
+import { groupedTableRows } from "@/features/grouped-table"
 import { jumpLabel, parseJumpRoute } from "./jump-route"
 import { SSHForm } from "./ssh-form"
 
@@ -50,14 +51,6 @@ interface DeleteDialogState {
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
-}
-
-/** Group display for one row: the name, (Ungrouped), or a Missing marker
- * for an externally corrupted nonzero reference. */
-function groupCell(connection: SSHConnection): string {
-  if (connection.group_name) return connection.group_name
-  if (connection.group_id === 0) return "(Ungrouped)"
-  return `Missing group #${connection.group_id}`
 }
 
 /** Jump-route display labels for one row; self-references are visibly marked. */
@@ -149,6 +142,7 @@ export function SSHTab({ resource, groups, keyPairs, notify }: SSHTabProps) {
   const hasDependents =
     dependents !== null && dependents !== undefined &&
     (dependents.ssh.length > 0 || dependents.db.length > 0)
+  const tableRows = groupedTableRows(resource.data)
 
   return (
     <div className="p-4">
@@ -174,8 +168,8 @@ export function SSHTab({ resource, groups, keyPairs, notify }: SSHTabProps) {
         <Table>
           <TableHeader>
             <TableRow>
-              <TableHead>Name</TableHead>
               <TableHead>Group</TableHead>
+              <TableHead>Name</TableHead>
               <TableHead>Host</TableHead>
               <TableHead>Username</TableHead>
               <TableHead>Auth</TableHead>
@@ -186,16 +180,16 @@ export function SSHTab({ resource, groups, keyPairs, notify }: SSHTabProps) {
             </TableRow>
           </TableHeader>
           <TableBody>
-            {resource.data.map(connection => (
-              <TableRow key={connection.id}>
-                <TableCell className="font-medium">{connection.name}</TableCell>
+            {tableRows.map(({ item: connection, groupLabel, backgroundClass }) => (
+              <TableRow key={connection.id} className={backgroundClass}>
                 <TableCell>
                   {connection.group_id === 0 && !connection.group_name ? (
-                    <span className="text-sm text-muted-foreground">(Ungrouped)</span>
+                    <span className="text-sm text-muted-foreground">{groupLabel}</span>
                   ) : (
-                    groupCell(connection)
+                    groupLabel
                   )}
                 </TableCell>
+                <TableCell className="font-medium">{connection.name}</TableCell>
                 <TableCell>
                   {connection.host}:{connection.port}
                 </TableCell>

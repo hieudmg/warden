@@ -143,6 +143,39 @@ describe("SSHTab", () => {
     expect(screen.getByText("Missing key pair #9")).toBeInTheDocument()
   })
 
+  test("puts group first, sorts grouped rows, and cycles group colors", () => {
+    const connections = [
+      ssh(1, "zulu", { group_id: 2, group_name: "beta" }),
+      ssh(2, "bravo", { group_id: 1, group_name: "alpha" }),
+      ssh(3, "alpha", { group_id: 1, group_name: "alpha" }),
+      ssh(4, "ungrouped", { group_id: 0 }),
+      ssh(5, "missing", { group_id: 8 }),
+    ]
+    render(<SSHTab resource={resource({ data: connections })} groups={[]} keyPairs={[]} notify={notify} />)
+
+    const rows = screen.getAllByRole("row")
+    expect(within(rows[0]).getAllByRole("columnheader")[0]).toHaveTextContent("Group")
+    expect(rows.slice(1).map(row => within(row).getAllByRole("cell")[1].textContent)).toEqual([
+      "alpha",
+      "bravo",
+      "zulu",
+      "missing",
+      "ungrouped",
+    ])
+    expect(rows.slice(1).map(row => within(row).getAllByRole("cell")[0].textContent)).toEqual([
+      "alpha",
+      "alpha",
+      "beta",
+      "Missing group #8",
+      "(Ungrouped)",
+    ])
+    expect(rows[1]).toHaveClass("bg-red-100")
+    expect(rows[2]).toHaveClass("bg-red-100")
+    expect(rows[3]).toHaveClass("bg-orange-100")
+    expect(rows[4]).toHaveClass("bg-amber-100")
+    expect(rows[5]).toHaveClass("bg-gray-100")
+  })
+
   test("renders the group column with named, ungrouped, and missing values", () => {
     const connections = [
       ssh(1, "bastion", { group_id: 3, group_name: "prod" }),
