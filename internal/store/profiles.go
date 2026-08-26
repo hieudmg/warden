@@ -99,6 +99,30 @@ func validateGroupID(ctx context.Context, tx *sql.Tx, groupID int64) error {
 	return nil
 }
 
+// validateKeyPairID checks a profile's stored key-pair selection inside the
+// write transaction. Zero means no stored pair and is always valid; a
+// positive id must reference an existing pair with a private key so API
+// writes can never select a public-only or deleted pair. Negative ids are
+// rejected.
+func validateKeyPairID(ctx context.Context, tx *sql.Tx, id int64) error {
+	if id < 0 {
+		return fmt.Errorf("%w: key_pair_id must not be negative", ErrValidation)
+	}
+	if id == 0 {
+		return nil
+	}
+	var found int
+	err := tx.QueryRowContext(ctx,
+		"SELECT 1 FROM key_pairs WHERE id=? AND private_key IS NOT NULL", id).Scan(&found)
+	if errors.Is(err, sql.ErrNoRows) {
+		return fmt.Errorf("%w: key_pair_id %d must reference a key pair with a private key", ErrValidation, id)
+	}
+	if err != nil {
+		return fmt.Errorf("validate key_pair_id: %w", err)
+	}
+	return nil
+}
+
 func (s *Store) encryptSecret(aad []byte, plaintext []byte) ([]byte, error) {
 	if len(plaintext) == 0 {
 		return nil, nil
