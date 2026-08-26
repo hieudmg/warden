@@ -316,6 +316,29 @@ describe("SSHForm", () => {
     expect(screen.queryByRole("combobox", { name: "Stored key pair" })).not.toBeInTheDocument()
   })
 
+  test("switching a saved key-pair connection to blank password mode clears the pair on submit", async () => {
+    const user = userEvent.setup()
+    const onSubmit = vi.fn()
+    renderForm({
+      connection: connection({ key_pair_id: 7, key_pair_name: "prod" }),
+      keyPairs: [keyPair(7, "prod")],
+      onSubmit,
+    })
+
+    // The form opens in stored-key mode with the saved pair selected.
+    expect(screen.getByRole("combobox", { name: "Stored key pair" })).toHaveTextContent("prod")
+
+    // Switch to password mode and leave the password blank: the request
+    // must explicitly clear the stored key pair (key_pair_id: 0) rather
+    // than retain it.
+    await user.click(screen.getByRole("radio", { name: "Password" }))
+    await user.click(screen.getByRole("button", { name: "Save" }))
+
+    expect(onSubmit).toHaveBeenCalledWith(
+      expect.objectContaining({ password: null, key_pair_id: 0 }),
+    )
+  })
+
   test("uses plain text inputs for credentials and disables browser autoComplete", async () => {
     const user = userEvent.setup()
     renderForm()

@@ -294,6 +294,32 @@ describe("KeyPairsTab", () => {
     expect(trigger).toHaveFocus()
   })
 
+  test("closing the edit dialog discards a late vault response", async () => {
+    const user = userEvent.setup()
+    let resolveVault: (value: KeyPairVault) => void = () => {}
+    mockedAPI.getKeyPair.mockReturnValue(
+      new Promise<KeyPairVault>(resolve => {
+        resolveVault = resolve
+      }),
+    )
+    render(<KeyPairsTab resource={resource({ data: [keyPair(1, "prod")] })} notify={notify} />)
+
+    await user.click(screen.getByRole("button", { name: "Edit prod" }))
+    const dialog = await screen.findByRole("dialog")
+    expect(within(dialog).getByText("Loading vault…")).toBeInTheDocument()
+
+    // Cancel while the vault GET is still pending; the dialog must close
+    // and the late response must not reopen it or repopulate secret state.
+    await user.click(within(dialog).getByRole("button", { name: "Cancel" }))
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument())
+
+    await act(async () => {
+      resolveVault(vault(1, "prod"))
+    })
+
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument()
+  })
+
   test("keeps the dialog open with a server error after a rejected submit", async () => {
     const user = userEvent.setup()
     mockedAPI.createKeyPair.mockRejectedValue(

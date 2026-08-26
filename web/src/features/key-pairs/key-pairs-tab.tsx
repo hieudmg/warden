@@ -100,6 +100,16 @@ export function KeyPairsTab({ resource, notify }: KeyPairsTabProps) {
     setFormDialog({ mode: "create" })
   }
 
+  // Centralized close: drops the dialog and clears the raw vault values
+  // held in form state so plaintext never survives a close in memory.
+  const closeFormDialog = () => {
+    editIDRef.current = null
+    setFormDialog(null)
+    setPublicKey("")
+    setPrivateKey("")
+    setPassphrase("")
+  }
+
   const openEdit = (pair: KeyPairSummary, trigger: HTMLElement) => {
     lastTriggerRef.current = trigger
     editIDRef.current = pair.id
@@ -158,8 +168,7 @@ export function KeyPairsTab({ resource, notify }: KeyPairsTabProps) {
         createdOrUpdated = "Created"
       }
       await resource.reload()
-      setFormDialog(null)
-      editIDRef.current = null
+      closeFormDialog()
       notify(`${createdOrUpdated} key pair "${name}".`, "success")
     } catch (error) {
       setFormError(errorMessage(error))
@@ -304,10 +313,7 @@ export function KeyPairsTab({ resource, notify }: KeyPairsTabProps) {
       <Dialog
         open={formDialog !== null}
         onOpenChange={open => {
-          if (!open && !pending) {
-            editIDRef.current = null
-            setFormDialog(null)
-          }
+          if (!open && !pending) closeFormDialog()
         }}
       >
         <DialogContent
@@ -413,7 +419,7 @@ export function KeyPairsTab({ resource, notify }: KeyPairsTabProps) {
               <Button
                 type="button"
                 variant="outline"
-                onClick={() => setFormDialog(null)}
+                onClick={closeFormDialog}
                 disabled={pending}
               >
                 Cancel

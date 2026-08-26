@@ -58,9 +58,10 @@ export interface GroupRequest {
 
 // Key pairs. Summary is the metadata-only view: presence flags, never raw
 // key material. Vault is the single-pair GET view that discloses raw
-// public/private/passphrase values. Request secret fields are string | null:
-// null means "not provided" (keep the stored value on update); a non-null
-// empty string explicitly clears.
+// public/private/passphrase values; it carries no presence flags because
+// the raw values themselves are present. Request secret fields are
+// string | null: null means "not provided" (keep the stored value on
+// update); a non-null empty string explicitly clears.
 export interface KeyPairSummary {
   id: number
   name: string
@@ -71,10 +72,14 @@ export interface KeyPairSummary {
   updated_at: string
 }
 
-export interface KeyPairVault extends KeyPairSummary {
+export interface KeyPairVault {
+  id: number
+  name: string
   public_key: string
   private_key: string
   private_key_passphrase: string
+  created_at: string
+  updated_at: string
 }
 
 export interface KeyPairRequest {
@@ -106,15 +111,16 @@ export interface DependentsResponse {
 // Write payloads. Secret fields are string | null: null means "not
 // provided" (keep the stored value on update); a blank input must never
 // serialize as "" because that would clear the stored secret. KeyPairID
-// selects a stored key pair; 0 means no stored pair selected. Password and
-// key_pair_id are mutually exclusive: exactly one active auth source.
+// selects a stored key pair; 0 explicitly clears the selection and null
+// keeps the stored selection on update. Password and key_pair_id are
+// mutually exclusive: exactly one active auth source.
 export interface SSHConnectionRequest {
   name: string
   host: string
   port: number
   username: string
   password: string | null
-  key_pair_id: number
+  key_pair_id: number | null
   proxy_host: string
   proxy_port: number
   proxy_username: string

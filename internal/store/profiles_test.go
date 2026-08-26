@@ -382,6 +382,92 @@ func TestSSHUpdatePasswordClearsKeyPair(t *testing.T) {
 	}
 }
 
+func TestSSHUpdateExplicitZeroClearsKeyPair(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+
+	pair, err := s.CreateKeyPair(ctx, KeyPairForTest("pair"))
+	if err != nil {
+		t.Fatalf("CreateKeyPair: %v", err)
+	}
+	created, err := s.CreateSSH(ctx, SSHProfileForTest("clear-pair", "[]"))
+	if err != nil {
+		t.Fatalf("CreateSSH: %v", err)
+	}
+
+	// Select the pair first.
+	updated := created
+	updated.Password = nil
+	updated.KeyPairID = pair.ID
+	if err := s.UpdateSSH(ctx, updated); err != nil {
+		t.Fatalf("UpdateSSH select pair: %v", err)
+	}
+
+	// Explicitly clear the selection with a blank password: the pair must
+	// be deselected while the (nil) password is retained.
+	updated = created
+	updated.Password = nil
+	updated.KeyPairID = 0
+	updated.KeyPairIDSet = true
+	if err := s.UpdateSSH(ctx, updated); err != nil {
+		t.Fatalf("UpdateSSH clear pair: %v", err)
+	}
+
+	got, err := s.GetSSH(ctx, created.ID)
+	if err != nil {
+		t.Fatalf("GetSSH: %v", err)
+	}
+	if got.KeyPairID != 0 {
+		t.Errorf("key_pair_id = %d, want cleared 0", got.KeyPairID)
+	}
+	if got.Password != nil {
+		t.Errorf("password = %q, want retained nil", got.Password)
+	}
+}
+
+func TestSSHUpdateOmittedKeyPairRetainsSelection(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+
+	pair, err := s.CreateKeyPair(ctx, KeyPairForTest("pair"))
+	if err != nil {
+		t.Fatalf("CreateKeyPair: %v", err)
+	}
+	created, err := s.CreateSSH(ctx, SSHProfileForTest("keep-pair", "[]"))
+	if err != nil {
+		t.Fatalf("CreateSSH: %v", err)
+	}
+
+	// Select the pair first.
+	updated := created
+	updated.Password = nil
+	updated.KeyPairID = pair.ID
+	if err := s.UpdateSSH(ctx, updated); err != nil {
+		t.Fatalf("UpdateSSH select pair: %v", err)
+	}
+
+	// Update metadata with key_pair_id omitted (KeyPairIDSet false) and a
+	// nil password: the stored selection must be preserved.
+	updated = created
+	updated.Host = "kept.invalid"
+	updated.Password = nil
+	updated.KeyPairID = 0
+	if err := s.UpdateSSH(ctx, updated); err != nil {
+		t.Fatalf("UpdateSSH omit pair: %v", err)
+	}
+
+	got, err := s.GetSSH(ctx, created.ID)
+	if err != nil {
+		t.Fatalf("GetSSH: %v", err)
+	}
+	if got.KeyPairID != pair.ID {
+		t.Errorf("key_pair_id = %d, want retained %d", got.KeyPairID, pair.ID)
+	}
+	if got.Password != nil {
+		t.Errorf("password = %q, want retained nil", got.Password)
+	}
+}
+
 func TestSSHRejectsMissingOrPublicOnlyKeyPair(t *testing.T) {
 	s := newTestStore(t)
 	ctx := context.Background()

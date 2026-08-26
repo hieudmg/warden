@@ -1,6 +1,7 @@
 package profiles
 
 import (
+	"bufio"
 	"encoding/json"
 	"errors"
 	"io"
@@ -109,13 +110,16 @@ func (h *Handler) createSSH(w http.ResponseWriter, r *http.Request) {
 		Host:              req.Host,
 		Port:              req.Port,
 		Username:          req.Username,
-		KeyPairID:         req.KeyPairID,
 		ProxyHost:         req.ProxyHost,
 		ProxyPort:         req.ProxyPort,
 		ProxyUsername:     req.ProxyUsername,
 		JumpConnectionIDs: req.JumpConnectionIDs,
 		DefaultDir:        req.DefaultDir,
 		GroupID:           req.GroupID,
+	}
+	if req.KeyPairID != nil {
+		p.KeyPairID = *req.KeyPairID
+		p.KeyPairIDSet = true
 	}
 	if req.Password != nil {
 		p.Password = []byte(*req.Password)
@@ -174,13 +178,16 @@ func (h *Handler) updateSSH(w http.ResponseWriter, r *http.Request) {
 		Host:              req.Host,
 		Port:              req.Port,
 		Username:          req.Username,
-		KeyPairID:         req.KeyPairID,
 		ProxyHost:         req.ProxyHost,
 		ProxyPort:         req.ProxyPort,
 		ProxyUsername:     req.ProxyUsername,
 		JumpConnectionIDs: req.JumpConnectionIDs,
 		DefaultDir:        req.DefaultDir,
 		GroupID:           req.GroupID,
+	}
+	if req.KeyPairID != nil {
+		p.KeyPairID = *req.KeyPairID
+		p.KeyPairIDSet = true
 	}
 	if req.Password != nil {
 		p.Password = []byte(*req.Password)
@@ -410,10 +417,34 @@ func pathID(w http.ResponseWriter, r *http.Request) (int64, bool) {
 }
 
 // decodeStrict enforces a bounded body, strict JSON decoding with no unknown
-// fields, and exactly one JSON object.
+// fields, and exactly one JSON object. The first JSON value must be an
+// object: null, arrays, scalars, and strings are rejected.
 func decodeStrict(w http.ResponseWriter, r *http.Request, dst any) error {
 	r.Body = http.MaxBytesReader(w, r.Body, maxBodyBytes)
-	dec := json.NewDecoder(r.Body)
+	br := bufio.NewReader(r.Body)
+	// Peek past leading whitespace and require the first JSON value to be
+	// an object before any decoding happens.
+	for {
+		b, err := br.Peek(1)
+		if err != nil {
+			var maxErr *http.MaxBytesError
+			if errors.As(err, &maxErr) {
+				return errPayloadTooLarge
+			}
+			return errInvalidJSON
+		}
+		if b[0] == ' ' || b[0] == '\t' || b[0] == '\n' || b[0] == '\r' {
+			if _, err := br.Discard(1); err != nil {
+				return errInvalidJSON
+			}
+			continue
+		}
+		if b[0] != '{' {
+			return errInvalidJSON
+		}
+		break
+	}
+	dec := json.NewDecoder(br)
 	dec.DisallowUnknownFields()
 	if err := dec.Decode(dst); err != nil {
 		var maxErr *http.MaxBytesError

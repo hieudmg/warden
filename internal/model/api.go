@@ -47,14 +47,16 @@ type DBConnection struct {
 // SSHConnectionRequest is the write payload for creating/updating an SSH
 // profile. Secret fields are pointers: nil means "not provided" (keep the
 // stored value on update, store nothing on create); non-nil replaces.
-// KeyPairID selects a stored key pair; 0 means no stored pair selected.
+// KeyPairID is a pointer for the same reason: nil keeps the stored
+// selection on update, 0 explicitly clears it, and a positive value
+// selects a stored key pair.
 type SSHConnectionRequest struct {
 	Name              string  `json:"name"`
 	Host              string  `json:"host"`
 	Port              int     `json:"port"`
 	Username          string  `json:"username"`
 	Password          *string `json:"password"`
-	KeyPairID         int64   `json:"key_pair_id"`
+	KeyPairID         *int64  `json:"key_pair_id"`
 	ProxyHost         string  `json:"proxy_host"`
 	ProxyPort         int     `json:"proxy_port"`
 	ProxyUsername     string  `json:"proxy_username"`

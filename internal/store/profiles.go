@@ -148,7 +148,8 @@ func (s *Store) decryptSecret(aad []byte, blob []byte) ([]byte, error) {
 // normalizeSSHAuthentication enforces password/key-pair exclusivity. A
 // non-empty password wins over a zero key_pair_id; a nonzero key_pair_id
 // with a non-empty password is rejected. Nil password with zero key_pair_id
-// means "no auth selection change" and is always valid.
+// is always valid; whether it retains or clears the stored selection is
+// decided by UpdateSSH from KeyPairIDSet.
 func normalizeSSHAuthentication(p *model.SSHProfile) error {
 	if len(p.Password) > 0 && p.KeyPairID != 0 {
 		return errors.New("password and key_pair_id are mutually exclusive")
@@ -310,7 +311,9 @@ func (s *Store) ListSSH(ctx context.Context) ([]model.SSHProfile, error) {
 }
 
 // UpdateSSH replaces metadata and jump ids. Secret fields are updated only
-// when non-nil; nil keeps the stored value.
+// when non-nil; nil keeps the stored value. KeyPairID is cleared when a
+// password is saved or when the request explicitly provides zero
+// (KeyPairIDSet); an omitted key_pair_id keeps the stored selection.
 func (s *Store) UpdateSSH(ctx context.Context, p model.SSHProfile) error {
 	if p.ID == 0 {
 		return errors.New("update ssh_connection requires id")
@@ -359,9 +362,10 @@ func (s *Store) UpdateSSH(ctx context.Context, p model.SSHProfile) error {
 	}
 
 	// Auth selection switching: a non-empty password deselects any stored
-	// key pair; a selected pair clears the stored password. When neither
-	// auth selection changes (nil password, zero key_pair_id) both stored
-	// values are preserved.
+	// key pair; a selected pair clears the stored password. An explicitly
+	// provided zero key_pair_id clears the selection while retaining the
+	// stored password; an omitted key_pair_id (KeyPairIDSet false) leaves
+	// the selection unchanged.
 	if len(p.Password) > 0 {
 		if _, err := tx.ExecContext(ctx,
 			"UPDATE ssh_connections SET key_pair_id=0 WHERE id=?", p.ID); err != nil {
@@ -372,6 +376,11 @@ func (s *Store) UpdateSSH(ctx context.Context, p model.SSHProfile) error {
 		if _, err := tx.ExecContext(ctx,
 			"UPDATE ssh_connections SET password=NULL, key_pair_id=? WHERE id=?", p.KeyPairID, p.ID); err != nil {
 			return fmt.Errorf("clear password: %w", err)
+		}
+	} else if p.KeyPairIDSet {
+		if _, err := tx.ExecContext(ctx,
+			"UPDATE ssh_connections SET key_pair_id=0 WHERE id=?", p.ID); err != nil {
+			return fmt.Errorf("clear key_pair_id: %w", err)
 		}
 	}
 

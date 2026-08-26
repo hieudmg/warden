@@ -8,13 +8,17 @@ import "time"
 // KeyPairID references a stored key pair when nonzero; private-key
 // material itself lives only in the key-pair vault.
 type SSHProfile struct {
-	ID            int64
-	Name          string
-	Host          string
-	Port          int
-	Username      string
-	Password      []byte
-	KeyPairID     int64
+	ID        int64
+	Name      string
+	Host      string
+	Port      int
+	Username  string
+	Password  []byte
+	KeyPairID int64
+	// KeyPairIDSet reports whether the write request explicitly provided
+	// key_pair_id. It distinguishes "clear the selection" (explicit 0)
+	// from "leave the selection unchanged" (omitted) on update.
+	KeyPairIDSet  bool
 	KeyPairName   string
 	ProxyHost     string
 	ProxyPort     int

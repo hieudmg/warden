@@ -53,34 +53,45 @@ func NewResolver(s *store.Store) *Resolver { return &Resolver{store: s} }
 // ResolveSSHBundle returns the target profile plus every jump host in
 // connection order (first hop first). It validates the complete graph —
 // missing ids, self-reference, cycles, malformed stored JSON, and depth —
-// before decrypting and returning any secrets. On failure it returns no
-// partial bundle.
+// before decrypting any key-pair secrets. On failure it returns no partial
+// bundle.
 func (r *Resolver) ResolveSSHBundle(ctx context.Context, id int64) (model.SSHBundle, error) {
 	target, err := r.store.GetSSH(ctx, id)
 	if err != nil {
 		return model.SSHBundle{}, err
 	}
+
+	// Pass 1: validate the full jump graph and collect the ordered hop
+	// profiles. No key-pair secrets are decrypted during this pass, so a
+	// graph error always wins over target key material.
+	var hops []model.SSHProfile
+	path := map[int64]bool{id: true}
+	if err := r.resolveJumps(ctx, id, target.JumpConnectionIDs, path, &hops); err != nil {
+		return model.SSHBundle{}, err
+	}
+
+	// Pass 2: inject secrets only after the graph is known to be valid.
 	targetNode, err := r.sshNode(ctx, target)
 	if err != nil {
 		return model.SSHBundle{}, err
 	}
-
-	var jumps []model.SSHNode
-	path := map[int64]bool{id: true}
-	if err := r.resolveJumps(ctx, id, target.JumpConnectionIDs, path, &jumps); err != nil {
-		return model.SSHBundle{}, err
+	jumps := make([]model.SSHNode, 0, len(hops))
+	for _, hop := range hops {
+		node, err := r.sshNode(ctx, hop)
+		if err != nil {
+			return model.SSHBundle{}, err
+		}
+		jumps = append(jumps, node)
 	}
-	if jumps == nil {
-		jumps = []model.SSHNode{}
-	}
-
 	return model.SSHBundle{Target: targetNode, Jumps: jumps}, nil
 }
 
-// resolveJumps appends the ordered hop chain for ownerID's jump route to
-// hops. path tracks the ids currently being resolved so cycles (including a
-// route that loops back to the target) are detected.
-func (r *Resolver) resolveJumps(ctx context.Context, ownerID int64, jumpJSON string, path map[int64]bool, hops *[]model.SSHNode) error {
+// resolveJumps validates ownerID's jump route and appends the ordered hop
+// profiles to hops. path tracks the ids currently being resolved so cycles
+// (including a route that loops back to the target) are detected. It
+// performs no secret decryption; node construction happens in a second
+// pass after the graph is known to be valid.
+func (r *Resolver) resolveJumps(ctx context.Context, ownerID int64, jumpJSON string, path map[int64]bool, hops *[]model.SSHProfile) error {
 	ids, err := parseJumpIDs(jumpJSON)
 	if err != nil {
 		return graphErrorf("connection %d has a malformed jump route: %v", ownerID, err)
@@ -106,11 +117,7 @@ func (r *Resolver) resolveJumps(ctx context.Context, ownerID int64, jumpJSON str
 		if err := r.resolveJumps(ctx, jid, node.JumpConnectionIDs, path, hops); err != nil {
 			return err
 		}
-		n, err := r.sshNode(ctx, node)
-		if err != nil {
-			return err
-		}
-		*hops = append(*hops, n)
+		*hops = append(*hops, node)
 		delete(path, jid)
 	}
 	return nil

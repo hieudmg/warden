@@ -415,6 +415,64 @@ func TestSSHHandlersAcceptKeyPairAndRejectPasswordConflict(t *testing.T) {
 	}
 }
 
+func TestSSHUpdateExplicitZeroKeyPairClearsSelection(t *testing.T) {
+	mux, s, _ := newTestAPI(t)
+	ctx := context.Background()
+	pair, err := s.CreateKeyPair(ctx, model.KeyPair{Name: "pair", PrivateKey: []byte("key-material")})
+	if err != nil {
+		t.Fatalf("CreateKeyPair: %v", err)
+	}
+	conn, err := s.CreateSSH(ctx, model.SSHProfile{
+		Name: "keyed", Host: "h.invalid", Port: 22, Username: "u",
+		KeyPairID: pair.ID, JumpConnectionIDs: "[]",
+	})
+	if err != nil {
+		t.Fatalf("CreateSSH: %v", err)
+	}
+
+	// Switch to password mode with a blank password: an explicit
+	// key_pair_id: 0 must clear the stored selection even though password
+	// is null (nil password alone means "keep the stored value").
+	body := `{"name":"keyed","host":"h.invalid","port":22,"username":"u","password":null,"key_pair_id":0,"jump_connection_ids":"[]"}`
+	rec := doRequest(t, mux, "PUT", fmt.Sprintf("/api/v1/ssh-connections/%d", conn.ID), body)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body=%s", rec.Code, rec.Body.String())
+	}
+	if strings.Contains(rec.Body.String(), `"key_pair_id":`+strconv.FormatInt(pair.ID, 10)) {
+		t.Errorf("update response still reports the cleared pair: %s", rec.Body.String())
+	}
+	got, err := s.GetSSH(ctx, conn.ID)
+	if err != nil {
+		t.Fatalf("GetSSH: %v", err)
+	}
+	if got.KeyPairID != 0 {
+		t.Errorf("key_pair_id = %d, want cleared 0", got.KeyPairID)
+	}
+	if got.Password != nil {
+		t.Errorf("password = %q, want retained nil", got.Password)
+	}
+}
+
+func TestCreateSSHRejectsNonObjectBody(t *testing.T) {
+	mux, _, _ := newTestAPI(t)
+	for _, body := range []string{"null", "[]", `"str"`, "42", "true"} {
+		rec := doRequest(t, mux, "POST", "/api/v1/ssh-connections", body)
+		if rec.Code != http.StatusBadRequest {
+			t.Errorf("body %q status = %d, want 400, body=%s", body, rec.Code, rec.Body.String())
+			continue
+		}
+		var e struct {
+			Code string `json:"code"`
+		}
+		if err := json.Unmarshal(rec.Body.Bytes(), &e); err != nil {
+			t.Fatalf("decode error body for %q: %v", body, err)
+		}
+		if e.Code != "invalid_request" {
+			t.Errorf("body %q error code = %q, want invalid_request", body, e.Code)
+		}
+	}
+}
+
 func TestCreateSSHRejectsUnknownField(t *testing.T) {
 	mux, _, _ := newTestAPI(t)
 	body := `{"name":"x","host":"h","port":22,"username":"u","jump_connection_ids":"[]","bogus":1}`

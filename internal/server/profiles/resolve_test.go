@@ -424,3 +424,37 @@ func TestResolveSSHBundleRejectsPairWhosePrivateKeyWasCleared(t *testing.T) {
 		t.Errorf("error %q must name the connection id and the pair id", msg)
 	}
 }
+
+func TestResolveSSHBundleValidatesGraphBeforeKeyPairSecrets(t *testing.T) {
+	_, s, _ := newTestAPI(t)
+	r := profiles.NewResolver(s)
+	ctx := context.Background()
+
+	pair, err := s.CreateKeyPair(ctx, model.KeyPair{Name: "doomed", PrivateKey: []byte("key")})
+	if err != nil {
+		t.Fatalf("CreateKeyPair: %v", err)
+	}
+	// The target has both an invalid jump graph and a deleted key pair;
+	// graph validation must win so no key-pair secret is decrypted first.
+	target := createSSH(t, s, "target", "[999999]")
+	target.Password = nil
+	target.KeyPairID = pair.ID
+	if err := s.UpdateSSH(ctx, target); err != nil {
+		t.Fatalf("UpdateSSH: %v", err)
+	}
+	if err := s.DeleteKeyPair(ctx, pair.ID); err != nil {
+		t.Fatalf("DeleteKeyPair: %v", err)
+	}
+
+	_, err = r.ResolveSSHBundle(ctx, target.ID)
+	if err == nil {
+		t.Fatal("ResolveSSHBundle succeeded with an invalid graph and a deleted key pair")
+	}
+	var ge *profiles.GraphError
+	if !errors.As(err, &ge) {
+		t.Errorf("error %v is not a GraphError", err)
+	}
+	if !strings.Contains(err.Error(), "does not exist") {
+		t.Errorf("error %q must report the missing jump connection before key-pair material", err)
+	}
+}
