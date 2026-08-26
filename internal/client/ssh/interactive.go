@@ -54,7 +54,41 @@ func (t termReadWriter) Write(p []byte) (int, error) { return t.term.Stdout().Wr
 // every exit path. acceptNew enables interactive first-use host-key
 // confirmation on the terminal; changed and unconfirmed keys always fail.
 func RunInteractive(ctx context.Context, bundle model.SSHBundle, term terminal.Session, acceptNew bool) error {
-	return runInteractive(ctx, bundle, term, DialOptions{AcceptNew: acceptNew, Terminal: termReadWriter{term}})
+	return runInteractive(ctx, bundle, term, DialOptions{
+		AcceptNew: acceptNew,
+		Terminal:  termReadWriter{term},
+		Progress: func(message string) {
+			WriteProgress(term.Stderr(), message)
+		},
+	})
+}
+
+// WriteProgress writes one green, non-secret interactive status message.
+// Control characters in profile-derived text are escaped before writing.
+func WriteProgress(w io.Writer, message string) {
+	if w == nil {
+		return
+	}
+	message = escapeProgressControls(message)
+	_, _ = fmt.Fprintf(w, "\x1b[32m%s\x1b[0m\n", message)
+}
+
+func escapeProgressControls(message string) string {
+	var escaped strings.Builder
+	for _, r := range message {
+		if r < 0x20 || r == 0x7f {
+			fmt.Fprintf(&escaped, `\x%02x`, r)
+			continue
+		}
+		escaped.WriteRune(r)
+	}
+	return escaped.String()
+}
+
+func reportProgress(progress func(string), message string) {
+	if progress != nil {
+		progress(message)
+	}
 }
 
 // runInteractive is RunInteractive with explicit dial options (tests
@@ -75,6 +109,7 @@ func runInteractive(ctx context.Context, bundle model.SSHBundle, term terminal.S
 		}
 	}()
 
+	reportProgress(opts.Progress, "Opening interactive session...")
 	session, err := client.NewSession()
 	if err != nil {
 		return fmt.Errorf("open ssh session: %w", err)

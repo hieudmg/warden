@@ -250,6 +250,7 @@ func runXSSH(args []string, configPath string, configPathSet bool, stdout, stder
 		}
 	}
 
+	clientssh.WriteProgress(stderr, "Fetching credentials...")
 	bundle, err := cl.GetSSHBundle(ctx, sel.ID)
 	if err != nil {
 		fmt.Fprintf(stderr, "xssh: %v\n", err)

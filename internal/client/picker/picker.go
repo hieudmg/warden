@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -29,8 +30,8 @@ const (
 )
 
 // State is the picker's query and selection state. The source connection
-// slice is immutable; matches holds indexes into it so Filtered always
-// returns results in the original ordering.
+// slice is immutable; matches holds indexes into it so Filtered returns
+// results in grouped, connection-name order.
 type State struct {
 	conns        []model.SSHConnection
 	query        string
@@ -50,8 +51,8 @@ func NewState(conns []model.SSHConnection) State {
 	return State{conns: src}.rebuild()
 }
 
-// Filtered returns the connections matching the current query in source
-// order.
+// Filtered returns the connections matching the current query in grouped,
+// connection-name order.
 func (s State) Filtered() []model.SSHConnection {
 	out := make([]model.SSHConnection, len(s.matches))
 	for i, idx := range s.matches {
@@ -313,7 +314,9 @@ func leaveAlternateScreen(w io.Writer) error {
 
 // rebuild recomputes matches for the current query. A connection matches
 // when the lowercased query is contained in its lowercased Name, Host, or
-// GroupName. An empty GroupName never matches a nonempty query.
+// GroupName. An empty GroupName never matches a nonempty query. Matches are
+// sorted by group name, then connection name; ungrouped connections sort
+// after named groups.
 func (s State) rebuild() State {
 	needle := strings.ToLower(s.query)
 	matches := make([]int, 0, len(s.conns))
@@ -324,6 +327,28 @@ func (s State) rebuild() State {
 			matches = append(matches, i)
 		}
 	}
+	sort.SliceStable(matches, func(i, j int) bool {
+		left := s.conns[matches[i]]
+		right := s.conns[matches[j]]
+		if left.GroupName == "" && right.GroupName != "" {
+			return false
+		}
+		if left.GroupName != "" && right.GroupName == "" {
+			return true
+		}
+		if groupOrder(left.GroupName) != groupOrder(right.GroupName) {
+			return groupOrder(left.GroupName) < groupOrder(right.GroupName)
+		}
+		return connectionNameOrder(left.Name) < connectionNameOrder(right.Name)
+	})
 	s.matches = matches
 	return s
+}
+
+func groupOrder(name string) string {
+	return strings.ToLower(name) + "\x00" + name
+}
+
+func connectionNameOrder(name string) string {
+	return strings.ToLower(name) + "\x00" + name
 }

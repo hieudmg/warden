@@ -41,6 +41,59 @@ func TestStateFiltersNameHostAndGroupCaseInsensitively(t *testing.T) {
 	}
 }
 
+func TestStateSortsByGroupThenConnectionName(t *testing.T) {
+	state := NewState([]model.SSHConnection{
+		{ID: 1, Name: "zulu", Host: "host-a", GroupName: "Group B"},
+		{ID: 2, Name: "bravo", Host: "host-z", GroupName: "Group A"},
+		{ID: 3, Name: "alpha", Host: "host-z", GroupName: "Group A"},
+		{ID: 4, Name: "alpha", Host: "host-a", GroupName: "Group B"},
+		{ID: 5, Name: "first", Host: "host-q"},
+	})
+
+	got := state.Filtered()
+	wantIDs := []int64{3, 2, 4, 1, 5}
+	if len(got) != len(wantIDs) {
+		t.Fatalf("Filtered() returned %d connections, want %d", len(got), len(wantIDs))
+	}
+	for i, wantID := range wantIDs {
+		if got[i].ID != wantID {
+			t.Fatalf("Filtered()[%d].ID = %d, want %d", i, got[i].ID, wantID)
+		}
+	}
+}
+
+func TestRenderGroupsRowsAndSkipsGroupHighlight(t *testing.T) {
+	state := NewState([]model.SSHConnection{
+		{ID: 1, Name: "zulu", GroupName: "Group B"},
+		{ID: 2, Name: "bravo", GroupName: "Group A"},
+		{ID: 3, Name: "alpha", GroupName: "Group A"},
+		{ID: 4, Name: "first"},
+	})
+	state = state.Apply(DecodedKey{Kind: KeyDown})
+
+	var out bytes.Buffer
+	if err := Render(&out, state, 100, 12); err != nil {
+		t.Fatalf("Render() error = %v", err)
+	}
+	s := out.String()
+	for _, want := range []string{"Group A", "Group B", "(Ungrouped)", ">   bravo"} {
+		if !strings.Contains(s, want) {
+			t.Fatalf("render missing %q: %q", want, s)
+		}
+	}
+	if strings.Index(s, "Group A") > strings.Index(s, "Group B") ||
+		strings.Index(s, "Group B") > strings.Index(s, "(Ungrouped)") {
+		t.Fatalf("group headers are not ordered: %q", s)
+	}
+	for _, line := range strings.Split(s, "\r\n") {
+		if strings.HasPrefix(line, "  Group A") || strings.HasPrefix(line, "  Group B") || strings.HasPrefix(line, "  (Ungrouped)") {
+			if strings.Contains(line, ">") {
+				t.Fatalf("group header highlighted: %q", line)
+			}
+		}
+	}
+}
+
 func TestStateNavigationAndQueryReset(t *testing.T) {
 	state := NewState([]model.SSHConnection{{ID: 1, Name: "alpha"}, {ID: 2, Name: "beta"}})
 	state = state.Apply(DecodedKey{Kind: KeyDown})
@@ -747,7 +800,7 @@ func TestRenderNarrowListScrollsToSelected(t *testing.T) {
 	var out bytes.Buffer
 	Render(&out, state, 79, 8)
 	s := out.String()
-	if !strings.Contains(s, "> conn-20") {
+	if !strings.Contains(s, ">   conn-20") {
 		t.Fatalf("selected row off screen: %q", s)
 	}
 	if strings.Contains(s, "conn-01") {

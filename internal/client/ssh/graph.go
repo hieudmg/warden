@@ -70,6 +70,7 @@ func DialChain(ctx context.Context, bundle model.SSHBundle, opts DialOptions) (*
 
 	var via *ssh.Client
 	for _, hop := range bundle.Jumps {
+		reportProgress(opts.Progress, "Connecting to "+hop.Name+"...")
 		nc, err := dialNode(ctx, hop, via, cb)
 		if err != nil {
 			closeAll()
@@ -79,6 +80,7 @@ func DialChain(ctx context.Context, bundle model.SSHBundle, opts DialOptions) (*
 		via = nc.client
 	}
 
+	reportProgress(opts.Progress, "Connecting to "+bundle.Target.Name+"...")
 	nc, err := dialNode(ctx, bundle.Target, via, cb)
 	if err != nil {
 		closeAll()
