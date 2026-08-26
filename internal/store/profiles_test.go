@@ -15,18 +15,16 @@ import (
 // model; the store encrypts them at rest.
 func SSHProfileForTest(name string, jumpIDs string) model.SSHProfile {
 	return model.SSHProfile{
-		Name:                 name,
-		Host:                 "example.invalid",
-		Port:                 22,
-		Username:             "deploy",
-		Password:             []byte("s3cret"),
-		PrivateKey:           []byte("-----BEGIN OPENSSH PRIVATE KEY-----\ntest\n-----END OPENSSH PRIVATE KEY-----\n"),
-		PrivateKeyPassphrase: []byte("passphrase"),
-		ProxyHost:            "proxy.invalid",
-		ProxyPort:            3128,
-		ProxyUsername:        "proxyuser",
-		ProxyPassword:        []byte("proxysecret"),
-		JumpConnectionIDs:    jumpIDs,
+		Name:              name,
+		Host:              "example.invalid",
+		Port:              22,
+		Username:          "deploy",
+		Password:          []byte("s3cret"),
+		ProxyHost:         "proxy.invalid",
+		ProxyPort:         3128,
+		ProxyUsername:     "proxyuser",
+		ProxyPassword:     []byte("proxysecret"),
+		JumpConnectionIDs: jumpIDs,
 	}
 }
 
@@ -76,6 +74,16 @@ func TestSSHCreateGetRoundTrip(t *testing.T) {
 	}
 	if got.JumpConnectionIDs != "[12, 4]" {
 		t.Errorf("jump ids stored as %q, want original text preserved", got.JumpConnectionIDs)
+	}
+}
+
+func TestSSHCreateRejectsPasswordAndPrivateKey(t *testing.T) {
+	s := newTestStore(t)
+	p := SSHProfileForTest("conflicting-auth", "[]")
+	p.PrivateKey = []byte("-----BEGIN OPENSSH PRIVATE KEY-----\ntest\n-----END OPENSSH PRIVATE KEY-----\n")
+
+	if _, err := s.CreateSSH(context.Background(), p); !errors.Is(err, ErrValidation) {
+		t.Errorf("CreateSSH conflicting credentials error = %v, want ErrValidation", err)
 	}
 }
 
@@ -240,6 +248,81 @@ func TestSSHUpdate(t *testing.T) {
 	}
 	if got.JumpConnectionIDs != "[2, 1]" {
 		t.Errorf("updated jump ids = %q, want [2, 1]", got.JumpConnectionIDs)
+	}
+}
+
+func TestSSHUpdateRejectsPasswordAndPrivateKey(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	created, err := s.CreateSSH(ctx, SSHProfileForTest("update-conflicting-auth", "[]"))
+	if err != nil {
+		t.Fatalf("CreateSSH: %v", err)
+	}
+	updated := created
+	updated.Password = []byte("replacement-password")
+	updated.PrivateKey = []byte("-----BEGIN OPENSSH PRIVATE KEY-----\nreplacement\n-----END OPENSSH PRIVATE KEY-----\n")
+
+	if err := s.UpdateSSH(ctx, updated); !errors.Is(err, ErrValidation) {
+		t.Errorf("UpdateSSH conflicting credentials error = %v, want ErrValidation", err)
+	}
+}
+
+func TestSSHUpdatePrivateKeyClearsPassword(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+
+	created, err := s.CreateSSH(ctx, SSHProfileForTest("switch-to-key", "[]"))
+	if err != nil {
+		t.Fatalf("CreateSSH: %v", err)
+	}
+	updated := created
+	updated.Password = nil
+	updated.PrivateKey = []byte("-----BEGIN OPENSSH PRIVATE KEY-----\nreplacement\n-----END OPENSSH PRIVATE KEY-----\n")
+	updated.PrivateKeyPassphrase = []byte("key-passphrase")
+	if err := s.UpdateSSH(ctx, updated); err != nil {
+		t.Fatalf("UpdateSSH: %v", err)
+	}
+
+	got, err := s.GetSSH(ctx, created.ID)
+	if err != nil {
+		t.Fatalf("GetSSH: %v", err)
+	}
+	if got.Password != nil {
+		t.Errorf("password = %q, want cleared", got.Password)
+	}
+	if string(got.PrivateKey) != "-----BEGIN OPENSSH PRIVATE KEY-----\nreplacement\n-----END OPENSSH PRIVATE KEY-----\n" {
+		t.Errorf("private key = %q, want replacement", got.PrivateKey)
+	}
+}
+
+func TestSSHUpdatePasswordClearsPrivateKeyAndPassphrase(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	p := SSHProfileForTest("switch-to-password", "[]")
+	p.Password = nil
+	p.PrivateKey = []byte("-----BEGIN OPENSSH PRIVATE KEY-----\noriginal\n-----END OPENSSH PRIVATE KEY-----\n")
+	p.PrivateKeyPassphrase = []byte("original-passphrase")
+	created, err := s.CreateSSH(ctx, p)
+	if err != nil {
+		t.Fatalf("CreateSSH: %v", err)
+	}
+	updated := created
+	updated.Password = []byte("replacement-password")
+	updated.PrivateKey = nil
+	updated.PrivateKeyPassphrase = nil
+	if err := s.UpdateSSH(ctx, updated); err != nil {
+		t.Fatalf("UpdateSSH: %v", err)
+	}
+
+	got, err := s.GetSSH(ctx, created.ID)
+	if err != nil {
+		t.Fatalf("GetSSH: %v", err)
+	}
+	if string(got.Password) != "replacement-password" {
+		t.Errorf("password = %q, want replacement-password", got.Password)
+	}
+	if got.PrivateKey != nil || got.PrivateKeyPassphrase != nil {
+		t.Errorf("private key credentials = %q, %q; want cleared", got.PrivateKey, got.PrivateKeyPassphrase)
 	}
 }
 

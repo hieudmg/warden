@@ -125,6 +125,9 @@ func (s *Store) decryptSecret(aad []byte, blob []byte) ([]byte, error) {
 // fields are encrypted so AAD can bind each ciphertext to its stable
 // `warden/ssh/<id>/<field>` location.
 func (s *Store) CreateSSH(ctx context.Context, p model.SSHProfile) (model.SSHProfile, error) {
+	if err := normalizeSSHAuthentication(&p); err != nil {
+		return model.SSHProfile{}, fmt.Errorf("%w: %v", ErrValidation, err)
+	}
 	if err := validateJumpIDs(p.JumpConnectionIDs); err != nil {
 		return model.SSHProfile{}, fmt.Errorf("%w: %v", ErrValidation, err)
 	}
@@ -283,6 +286,9 @@ func (s *Store) UpdateSSH(ctx context.Context, p model.SSHProfile) error {
 	if p.ID == 0 {
 		return errors.New("update ssh_connection requires id")
 	}
+	if err := normalizeSSHAuthentication(&p); err != nil {
+		return fmt.Errorf("%w: %v", ErrValidation, err)
+	}
 	if err := validateJumpIDs(p.JumpConnectionIDs); err != nil {
 		return fmt.Errorf("%w: %v", ErrValidation, err)
 	}
@@ -318,6 +324,19 @@ func (s *Store) UpdateSSH(ctx context.Context, p model.SSHProfile) error {
 		return fmt.Errorf("rows affected: %w", err)
 	} else if n == 0 {
 		return ErrNotFound
+	}
+
+	if len(p.Password) > 0 {
+		if _, err := tx.ExecContext(ctx,
+			"UPDATE ssh_connections SET private_key=NULL, private_key_passphrase=NULL WHERE id=?", p.ID); err != nil {
+			return fmt.Errorf("clear private key authentication: %w", err)
+		}
+	}
+	if len(p.PrivateKey) > 0 {
+		if _, err := tx.ExecContext(ctx,
+			"UPDATE ssh_connections SET password=NULL WHERE id=?", p.ID); err != nil {
+			return fmt.Errorf("clear password authentication: %w", err)
+		}
 	}
 
 	updates := []struct {
@@ -598,6 +617,19 @@ func sshAAD(id int64, field string) []byte {
 
 func dbAAD(id int64, field string) []byte {
 	return []byte(fmt.Sprintf("warden/db/%d/%s", id, field))
+}
+
+// normalizeSSHAuthentication rejects conflicting credentials and removes a
+// passphrase whenever password authentication is selected.
+func normalizeSSHAuthentication(p *model.SSHProfile) error {
+	if len(p.Password) > 0 && len(p.PrivateKey) > 0 {
+		return errors.New("password and private_key are mutually exclusive")
+	}
+	if len(p.Password) > 0 {
+		p.PrivateKey = nil
+		p.PrivateKeyPassphrase = nil
+	}
+	return nil
 }
 
 func validateSSHMetadata(p model.SSHProfile) error {

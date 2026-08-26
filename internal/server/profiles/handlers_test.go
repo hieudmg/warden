@@ -15,12 +15,19 @@ import (
 
 func TestListSSHRedactsSecrets(t *testing.T) {
 	mux, s, _ := newTestAPI(t)
-	if _, err := s.CreateSSH(context.Background(), model.SSHProfile{
-		Name: "secret-host", Host: "h.invalid", Port: 22, Username: "u",
-		Password: []byte("s3cret-value"), PrivateKey: []byte("PRIVATE-KEY-MATERIAL"),
-		JumpConnectionIDs: "[]",
-	}); err != nil {
-		t.Fatalf("CreateSSH: %v", err)
+	for _, p := range []model.SSHProfile{
+		{
+			Name: "password-secret", Host: "h.invalid", Port: 22, Username: "u",
+			Password: []byte("s3cret-value"), JumpConnectionIDs: "[]",
+		},
+		{
+			Name: "key-secret", Host: "h.invalid", Port: 22, Username: "u",
+			PrivateKey: []byte("PRIVATE-KEY-MATERIAL"), JumpConnectionIDs: "[]",
+		},
+	} {
+		if _, err := s.CreateSSH(context.Background(), p); err != nil {
+			t.Fatalf("CreateSSH: %v", err)
+		}
 	}
 
 	rec := doRequest(t, mux, "GET", "/api/v1/ssh-connections", "")
