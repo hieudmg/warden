@@ -99,13 +99,14 @@ func Render(w io.Writer, state State, width, height int) error {
 		if rightWidth < 1 {
 			rightWidth = 1
 		}
-		listStart := listWindowStart(state.selected, bodyRows, len(filtered))
+		rows := buildListRows(filtered)
+		listStart := listRowsWindowStart(rows, state.selected, bodyRows)
 		fields := []Field{}
 		if hasSelected {
 			fields = FormatConnection(selectedConn)
 		}
 		for i := 0; i < bodyRows; i++ {
-			row := listLine(filtered, state.selected, listStart+i, leftWidth)
+			row := listRowLine(filtered, rows, state.selected, listStart+i, leftWidth)
 			// Pad the visible row to leftWidth so the │ separator always
 			// sits at the same column no matter how short the name is.
 			line := padVisible(row, leftWidth) + cyan + "│" + reset
@@ -123,9 +124,14 @@ func Render(w io.Writer, state State, width, height int) error {
 		if bodyRows == 1 {
 			listRows, previewRows = 1, 0
 		}
-		listStart := listWindowStart(state.selected, listRows, len(filtered))
+		rows := buildListRows(filtered)
+		if len(rows) > len(filtered) && listRows < bodyRows {
+			listRows++
+			previewRows--
+		}
+		listStart := listRowsWindowStart(rows, state.selected, listRows)
 		for i := 0; i < listRows; i++ {
-			lines = append(lines, listLine(filtered, state.selected, listStart+i, width))
+			lines = append(lines, listRowLine(filtered, rows, state.selected, listStart+i, width))
 		}
 		if hasSelected {
 			fields := FormatConnection(selectedConn)
@@ -163,6 +169,44 @@ func listWindowStart(sel, rows, total int) int {
 		start = total - rows
 	}
 	return start
+}
+
+type listRow struct {
+	group      string
+	connection int
+	header     bool
+}
+
+func buildListRows(filtered []model.SSHConnection) []listRow {
+	rows := make([]listRow, 0, len(filtered)+1)
+	previousGroup := ""
+	for i, c := range filtered {
+		group := c.GroupName
+		if i == 0 || group != previousGroup {
+			label := group
+			if label == "" {
+				label = "(Ungrouped)"
+			}
+			rows = append(rows, listRow{group: label, header: true})
+			previousGroup = group
+		}
+		rows = append(rows, listRow{connection: i})
+	}
+	return rows
+}
+
+func listRowsWindowStart(rows []listRow, selected, visible int) int {
+	if len(rows) == 0 || visible <= 0 {
+		return 0
+	}
+	selectedRow := 0
+	for i, row := range rows {
+		if !row.header && row.connection == selected {
+			selectedRow = i
+			break
+		}
+	}
+	return listWindowStart(selectedRow, visible, len(rows))
 }
 
 // focusHint names the pane that currently owns Up/Down navigation and the
@@ -206,8 +250,19 @@ func visibleWidth(line string) int {
 	return n
 }
 
-// listLine renders one connection row, highlighting the selected row.
-// rowIdx is the index into filtered; the row is only rendered when it
+func listRowLine(filtered []model.SSHConnection, rows []listRow, selected, rowIdx, width int) string {
+	if rowIdx < 0 || rowIdx >= len(rows) {
+		return ""
+	}
+	row := rows[rowIdx]
+	if row.header {
+		return "  " + clamp(sanitize(row.group), width-2)
+	}
+	return listLine(filtered, selected, row.connection, width)
+}
+
+// listLine renders one indented connection row, highlighting the selected
+// row. rowIdx is the index into filtered; the row is only rendered when it
 // falls inside the visible window.
 func listLine(filtered []model.SSHConnection, selIdx, rowIdx, width int) string {
 	if rowIdx < 0 || rowIdx >= len(filtered) {
@@ -215,9 +270,9 @@ func listLine(filtered []model.SSHConnection, selIdx, rowIdx, width int) string 
 	}
 	name := sanitize(filtered[rowIdx].Name)
 	if rowIdx == selIdx {
-		return selected + "> " + clamp(name, width-2) + reset
+		return selected + ">   " + clamp(name, width-4) + reset
 	}
-	return "  " + clamp(name, width-2)
+	return "    " + clamp(name, width-4)
 }
 
 // fieldLine renders "Label: Value" with the label in blue, clamped to max

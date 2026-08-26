@@ -38,6 +38,9 @@ type DialOptions struct {
 	// Terminal is the interactive prompt used for --accept-new
 	// confirmation. Nil means noninteractive: unknown keys always fail.
 	Terminal io.ReadWriter
+	// Progress receives non-secret interactive connection status messages.
+	// It is ignored when nil.
+	Progress func(string)
 }
 
 // ExitStatusError reports a remote command that exited nonzero.

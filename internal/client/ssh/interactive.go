@@ -17,12 +17,11 @@ import (
 // interactiveShellCommand is the remote command started for interactive
 // sessions when the target profile has no DefaultDir. It is interpreted by
 // the user's shell on the remote host and re-execs a fresh login shell so
-// login rc files load. -l is the portable login flag accepted by sh, bash,
-// zsh, dash, and fish; ${SHELL:-sh} guards the rare case where the remote
-// environment does not set $SHELL. When DefaultDir is non-empty, the
-// remote command is prefixed with `cd '<dir>' && ` (see
-// buildInteractiveShellCommand).
-const interactiveShellCommand = "exec ${SHELL:-sh} -l"
+// login rc files load. The command uses only shell syntax accepted by
+// common remote login shells, including fish; the SSH server supplies SHELL
+// from the account configuration. When DefaultDir is non-empty, the remote
+// command is prefixed with `cd '<dir>' && ` (see buildInteractiveShellCommand).
+const interactiveShellCommand = `exec "$SHELL" -l`
 
 // buildInteractiveShellCommand returns the remote shell command string
 // for the given default working directory. An empty dir yields the bare
@@ -54,7 +53,41 @@ func (t termReadWriter) Write(p []byte) (int, error) { return t.term.Stdout().Wr
 // every exit path. acceptNew enables interactive first-use host-key
 // confirmation on the terminal; changed and unconfirmed keys always fail.
 func RunInteractive(ctx context.Context, bundle model.SSHBundle, term terminal.Session, acceptNew bool) error {
-	return runInteractive(ctx, bundle, term, DialOptions{AcceptNew: acceptNew, Terminal: termReadWriter{term}})
+	return runInteractive(ctx, bundle, term, DialOptions{
+		AcceptNew: acceptNew,
+		Terminal:  termReadWriter{term},
+		Progress: func(message string) {
+			WriteProgress(term.Stderr(), message)
+		},
+	})
+}
+
+// WriteProgress writes one green, non-secret interactive status message.
+// Control characters in profile-derived text are escaped before writing.
+func WriteProgress(w io.Writer, message string) {
+	if w == nil {
+		return
+	}
+	message = escapeProgressControls(message)
+	_, _ = fmt.Fprintf(w, "\x1b[32m%s\x1b[0m\r\n", message)
+}
+
+func escapeProgressControls(message string) string {
+	var escaped strings.Builder
+	for _, r := range message {
+		if r < 0x20 || r == 0x7f {
+			fmt.Fprintf(&escaped, `\x%02x`, r)
+			continue
+		}
+		escaped.WriteRune(r)
+	}
+	return escaped.String()
+}
+
+func reportProgress(progress func(string), message string) {
+	if progress != nil {
+		progress(message)
+	}
 }
 
 // runInteractive is RunInteractive with explicit dial options (tests
@@ -75,6 +108,7 @@ func runInteractive(ctx context.Context, bundle model.SSHBundle, term terminal.S
 		}
 	}()
 
+	reportProgress(opts.Progress, "Opening interactive session...")
 	session, err := client.NewSession()
 	if err != nil {
 		return fmt.Errorf("open ssh session: %w", err)

@@ -176,12 +176,16 @@ warden xssh [--accept-new] [connection]
 ```
 
 When invoked without `<connection>`, `xssh` opens a colorized native
-terminal picker. Type to filter profile names and hostnames; use Up/Down
-to move, Tab to switch focus between the connection list and the profile
-preview (the bottom line shows which pane is focused), Enter to connect,
-and Esc or Ctrl-C to cancel. The right pane shows the selected profile;
-password, private-key, passphrase, and proxy-password values are never
-shown and instead display whether they are configured. Terminals
+terminal picker. Connections are grouped and sorted by group name, then
+connection name; `(Ungrouped)` appears last. Type to filter profile names,
+hostnames, and group names. Use Up/Down to move between connections; group
+headers are not selectable. Tab switches focus between the connection list
+and the profile preview (the bottom line shows which pane is focused), Enter
+to connect, and Esc or Ctrl-C to cancel. Green progress messages show
+credential fetching and interactive connection stages. The right pane shows
+the selected profile; password, private-key, passphrase, and
+proxy-password values are never shown and instead display whether they are
+configured. Terminals
 narrower than 80 columns use a stacked layout. Use a modern
 ANSI/VT-capable terminal on Windows.
 

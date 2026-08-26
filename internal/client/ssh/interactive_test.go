@@ -12,6 +12,7 @@ import (
 	"net"
 	"os"
 	"os/exec"
+	"reflect"
 	"strconv"
 	"strings"
 	"sync"
@@ -427,6 +428,58 @@ func waitFor(t *testing.T, what string, cond func() bool) {
 	t.Fatalf("timed out waiting for %s", what)
 }
 
+// TestRunInteractiveReportsConnectionProgress verifies interactive
+// connection stages are reported in order.
+func TestRunInteractiveReportsConnectionProgress(t *testing.T) {
+	srv := newInteractiveTestServer(t)
+	inR, inW := io.Pipe()
+	t.Cleanup(func() { inR.Close() })
+	var out bytes.Buffer
+	var progress []string
+
+	term := newFakeTerminalSession(inR, &out, io.Discard)
+	done := make(chan error, 1)
+	go func() {
+		done <- runInteractive(context.Background(), interactiveBundle(srv), term, DialOptions{
+			HostKeyCallback: func(string, net.Addr, golangssh.PublicKey) error { return nil },
+			Progress:        func(message string) { progress = append(progress, message) },
+		})
+	}()
+	waitFor(t, "remote shell start", srv.started)
+	if _, err := inW.Write([]byte{0x04}); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("runInteractive() err = %v, want nil", err)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("interactive session did not end")
+	}
+
+	want := []string{"Connecting to test...", "Opening interactive session..."}
+	if !reflect.DeepEqual(progress, want) {
+		t.Fatalf("progress = %#v, want %#v", progress, want)
+	}
+}
+
+func TestWriteProgressUsesGreenOutput(t *testing.T) {
+	var out bytes.Buffer
+	WriteProgress(&out, "Fetching credentials...")
+	if got, want := out.String(), "\x1b[32mFetching credentials...\x1b[0m\r\n"; got != want {
+		t.Fatalf("WriteProgress() = %q, want %q", got, want)
+	}
+}
+
+func TestWriteProgressEscapesControlCharacters(t *testing.T) {
+	var out bytes.Buffer
+	WriteProgress(&out, "bad\x00\a\b\x1b[31m\x7f")
+	if got, want := out.String(), "\x1b[32mbad\\x00\\x07\\x08\\x1b[31m\\x7f\x1b[0m\r\n"; got != want {
+		t.Fatalf("WriteProgress() = %q, want %q", got, want)
+	}
+}
+
 // TestRunInteractiveRequestsPTYAndStreamsOutput verifies the full
 // interactive flow: raw mode entered, PTY requested with the terminal
 // size, remote output streamed locally in real time, and Ctrl-D ending
@@ -595,8 +648,8 @@ func TestRunInteractiveRestoresTerminalOnDialFailure(t *testing.T) {
 // TestInteractiveShellCommand verifies the fixed remote command string
 // stays the portable login-shell form (documented contract).
 func TestInteractiveShellCommand(t *testing.T) {
-	if interactiveShellCommand != "exec ${SHELL:-sh} -l" {
-		t.Fatalf("interactiveShellCommand = %q, want %q", interactiveShellCommand, "exec ${SHELL:-sh} -l")
+	if interactiveShellCommand != `exec "$SHELL" -l` {
+		t.Fatalf("interactiveShellCommand = %q, want %q", interactiveShellCommand, `exec "$SHELL" -l`)
 	}
 }
 
@@ -604,13 +657,13 @@ func TestInteractiveShellCommand(t *testing.T) {
 // single quotes, embedded quotes are escaped, and an empty dir yields
 // the bare login-shell command.
 func TestBuildInteractiveShellCommand(t *testing.T) {
-	if got := buildInteractiveShellCommand(""); got != "exec ${SHELL:-sh} -l" {
+	if got := buildInteractiveShellCommand(""); got != `exec "$SHELL" -l` {
 		t.Errorf("empty dir = %q, want bare login-shell", got)
 	}
-	if got := buildInteractiveShellCommand("/srv/app"); got != "cd '/srv/app' && exec ${SHELL:-sh} -l" {
+	if got := buildInteractiveShellCommand("/srv/app"); got != `cd '/srv/app' && exec "$SHELL" -l` {
 		t.Errorf("plain dir = %q, want single-quoted prefix", got)
 	}
-	if got := buildInteractiveShellCommand("/srv/it's"); got != `cd '/srv/it'"'"'s' && exec ${SHELL:-sh} -l` {
+	if got := buildInteractiveShellCommand("/srv/it's"); got != `cd '/srv/it'"'"'s' && exec "$SHELL" -l` {
 		t.Errorf("quoted dir = %q, want embedded single quote escaped", got)
 	}
 }
