@@ -1,4 +1,4 @@
-import { useRef, useState, type FormEvent } from "react"
+import { useEffect, useRef, useState, type ChangeEvent, type FormEvent } from "react"
 import { api } from "@/api/client"
 import type {
   DependentsResponse,
@@ -67,6 +67,101 @@ function changedSecret(current: string, original: string): string | null {
   return current === original ? null : current
 }
 
+interface KeyMaterialFieldProps {
+  id: string
+  label: string
+  value: string
+  rows: number
+  onChange: (value: string) => void
+  onFileError: (message: string) => void
+}
+
+function KeyMaterialField({ id, label, value, rows, onChange, onFileError }: KeyMaterialFieldProps) {
+  const [cleared, setCleared] = useState(false)
+  const previousValue = useRef<string | null>(null)
+  const fileInput = useRef<HTMLInputElement | null>(null)
+  const readGeneration = useRef(0)
+  const mounted = useRef(true)
+
+  useEffect(() => {
+    mounted.current = true
+    return () => {
+      mounted.current = false
+      readGeneration.current += 1
+    }
+  }, [])
+
+  const toggleClear = () => {
+    readGeneration.current += 1
+    if (cleared) {
+      onChange(previousValue.current ?? "")
+      previousValue.current = null
+      setCleared(false)
+      return
+    }
+
+    previousValue.current = value
+    onChange("")
+    if (fileInput.current) fileInput.current.value = ""
+    setCleared(true)
+  }
+
+  const handleFileChange = async (event: ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0]
+    if (!file) return
+    const generation = ++readGeneration.current
+
+    try {
+      const text = await file.text()
+      if (mounted.current && readGeneration.current === generation) onChange(text)
+    } catch (error) {
+      if (mounted.current && readGeneration.current === generation) {
+        onFileError(error instanceof Error ? error.message : "Unable to read selected file.")
+      }
+    }
+  }
+
+  const fieldName = label.toLowerCase()
+
+  return (
+    <div className="grid gap-1.5">
+      <div className="flex items-center justify-between gap-2">
+        <Label htmlFor={id}>{label}</Label>
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          onClick={toggleClear}
+          aria-label={`${cleared ? "Undo clear" : "Clear"} ${fieldName}`}
+        >
+          {cleared ? `Undo clear ${fieldName}` : `Clear ${fieldName}`}
+        </Button>
+      </div>
+      <Textarea
+        id={id}
+        value={value}
+        onChange={event => onChange(event.target.value)}
+        autoComplete="off"
+        rows={rows}
+        disabled={cleared}
+      />
+      <div className="flex items-center gap-2 text-xs text-muted-foreground">
+        <span aria-hidden="true" className="h-px flex-1 bg-border" />
+        <span>or</span>
+        <span aria-hidden="true" className="h-px flex-1 bg-border" />
+      </div>
+      <Input
+        ref={fileInput}
+        id={`${id}-file`}
+        type="file"
+        aria-label={`Select ${fieldName} file`}
+        disabled={cleared}
+        onChange={event => void handleFileChange(event)}
+      />
+    </div>
+  )
+}
+
 export function KeyPairsTab({ resource, notify }: KeyPairsTabProps) {
   const [query, setQuery] = useState("")
   const [formDialog, setFormDialog] = useState<FormDialogState | null>(null)
@@ -88,9 +183,20 @@ export function KeyPairsTab({ resource, notify }: KeyPairsTabProps) {
   // Guards vault GET resolution against overwriting a newer dialog (raw
   // values are kept only in edit dialog state, never in table state).
   const editIDRef = useRef<number | null>(null)
+  const vaultRequestRef = useRef(0)
+  const mounted = useRef(true)
+
+  useEffect(() => {
+    mounted.current = true
+    return () => {
+      mounted.current = false
+      vaultRequestRef.current += 1
+    }
+  }, [])
 
   const openCreate = (trigger: HTMLElement) => {
     lastTriggerRef.current = trigger
+    vaultRequestRef.current += 1
     editIDRef.current = null
     setFormError(null)
     setName("")
@@ -103,6 +209,7 @@ export function KeyPairsTab({ resource, notify }: KeyPairsTabProps) {
   // Centralized close: drops the dialog and clears the raw vault values
   // held in form state so plaintext never survives a close in memory.
   const closeFormDialog = () => {
+    vaultRequestRef.current += 1
     editIDRef.current = null
     setFormDialog(null)
     setPublicKey("")
@@ -112,6 +219,7 @@ export function KeyPairsTab({ resource, notify }: KeyPairsTabProps) {
 
   const openEdit = (pair: KeyPairSummary, trigger: HTMLElement) => {
     lastTriggerRef.current = trigger
+    const requestID = ++vaultRequestRef.current
     editIDRef.current = pair.id
     setFormError(null)
     setName(pair.name)
@@ -119,20 +227,23 @@ export function KeyPairsTab({ resource, notify }: KeyPairsTabProps) {
     setPrivateKey("")
     setPassphrase("")
     setFormDialog({ mode: "edit", pair, vault: null, vaultError: null })
-    void loadVault(pair)
+    void loadVault(pair, requestID)
   }
 
-  const loadVault = async (pair: KeyPairSummary) => {
+  const loadVault = async (pair: KeyPairSummary, requestID: number) => {
+    const isCurrent = () =>
+      mounted.current && editIDRef.current === pair.id && vaultRequestRef.current === requestID
+
     try {
       const vault = await api.getKeyPair(pair.id)
-      if (editIDRef.current === pair.id) {
+      if (isCurrent()) {
         setFormDialog({ mode: "edit", pair, vault, vaultError: null })
         setPublicKey(vault.public_key)
         setPrivateKey(vault.private_key)
         setPassphrase(vault.private_key_passphrase)
       }
     } catch (error) {
-      if (editIDRef.current === pair.id) {
+      if (isCurrent()) {
         setFormDialog({ mode: "edit", pair, vault: null, vaultError: errorMessage(error) })
       }
     }
@@ -351,62 +462,42 @@ export function KeyPairsTab({ resource, notify }: KeyPairsTabProps) {
             )}
             {showSecretFields && (
               <>
+                <KeyMaterialField
+                  id="key-pair-public-key"
+                  label="Public key"
+                  value={publicKey}
+                  rows={3}
+                  onChange={setPublicKey}
+                  onFileError={setFormError}
+                />
+                <KeyMaterialField
+                  id="key-pair-private-key"
+                  label="Private key"
+                  value={privateKey}
+                  rows={3}
+                  onChange={setPrivateKey}
+                  onFileError={setFormError}
+                />
                 <div className="grid gap-1.5">
-                  <Label htmlFor="key-pair-public-key">Public key</Label>
-                  <Textarea
-                    id="key-pair-public-key"
-                    value={publicKey}
-                    onChange={event => setPublicKey(event.target.value)}
-                    autoComplete="off"
-                    rows={3}
-                  />
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    className="justify-self-start"
-                    onClick={() => setPublicKey("")}
-                  >
-                    Clear public key
-                  </Button>
-                </div>
-                <div className="grid gap-1.5">
-                  <Label htmlFor="key-pair-private-key">Private key</Label>
-                  <Textarea
-                    id="key-pair-private-key"
-                    value={privateKey}
-                    onChange={event => setPrivateKey(event.target.value)}
-                    autoComplete="off"
-                    rows={3}
-                  />
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    className="justify-self-start"
-                    onClick={() => setPrivateKey("")}
-                  >
-                    Clear private key
-                  </Button>
-                </div>
-                <div className="grid gap-1.5">
-                  <Label htmlFor="key-pair-passphrase">Private key passphrase</Label>
-                  <Textarea
+                  <div className="flex items-center justify-between gap-2">
+                    <Label htmlFor="key-pair-passphrase">Private key passphrase</Label>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setPassphrase("")}
+                      aria-label="Clear private key passphrase"
+                    >
+                      Clear private key passphrase
+                    </Button>
+                  </div>
+                  <Input
                     id="key-pair-passphrase"
+                    type="password"
                     value={passphrase}
                     onChange={event => setPassphrase(event.target.value)}
-                    autoComplete="off"
-                    rows={2}
+                    autoComplete="new-password"
                   />
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    className="justify-self-start"
-                    onClick={() => setPassphrase("")}
-                  >
-                    Clear private key passphrase
-                  </Button>
                 </div>
               </>
             )}

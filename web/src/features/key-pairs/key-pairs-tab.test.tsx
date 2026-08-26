@@ -1,4 +1,5 @@
 import { act, render, screen, waitFor, within } from "@testing-library/react"
+import { StrictMode } from "react"
 import userEvent from "@testing-library/user-event"
 import { beforeEach, describe, expect, test, vi } from "vitest"
 import { api, ApiError } from "@/api/client"
@@ -232,6 +233,143 @@ describe("KeyPairsTab", () => {
     await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument())
   })
 
+  test("loads public and private key files into their textareas", async () => {
+    const user = userEvent.setup()
+    render(
+      <StrictMode>
+        <KeyPairsTab resource={resource({ data: [] })} notify={notify} />
+      </StrictMode>,
+    )
+
+    await user.click(screen.getByRole("button", { name: "New key pair" }))
+    const dialog = await screen.findByRole("dialog")
+    const publicFile = new File(["PUBLIC-FROM-FILE"], "id_rsa.pub", { type: "text/plain" })
+    const privateFile = new File(["PRIVATE-FROM-FILE"], "id_rsa", { type: "text/plain" })
+
+    await user.upload(within(dialog).getByLabelText("Select public key file"), publicFile)
+    await user.upload(within(dialog).getByLabelText("Select private key file"), privateFile)
+
+    await waitFor(() => {
+      expect(within(dialog).getByLabelText("Public key")).toHaveValue("PUBLIC-FROM-FILE")
+      expect(within(dialog).getByLabelText("Private key")).toHaveValue("PRIVATE-FROM-FILE")
+    })
+  })
+
+  test("does not apply a late file read after clearing key material", async () => {
+    const user = userEvent.setup()
+    let resolveText: (text: string) => void = () => {}
+    const textPromise = new Promise<string>(resolve => {
+      resolveText = resolve
+    })
+    const file = new File(["LATE-PUBLIC-MATERIAL"], "id_rsa.pub", { type: "text/plain" })
+    vi.spyOn(file, "text").mockReturnValue(textPromise)
+    render(<KeyPairsTab resource={resource({ data: [] })} notify={notify} />)
+
+    await user.click(screen.getByRole("button", { name: "New key pair" }))
+    const dialog = await screen.findByRole("dialog")
+    await user.upload(within(dialog).getByLabelText("Select public key file"), file)
+    await user.click(within(dialog).getByRole("button", { name: "Clear public key" }))
+
+    await act(async () => {
+      resolveText("LATE-PUBLIC-MATERIAL")
+      await textPromise
+    })
+
+    expect(within(dialog).getByLabelText("Public key")).toHaveValue("")
+    expect(within(dialog).getByLabelText("Public key")).toBeDisabled()
+  })
+
+  test("ignores a late file read from an older file selection", async () => {
+    const user = userEvent.setup()
+    let resolveFirst: (text: string) => void = () => {}
+    let resolveSecond: (text: string) => void = () => {}
+    const firstText = new Promise<string>(resolve => {
+      resolveFirst = resolve
+    })
+    const secondText = new Promise<string>(resolve => {
+      resolveSecond = resolve
+    })
+    const firstFile = new File(["FIRST"], "first.pub", { type: "text/plain" })
+    const secondFile = new File(["SECOND"], "second.pub", { type: "text/plain" })
+    vi.spyOn(firstFile, "text").mockReturnValue(firstText)
+    vi.spyOn(secondFile, "text").mockReturnValue(secondText)
+    render(<KeyPairsTab resource={resource({ data: [] })} notify={notify} />)
+
+    await user.click(screen.getByRole("button", { name: "New key pair" }))
+    const dialog = await screen.findByRole("dialog")
+    const fileInput = within(dialog).getByLabelText("Select public key file")
+    await user.upload(fileInput, firstFile)
+    await user.upload(fileInput, secondFile)
+
+    await act(async () => {
+      resolveSecond("SECOND")
+      await secondText
+      resolveFirst("FIRST")
+      await firstText
+    })
+
+    expect(within(dialog).getByLabelText("Public key")).toHaveValue("SECOND")
+  })
+
+  test("ignores a late file read error after clearing key material", async () => {
+    const user = userEvent.setup()
+    let rejectText: (reason?: unknown) => void = () => {}
+    const textPromise = new Promise<string>((_, reject) => {
+      rejectText = reject
+    })
+    const file = new File(["LATE-PUBLIC-MATERIAL"], "id_rsa.pub", { type: "text/plain" })
+    vi.spyOn(file, "text").mockReturnValue(textPromise)
+    render(<KeyPairsTab resource={resource({ data: [] })} notify={notify} />)
+
+    await user.click(screen.getByRole("button", { name: "New key pair" }))
+    const dialog = await screen.findByRole("dialog")
+    await user.upload(within(dialog).getByLabelText("Select public key file"), file)
+    await user.click(within(dialog).getByRole("button", { name: "Clear public key" }))
+
+    await act(async () => {
+      rejectText(new Error("read failed"))
+      await textPromise.catch(() => undefined)
+    })
+
+    expect(within(dialog).queryByRole("alert")).not.toBeInTheDocument()
+  })
+
+  test("reversibly clears key material and disables text and file inputs", async () => {
+    const user = userEvent.setup()
+    render(<KeyPairsTab resource={resource({ data: [] })} notify={notify} />)
+
+    await user.click(screen.getByRole("button", { name: "New key pair" }))
+    const dialog = await screen.findByRole("dialog")
+    const publicKey = within(dialog).getByLabelText("Public key")
+    await user.type(publicKey, "PUBLIC-MATERIAL")
+
+    await user.click(within(dialog).getByRole("button", { name: "Clear public key" }))
+    expect(publicKey).toBeDisabled()
+    expect(within(dialog).getByLabelText("Select public key file")).toBeDisabled()
+    expect(publicKey).toHaveValue("")
+
+    await user.click(within(dialog).getByRole("button", { name: "Undo clear public key" }))
+    expect(publicKey).toBeEnabled()
+    expect(within(dialog).getByLabelText("Select public key file")).toBeEnabled()
+    expect(publicKey).toHaveValue("PUBLIC-MATERIAL")
+  })
+
+  test("renders passphrase as a password input with a non-reversible clear", async () => {
+    const user = userEvent.setup()
+    render(<KeyPairsTab resource={resource({ data: [] })} notify={notify} />)
+
+    await user.click(screen.getByRole("button", { name: "New key pair" }))
+    const dialog = await screen.findByRole("dialog")
+    const passphrase = within(dialog).getByLabelText("Private key passphrase")
+    expect(passphrase).toHaveAttribute("type", "password")
+
+    await user.type(passphrase, "secret")
+    await user.click(within(dialog).getByRole("button", { name: "Clear private key passphrase" }))
+    expect(passphrase).toHaveValue("")
+    expect(passphrase).toBeEnabled()
+    expect(within(dialog).queryByRole("button", { name: "Undo clear private key passphrase" })).not.toBeInTheDocument()
+  })
+
   test("warns about referencing SSH connections before deletion", async () => {
     const user = userEvent.setup()
     const reload = vi.fn().mockResolvedValue(undefined)
@@ -292,6 +430,36 @@ describe("KeyPairsTab", () => {
     await user.keyboard("{Escape}")
     await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument())
     expect(trigger).toHaveFocus()
+  })
+
+  test("ignores a stale vault response after reopening the same pair", async () => {
+    const user = userEvent.setup()
+    let resolveFirst: (value: KeyPairVault) => void = () => {}
+    let resolveSecond: (value: KeyPairVault) => void = () => {}
+    const firstVault = new Promise<KeyPairVault>(resolve => {
+      resolveFirst = resolve
+    })
+    const secondVault = new Promise<KeyPairVault>(resolve => {
+      resolveSecond = resolve
+    })
+    mockedAPI.getKeyPair.mockReturnValueOnce(firstVault).mockReturnValueOnce(secondVault)
+    render(<KeyPairsTab resource={resource({ data: [keyPair(1, "prod")] })} notify={notify} />)
+
+    await user.click(screen.getByRole("button", { name: "Edit prod" }))
+    const firstDialog = await screen.findByRole("dialog")
+    await user.click(within(firstDialog).getByRole("button", { name: "Cancel" }))
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument())
+
+    await user.click(screen.getByRole("button", { name: "Edit prod" }))
+    const secondDialog = await screen.findByRole("dialog")
+    await act(async () => {
+      resolveSecond(vault(1, "prod", { public_key: "NEW-PUBLIC" }))
+      await secondVault
+      resolveFirst(vault(1, "prod", { public_key: "OLD-PUBLIC" }))
+      await firstVault
+    })
+
+    expect(await within(secondDialog).findByLabelText("Public key")).toHaveValue("NEW-PUBLIC")
   })
 
   test("closing the edit dialog discards a late vault response", async () => {
