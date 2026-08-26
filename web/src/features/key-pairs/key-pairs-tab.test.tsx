@@ -233,6 +233,29 @@ describe("KeyPairsTab", () => {
     await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument())
   })
 
+  test("keeps key textareas fixed-size when loading file content", async () => {
+    const user = userEvent.setup()
+    render(<KeyPairsTab resource={resource({ data: [] })} notify={notify} />)
+
+    await user.click(screen.getByRole("button", { name: "New key pair" }))
+    const dialog = await screen.findByRole("dialog")
+    const publicKey = within(dialog).getByLabelText("Public key")
+    expect(publicKey).toHaveClass(
+      "field-sizing-fixed",
+      "h-[120px]",
+      "min-h-[120px]",
+      "max-h-[120px]",
+      "w-full",
+      "resize-none",
+    )
+    const classNameBeforeFileLoad = publicKey.className
+    const file = new File(["PUBLIC-FROM-FILE"], "id_rsa.pub", { type: "text/plain" })
+    await user.upload(within(dialog).getByLabelText("Select public key file"), file)
+
+    await waitFor(() => expect(publicKey).toHaveValue("PUBLIC-FROM-FILE"))
+    expect(publicKey.className).toBe(classNameBeforeFileLoad)
+  })
+
   test("loads public and private key files into their textareas", async () => {
     const user = userEvent.setup()
     render(

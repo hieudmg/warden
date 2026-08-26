@@ -141,6 +141,7 @@ function KeyMaterialField({ id, label, value, rows, onChange, onFileError }: Key
         id={id}
         value={value}
         onChange={event => onChange(event.target.value)}
+        className="field-sizing-fixed h-[120px] min-h-[120px] max-h-[120px] w-full resize-none"
         autoComplete="off"
         rows={rows}
         disabled={cleared}
