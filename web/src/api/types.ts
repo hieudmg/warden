@@ -9,8 +9,8 @@ export interface SSHConnection {
   port: number
   username: string
   has_password: boolean
-  has_private_key: boolean
-  has_private_key_passphrase: boolean
+  key_pair_id: number
+  key_pair_name?: string
   proxy_host: string
   proxy_port: number
   proxy_username: string
@@ -105,15 +105,16 @@ export interface DependentsResponse {
 
 // Write payloads. Secret fields are string | null: null means "not
 // provided" (keep the stored value on update); a blank input must never
-// serialize as "" because that would clear the stored secret.
+// serialize as "" because that would clear the stored secret. KeyPairID
+// selects a stored key pair; 0 means no stored pair selected. Password and
+// key_pair_id are mutually exclusive: exactly one active auth source.
 export interface SSHConnectionRequest {
   name: string
   host: string
   port: number
   username: string
   password: string | null
-  private_key: string | null
-  private_key_passphrase: string | null
+  key_pair_id: number
   proxy_host: string
   proxy_port: number
   proxy_username: string

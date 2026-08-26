@@ -1,4 +1,4 @@
-import { act, render, screen } from "@testing-library/react"
+import { act, render, screen, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { useState } from "react"
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest"
@@ -46,8 +46,7 @@ function sshConnection(id: number): SSHConnection {
     port: 22,
     username: "root",
     has_password: true,
-    has_private_key: false,
-    has_private_key_passphrase: false,
+    key_pair_id: 0,
     proxy_host: "",
     proxy_port: 0,
     proxy_username: "",
@@ -231,6 +230,17 @@ describe("App", () => {
     await user.click(screen.getByRole("tab", { name: "Key Pairs" }))
     expect(await screen.findByRole("heading", { name: "Key pairs" })).toBeInTheDocument()
     expect(await screen.findByText("pair-1")).toBeInTheDocument()
+  })
+
+  test("passes key-pair summaries to the SSH form after resources resolve", async () => {
+    const user = userEvent.setup()
+    render(<App />)
+
+    await user.click(screen.getByRole("button", { name: "New connection" }))
+    const dialog = await screen.findByRole("dialog")
+    await user.click(within(dialog).getByRole("radio", { name: "Stored key pair" }))
+    await user.click(within(dialog).getByRole("combobox", { name: "Stored key pair" }))
+    expect(await within(dialog).findByRole("option", { name: "pair-1" })).toBeInTheDocument()
   })
 })
 

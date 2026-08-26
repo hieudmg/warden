@@ -91,7 +91,7 @@ export function App() {
           <TabsTrigger value="projects">Projects &amp; Reports</TabsTrigger>
         </TabsList>
         <TabsContent value="ssh">
-          <SSHTab resource={ssh} groups={groups.data} notify={notify} />
+          <SSHTab resource={ssh} groups={groups.data} keyPairs={keyPairs.data} notify={notify} />
         </TabsContent>
         <TabsContent value="db">
           <DBTab resource={db} sshProfiles={ssh.data} groups={groups.data} notify={notify} />

@@ -1,6 +1,12 @@
 import { useRef, useState } from "react"
 import { api } from "@/api/client"
-import type { DependentsResponse, Group, SSHConnection, SSHConnectionRequest } from "@/api/types"
+import type {
+  DependentsResponse,
+  Group,
+  KeyPairSummary,
+  SSHConnection,
+  SSHConnectionRequest,
+} from "@/api/types"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import {
@@ -28,6 +34,8 @@ export interface SSHTabProps {
   resource: ListResource<SSHConnection>
   /** Groups backing the form selector. */
   groups: readonly Group[]
+  /** Stored key-pair summaries backing the form's stored-key selector. */
+  keyPairs: readonly KeyPairSummary[]
   notify: (message: string, kind: "success" | "error") => void
 }
 
@@ -59,7 +67,7 @@ function jumpRouteLabels(connection: SSHConnection, profiles: readonly SSHConnec
   return ids.map(id => jumpLabel(id, profiles, connection.id)).join(", ")
 }
 
-export function SSHTab({ resource, groups, notify }: SSHTabProps) {
+export function SSHTab({ resource, groups, keyPairs, notify }: SSHTabProps) {
   const [formDialog, setFormDialog] = useState<FormDialogState | null>(null)
   const [pending, setPending] = useState(false)
   const [formError, setFormError] = useState<string | null>(null)
@@ -195,14 +203,16 @@ export function SSHTab({ resource, groups, notify }: SSHTabProps) {
                 <TableCell>
                   <div className="flex flex-wrap gap-1">
                     {connection.has_password && <Badge variant="secondary">Password</Badge>}
-                    {connection.has_private_key && <Badge variant="secondary">Private key</Badge>}
-                    {connection.has_private_key_passphrase && (
-                      <Badge variant="secondary">Key passphrase</Badge>
+                    {connection.key_pair_id !== 0 && (
+                      <Badge variant="secondary">
+                        {connection.key_pair_name
+                          ? `Key pair: ${connection.key_pair_name}`
+                          : `Missing key pair #${connection.key_pair_id}`}
+                      </Badge>
                     )}
                     {connection.has_proxy_password && <Badge variant="secondary">Proxy password</Badge>}
                     {!connection.has_password &&
-                      !connection.has_private_key &&
-                      !connection.has_private_key_passphrase &&
+                      connection.key_pair_id === 0 &&
                       !connection.has_proxy_password && (
                         <span className="text-sm text-muted-foreground">None</span>
                       )}
@@ -269,6 +279,7 @@ export function SSHTab({ resource, groups, notify }: SSHTabProps) {
               connection={formDialog.mode === "edit" ? formDialog.connection : null}
               profiles={resource.data}
               groups={groups}
+              keyPairs={keyPairs}
               pending={pending}
               error={formError}
               onSubmit={request => void handleSubmit(request)}

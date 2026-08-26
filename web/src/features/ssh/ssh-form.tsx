@@ -1,5 +1,5 @@
 import { useState, type FormEvent } from "react"
-import type { Group, SSHConnection, SSHConnectionRequest } from "@/api/types"
+import type { Group, KeyPairSummary, SSHConnection, SSHConnectionRequest } from "@/api/types"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { DialogFooter } from "@/components/ui/dialog"
@@ -7,25 +7,23 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
 import { Separator } from "@/components/ui/separator"
-import { Textarea } from "@/components/ui/textarea"
 import { SSHProfileCombobox, type SSHProfileOption } from "@/components/ssh-profile-combobox"
 import { parseJumpRoute, serializeJumpRoute } from "./jump-route"
 import { JumpRouteField } from "./jump-route-field"
 
 /** Controlled SSH form state. Secrets are always blank on open because
  * list/get responses are redacted; only literal empty strings serialize
- * as null so stored values are retained on edit. Password and private
- * key are mutually exclusive auth modes selected by radio: switching
- * modes clears the inactive mode's secret client-side. */
+ * as null so stored values are retained on edit. Password and stored key
+ * pair are mutually exclusive auth modes selected by radio: switching
+ * modes clears the inactive mode's selection client-side. */
 export interface SSHFormState {
   name: string
   host: string
   port: string
   username: string
-  authMode: "password" | "privateKey"
+  authMode: "password" | "keyPair"
   password: string
-  privateKey: string
-  privateKeyPassphrase: string
+  keyPairID: string
   proxyHost: string
   proxyPort: string
   proxyUsername: string
@@ -43,8 +41,7 @@ export function emptySSHForm(): SSHFormState {
     username: "",
     authMode: "password",
     password: "",
-    privateKey: "",
-    privateKeyPassphrase: "",
+    keyPairID: "0",
     proxyHost: "",
     proxyPort: "1080",
     proxyUsername: "",
@@ -61,11 +58,9 @@ export function sshFormFromConnection(connection: SSHConnection): SSHFormState {
     host: connection.host,
     port: String(connection.port),
     username: connection.username,
-    authMode:
-      connection.has_private_key && !connection.has_password ? "privateKey" : "password",
+    authMode: connection.key_pair_id !== 0 ? "keyPair" : "password",
     password: "",
-    privateKey: "",
-    privateKeyPassphrase: "",
+    keyPairID: String(connection.key_pair_id),
     proxyHost: connection.proxy_host,
     proxyPort: String(connection.proxy_port),
     proxyUsername: connection.proxy_username,
@@ -81,15 +76,13 @@ export function sshFormFromConnection(connection: SSHConnection): SSHFormState {
 const nullableSecret = (value: string): string | null => (value === "" ? null : value)
 
 export function toSSHRequest(form: SSHFormState): SSHConnectionRequest {
-  const useKey = form.authMode === "privateKey"
   return {
     name: form.name,
     host: form.host,
     port: Number(form.port),
     username: form.username,
-    password: useKey ? null : nullableSecret(form.password),
-    private_key: useKey ? nullableSecret(form.privateKey) : null,
-    private_key_passphrase: useKey ? nullableSecret(form.privateKeyPassphrase) : null,
+    password: form.authMode === "password" ? nullableSecret(form.password) : null,
+    key_pair_id: form.authMode === "keyPair" ? Number(form.keyPairID) : 0,
     proxy_host: form.proxyHost,
     proxy_port: Number(form.proxyPort),
     proxy_username: form.proxyUsername,
@@ -115,6 +108,23 @@ function groupOptions(groups: readonly Group[], currentID: number): SSHProfileOp
   return options
 }
 
+/** Select options for stored key pairs: only pairs with a private key are
+ * selectable. A saved nonzero ID that is absent from that set (dangling
+ * reference or public-only pair) is prepended as a Missing option so the
+ * form never silently drops an assignment it cannot resolve. */
+function keyPairOptions(keyPairs: readonly KeyPairSummary[], currentID: number): SSHProfileOption[] {
+  const options: SSHProfileOption[] = []
+  if (currentID !== 0 && !keyPairs.some(pair => pair.id === currentID && pair.has_private_key)) {
+    options.push({ value: String(currentID), label: `Missing key pair #${currentID}` })
+  }
+  for (const pair of keyPairs) {
+    if (pair.has_private_key) {
+      options.push({ value: String(pair.id), label: pair.name })
+    }
+  }
+  return options
+}
+
 export interface SSHFormProps {
   /** The connection being edited, or null for create. */
   connection: SSHConnection | null
@@ -122,24 +132,33 @@ export interface SSHFormProps {
   profiles: readonly SSHConnection[]
   /** Existing connection groups backing the group select options. */
   groups: readonly Group[]
+  /** Stored key-pair summaries backing the stored-key selector. */
+  keyPairs: readonly KeyPairSummary[]
   pending: boolean
   error: string | null
   onSubmit: (request: SSHConnectionRequest) => void
   onCancel: () => void
 }
 
-export function SSHForm({ connection, profiles, groups, pending, error, onSubmit, onCancel }: SSHFormProps) {
+export function SSHForm({ connection, profiles, groups, keyPairs, pending, error, onSubmit, onCancel }: SSHFormProps) {
   const [form, setForm] = useState<SSHFormState>(() =>
     connection ? sshFormFromConnection(connection) : emptySSHForm(),
   )
   const [passthroughOpen, setPassthroughOpen] = useState(false)
+  const [validationError, setValidationError] = useState<string | null>(null)
   const set = <K extends keyof SSHFormState>(key: K, value: SSHFormState[K]) =>
     setForm(current => ({ ...current, [key]: value }))
 
   const groupSelectOptions = groupOptions(groups, Number(form.groupID))
+  const keyPairSelectOptions = keyPairOptions(keyPairs, Number(form.keyPairID))
 
   const handleSubmit = (event: FormEvent) => {
     event.preventDefault()
+    if (form.authMode === "keyPair" && form.keyPairID === "0") {
+      setValidationError("Select a stored key pair.")
+      return
+    }
+    setValidationError(null)
     onSubmit(toSSHRequest(form))
   }
 
@@ -272,15 +291,14 @@ export function SSHForm({ connection, profiles, groups, pending, error, onSubmit
         <RadioGroup
           value={form.authMode}
           onValueChange={value => {
-            const authMode = value as "password" | "privateKey"
+            const authMode = value as "password" | "keyPair"
             setForm(current => ({
               ...current,
               authMode,
               password: authMode === "password" ? current.password : "",
-              privateKey: authMode === "privateKey" ? current.privateKey : "",
-              privateKeyPassphrase:
-                authMode === "privateKey" ? current.privateKeyPassphrase : "",
+              keyPairID: authMode === "keyPair" ? current.keyPairID : "0",
             }))
+            setValidationError(null)
           }}
         >
           <div className="flex items-center gap-2">
@@ -288,8 +306,8 @@ export function SSHForm({ connection, profiles, groups, pending, error, onSubmit
             <Label htmlFor="ssh-auth-password">Password</Label>
           </div>
           <div className="flex items-center gap-2">
-            <RadioGroupItem value="privateKey" id="ssh-auth-private-key" />
-            <Label htmlFor="ssh-auth-private-key">Private key</Label>
+            <RadioGroupItem value="keyPair" id="ssh-auth-key-pair" />
+            <Label htmlFor="ssh-auth-key-pair">Stored key pair</Label>
           </div>
         </RadioGroup>
       </div>
@@ -304,26 +322,26 @@ export function SSHForm({ connection, profiles, groups, pending, error, onSubmit
           />
         </div>
       ) : (
-        <div className="grid gap-3">
-          <div className="grid gap-1.5">
-            <Label htmlFor="ssh-private-key">Private key</Label>
-            <Textarea
-              id="ssh-private-key"
-              placeholder="Leave blank to keep the stored value"
-              value={form.privateKey}
-              onChange={event => set("privateKey", event.target.value)}
-            />
-          </div>
-          <div className="grid gap-1.5">
-            <Label htmlFor="ssh-private-key-passphrase">Private key passphrase</Label>
-            <Input
-              id="ssh-private-key-passphrase"
-              placeholder="Leave blank to keep the stored value"
-              value={form.privateKeyPassphrase}
-              onChange={event => set("privateKeyPassphrase", event.target.value)}
-            />
-          </div>
+        <div className="grid gap-1.5">
+          <Label htmlFor="ssh-key-pair">Stored key pair</Label>
+          <SSHProfileCombobox
+            id="ssh-key-pair"
+            value={form.keyPairID}
+            options={keyPairSelectOptions}
+            placeholder="Select a stored key pair"
+            searchPlaceholder="Search key pairs"
+            emptyLabel="No key pairs with private keys found."
+            onValueChange={value => {
+              set("keyPairID", value)
+              setValidationError(null)
+            }}
+          />
         </div>
+      )}
+      {validationError && (
+        <p role="alert" className="text-sm text-destructive">
+          {validationError}
+        </p>
       )}
       <Separator decorative={false} />
       <div className="grid gap-1.5">
