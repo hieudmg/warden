@@ -102,6 +102,7 @@ func (h *Handler) createSSH(w http.ResponseWriter, r *http.Request) {
 		Host:              req.Host,
 		Port:              req.Port,
 		Username:          req.Username,
+		KeyPairID:         req.KeyPairID,
 		ProxyHost:         req.ProxyHost,
 		ProxyPort:         req.ProxyPort,
 		ProxyUsername:     req.ProxyUsername,
@@ -111,12 +112,6 @@ func (h *Handler) createSSH(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.Password != nil {
 		p.Password = []byte(*req.Password)
-	}
-	if req.PrivateKey != nil {
-		p.PrivateKey = []byte(*req.PrivateKey)
-	}
-	if req.PrivateKeyPassphrase != nil {
-		p.PrivateKeyPassphrase = []byte(*req.PrivateKeyPassphrase)
 	}
 	if req.ProxyPassword != nil {
 		p.ProxyPassword = []byte(*req.ProxyPassword)
@@ -172,6 +167,7 @@ func (h *Handler) updateSSH(w http.ResponseWriter, r *http.Request) {
 		Host:              req.Host,
 		Port:              req.Port,
 		Username:          req.Username,
+		KeyPairID:         req.KeyPairID,
 		ProxyHost:         req.ProxyHost,
 		ProxyPort:         req.ProxyPort,
 		ProxyUsername:     req.ProxyUsername,
@@ -181,12 +177,6 @@ func (h *Handler) updateSSH(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.Password != nil {
 		p.Password = []byte(*req.Password)
-	}
-	if req.PrivateKey != nil {
-		p.PrivateKey = []byte(*req.PrivateKey)
-	}
-	if req.PrivateKeyPassphrase != nil {
-		p.PrivateKeyPassphrase = []byte(*req.PrivateKeyPassphrase)
 	}
 	if req.ProxyPassword != nil {
 		p.ProxyPassword = []byte(*req.ProxyPassword)
@@ -475,24 +465,24 @@ func nonNilRefs(refs []model.DependentRef) []model.DependentRef {
 
 func redactSSH(p model.SSHProfile) model.SSHConnection {
 	return model.SSHConnection{
-		ID:                      p.ID,
-		Name:                    p.Name,
-		Host:                    p.Host,
-		Port:                    p.Port,
-		Username:                p.Username,
-		HasPassword:             len(p.Password) > 0,
-		HasPrivateKey:           len(p.PrivateKey) > 0,
-		HasPrivateKeyPassphrase: len(p.PrivateKeyPassphrase) > 0,
-		ProxyHost:               p.ProxyHost,
-		ProxyPort:               p.ProxyPort,
-		ProxyUsername:           p.ProxyUsername,
-		HasProxyPassword:        len(p.ProxyPassword) > 0,
-		JumpConnectionIDs:       p.JumpConnectionIDs,
-		DefaultDir:              p.DefaultDir,
-		GroupID:                 p.GroupID,
-		GroupName:               p.GroupName,
-		CreatedAt:               p.CreatedAt,
-		UpdatedAt:               p.UpdatedAt,
+		ID:                p.ID,
+		Name:              p.Name,
+		Host:              p.Host,
+		Port:              p.Port,
+		Username:          p.Username,
+		HasPassword:       len(p.Password) > 0,
+		KeyPairID:         p.KeyPairID,
+		KeyPairName:       p.KeyPairName,
+		ProxyHost:         p.ProxyHost,
+		ProxyPort:         p.ProxyPort,
+		ProxyUsername:     p.ProxyUsername,
+		HasProxyPassword:  len(p.ProxyPassword) > 0,
+		JumpConnectionIDs: p.JumpConnectionIDs,
+		DefaultDir:        p.DefaultDir,
+		GroupID:           p.GroupID,
+		GroupName:         p.GroupName,
+		CreatedAt:         p.CreatedAt,
+		UpdatedAt:         p.UpdatedAt,
 	}
 }
 

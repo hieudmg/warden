@@ -1,11 +1,20 @@
 package profiles_test
 
 import (
+	"bytes"
 	"context"
+	"crypto/ed25519"
+	"crypto/rand"
+	"encoding/pem"
 	"errors"
 	"fmt"
+	"strconv"
+	"strings"
 	"testing"
 
+	"golang.org/x/crypto/ssh"
+
+	"warden/internal/model"
 	"warden/internal/server/profiles"
 )
 
@@ -257,5 +266,161 @@ func TestResolveDBBundleMissingSSH(t *testing.T) {
 	_, err := r.ResolveDBBundle(ctx, dbp.ID)
 	if err == nil {
 		t.Fatal("ResolveDBBundle succeeded with a missing SSH reference")
+	}
+}
+
+// testKeyPairMaterial returns a parseable passphrase-encrypted ed25519
+// private key and its passphrase so resolver tests exercise real transport
+// key material.
+func testKeyPairMaterial(t *testing.T) (privateKey, passphrase []byte) {
+	t.Helper()
+	_, priv, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatalf("generate ed25519 key: %v", err)
+	}
+	passphrase = []byte("test-phrase")
+	block, err := ssh.MarshalPrivateKeyWithPassphrase(priv, "test", passphrase)
+	if err != nil {
+		t.Fatalf("marshal encrypted private key: %v", err)
+	}
+	return pem.EncodeToMemory(block), passphrase
+}
+
+func TestResolveSSHBundleLoadsSelectedKeyPair(t *testing.T) {
+	_, s, _ := newTestAPI(t)
+	r := profiles.NewResolver(s)
+	ctx := context.Background()
+
+	privateKey, passphrase := testKeyPairMaterial(t)
+	pair, err := s.CreateKeyPair(ctx, model.KeyPair{
+		Name: "pair", PrivateKey: privateKey, PrivateKeyPassphrase: passphrase,
+	})
+	if err != nil {
+		t.Fatalf("CreateKeyPair: %v", err)
+	}
+	target := createSSH(t, s, "target", "[]")
+	target.Password = nil
+	target.KeyPairID = pair.ID
+	if err := s.UpdateSSH(ctx, target); err != nil {
+		t.Fatalf("UpdateSSH: %v", err)
+	}
+
+	bundle, err := r.ResolveSSHBundle(ctx, target.ID)
+	if err != nil {
+		t.Fatalf("ResolveSSHBundle: %v", err)
+	}
+	if !bytes.Equal(bundle.Target.PrivateKey, privateKey) {
+		t.Errorf("target private key mismatch (len %d vs %d)", len(bundle.Target.PrivateKey), len(privateKey))
+	}
+	if !bytes.Equal(bundle.Target.PrivateKeyPassphrase, passphrase) {
+		t.Errorf("target passphrase = %q, want %q", bundle.Target.PrivateKeyPassphrase, passphrase)
+	}
+	if bundle.Target.Password != nil {
+		t.Errorf("target password = %q, want nil", bundle.Target.Password)
+	}
+}
+
+func TestResolveSSHBundleJumpHostUsesKeyPair(t *testing.T) {
+	_, s, _ := newTestAPI(t)
+	r := profiles.NewResolver(s)
+	ctx := context.Background()
+
+	privateKey, passphrase := testKeyPairMaterial(t)
+	pair, err := s.CreateKeyPair(ctx, model.KeyPair{
+		Name: "jump-pair", PrivateKey: privateKey, PrivateKeyPassphrase: passphrase,
+	})
+	if err != nil {
+		t.Fatalf("CreateKeyPair: %v", err)
+	}
+	j1 := createSSH(t, s, "j1", "[]")
+	j1.Password = nil
+	j1.KeyPairID = pair.ID
+	if err := s.UpdateSSH(ctx, j1); err != nil {
+		t.Fatalf("UpdateSSH j1: %v", err)
+	}
+	target := createSSH(t, s, "target", fmt.Sprintf("[%d]", j1.ID))
+
+	bundle, err := r.ResolveSSHBundle(ctx, target.ID)
+	if err != nil {
+		t.Fatalf("ResolveSSHBundle: %v", err)
+	}
+	if len(bundle.Jumps) != 1 {
+		t.Fatalf("jumps = %d, want 1", len(bundle.Jumps))
+	}
+	if !bytes.Equal(bundle.Jumps[0].PrivateKey, privateKey) {
+		t.Errorf("jump private key mismatch (len %d vs %d)", len(bundle.Jumps[0].PrivateKey), len(privateKey))
+	}
+	if !bytes.Equal(bundle.Jumps[0].PrivateKeyPassphrase, passphrase) {
+		t.Errorf("jump passphrase = %q, want %q", bundle.Jumps[0].PrivateKeyPassphrase, passphrase)
+	}
+}
+
+func TestResolveSSHBundleRejectsDeletedKeyPair(t *testing.T) {
+	_, s, _ := newTestAPI(t)
+	r := profiles.NewResolver(s)
+	ctx := context.Background()
+
+	pair, err := s.CreateKeyPair(ctx, model.KeyPair{Name: "doomed", PrivateKey: []byte("key")})
+	if err != nil {
+		t.Fatalf("CreateKeyPair: %v", err)
+	}
+	target := createSSH(t, s, "target", "[]")
+	target.Password = nil
+	target.KeyPairID = pair.ID
+	if err := s.UpdateSSH(ctx, target); err != nil {
+		t.Fatalf("UpdateSSH: %v", err)
+	}
+	if err := s.DeleteKeyPair(ctx, pair.ID); err != nil {
+		t.Fatalf("DeleteKeyPair: %v", err)
+	}
+
+	_, err = r.ResolveSSHBundle(ctx, target.ID)
+	if err == nil {
+		t.Fatal("ResolveSSHBundle succeeded with a deleted key pair")
+	}
+	var ge *profiles.GraphError
+	if !errors.As(err, &ge) {
+		t.Errorf("error %v is not a GraphError", err)
+	}
+	msg := err.Error()
+	if !strings.Contains(msg, strconv.FormatInt(target.ID, 10)) ||
+		!strings.Contains(msg, strconv.FormatInt(pair.ID, 10)) {
+		t.Errorf("error %q must name the connection id and the pair id", msg)
+	}
+}
+
+func TestResolveSSHBundleRejectsPairWhosePrivateKeyWasCleared(t *testing.T) {
+	_, s, _ := newTestAPI(t)
+	r := profiles.NewResolver(s)
+	ctx := context.Background()
+
+	pair, err := s.CreateKeyPair(ctx, model.KeyPair{Name: "cleared", PrivateKey: []byte("key")})
+	if err != nil {
+		t.Fatalf("CreateKeyPair: %v", err)
+	}
+	target := createSSH(t, s, "target", "[]")
+	target.Password = nil
+	target.KeyPairID = pair.ID
+	if err := s.UpdateSSH(ctx, target); err != nil {
+		t.Fatalf("UpdateSSH: %v", err)
+	}
+	cleared := pair
+	cleared.PrivateKey = []byte{} // explicit clear
+	if err := s.UpdateKeyPair(ctx, cleared); err != nil {
+		t.Fatalf("UpdateKeyPair clear private key: %v", err)
+	}
+
+	_, err = r.ResolveSSHBundle(ctx, target.ID)
+	if err == nil {
+		t.Fatal("ResolveSSHBundle succeeded with a pair whose private key was cleared")
+	}
+	var ge *profiles.GraphError
+	if !errors.As(err, &ge) {
+		t.Errorf("error %v is not a GraphError", err)
+	}
+	msg := err.Error()
+	if !strings.Contains(msg, strconv.FormatInt(target.ID, 10)) ||
+		!strings.Contains(msg, strconv.FormatInt(pair.ID, 10)) {
+		t.Errorf("error %q must name the connection id and the pair id", msg)
 	}
 }

@@ -266,6 +266,146 @@ func TestSSHUpdateKeepsUnsetSecrets(t *testing.T) {
 	}
 }
 
+func TestSSHCreateWithKeyPairRoundTrip(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+
+	pair, err := s.CreateKeyPair(ctx, KeyPairForTest("roundtrip-pair"))
+	if err != nil {
+		t.Fatalf("CreateKeyPair: %v", err)
+	}
+	p := SSHProfileForTest("pair-user", "[]")
+	p.Password = nil
+	p.KeyPairID = pair.ID
+	created, err := s.CreateSSH(ctx, p)
+	if err != nil {
+		t.Fatalf("CreateSSH: %v", err)
+	}
+
+	got, err := s.GetSSH(ctx, created.ID)
+	if err != nil {
+		t.Fatalf("GetSSH: %v", err)
+	}
+	if got.KeyPairID != pair.ID || got.KeyPairName != "roundtrip-pair" {
+		t.Errorf("key pair = %d/%q, want %d/roundtrip-pair", got.KeyPairID, got.KeyPairName, pair.ID)
+	}
+	if got.Password != nil {
+		t.Errorf("password = %q, want nil", got.Password)
+	}
+}
+
+func TestSSHCreateRejectsPasswordAndKeyPair(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+
+	pair, err := s.CreateKeyPair(ctx, KeyPairForTest("both"))
+	if err != nil {
+		t.Fatalf("CreateKeyPair: %v", err)
+	}
+	p := SSHProfileForTest("both-auth", "[]")
+	p.KeyPairID = pair.ID
+	if _, err := s.CreateSSH(ctx, p); !errors.Is(err, ErrValidation) {
+		t.Errorf("CreateSSH with password and key_pair_id error = %v, want ErrValidation", err)
+	}
+}
+
+func TestSSHUpdateKeyPairClearsPassword(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+
+	pair, err := s.CreateKeyPair(ctx, KeyPairForTest("pair"))
+	if err != nil {
+		t.Fatalf("CreateKeyPair: %v", err)
+	}
+	created, err := s.CreateSSH(ctx, SSHProfileForTest("switch-pair", "[]"))
+	if err != nil {
+		t.Fatalf("CreateSSH: %v", err)
+	}
+
+	updated := created
+	updated.Password = nil
+	updated.KeyPairID = pair.ID
+	if err := s.UpdateSSH(ctx, updated); err != nil {
+		t.Fatalf("UpdateSSH: %v", err)
+	}
+
+	got, err := s.GetSSH(ctx, created.ID)
+	if err != nil {
+		t.Fatalf("GetSSH: %v", err)
+	}
+	if got.KeyPairID != pair.ID || got.KeyPairName != "pair" {
+		t.Errorf("key pair = %d/%q, want %d/pair", got.KeyPairID, got.KeyPairName, pair.ID)
+	}
+	if got.Password != nil {
+		t.Errorf("password = %q, want cleared nil", got.Password)
+	}
+}
+
+func TestSSHUpdatePasswordClearsKeyPair(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+
+	pair, err := s.CreateKeyPair(ctx, KeyPairForTest("pair"))
+	if err != nil {
+		t.Fatalf("CreateKeyPair: %v", err)
+	}
+	created, err := s.CreateSSH(ctx, SSHProfileForTest("switch-pw", "[]"))
+	if err != nil {
+		t.Fatalf("CreateSSH: %v", err)
+	}
+
+	// Select the pair first.
+	updated := created
+	updated.Password = nil
+	updated.KeyPairID = pair.ID
+	if err := s.UpdateSSH(ctx, updated); err != nil {
+		t.Fatalf("UpdateSSH select pair: %v", err)
+	}
+
+	// Switch back to a password; the stored pair reference must be cleared.
+	updated = created
+	updated.Password = []byte("newpass")
+	updated.KeyPairID = 0
+	if err := s.UpdateSSH(ctx, updated); err != nil {
+		t.Fatalf("UpdateSSH set password: %v", err)
+	}
+
+	got, err := s.GetSSH(ctx, created.ID)
+	if err != nil {
+		t.Fatalf("GetSSH: %v", err)
+	}
+	if got.KeyPairID != 0 {
+		t.Errorf("key_pair_id = %d, want cleared 0", got.KeyPairID)
+	}
+	if string(got.Password) != "newpass" {
+		t.Errorf("password = %q, want newpass", got.Password)
+	}
+}
+
+func TestSSHRejectsMissingOrPublicOnlyKeyPair(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+
+	publicOnly, err := s.CreateKeyPair(ctx, model.KeyPair{Name: "public-only", PublicKey: []byte("pub")})
+	if err != nil {
+		t.Fatalf("CreateKeyPair public-only: %v", err)
+	}
+	for _, tc := range []struct {
+		name   string
+		pairID int64
+	}{
+		{"missing", 999999},
+		{"public-only", publicOnly.ID},
+	} {
+		p := SSHProfileForTest("kp-"+tc.name, "[]")
+		p.Password = nil
+		p.KeyPairID = tc.pairID
+		if _, err := s.CreateSSH(ctx, p); !errors.Is(err, ErrValidation) {
+			t.Errorf("CreateSSH(key_pair_id=%d) error = %v, want ErrValidation", tc.pairID, err)
+		}
+	}
+}
+
 func TestSSHList(t *testing.T) {
 	s := newTestStore(t)
 	ctx := context.Background()

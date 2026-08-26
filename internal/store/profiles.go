@@ -145,6 +145,20 @@ func (s *Store) decryptSecret(aad []byte, blob []byte) ([]byte, error) {
 	return plaintext, nil
 }
 
+// normalizeSSHAuthentication enforces password/key-pair exclusivity. A
+// non-empty password wins over a zero key_pair_id; a nonzero key_pair_id
+// with a non-empty password is rejected. Nil password with zero key_pair_id
+// means "no auth selection change" and is always valid.
+func normalizeSSHAuthentication(p *model.SSHProfile) error {
+	if len(p.Password) > 0 && p.KeyPairID != 0 {
+		return errors.New("password and key_pair_id are mutually exclusive")
+	}
+	if len(p.Password) > 0 {
+		p.KeyPairID = 0
+	}
+	return nil
+}
+
 // CreateSSH inserts a new SSH profile. The row id is allocated before secret
 // fields are encrypted so AAD can bind each ciphertext to its stable
 // `warden/ssh/<id>/<field>` location.
@@ -153,6 +167,9 @@ func (s *Store) CreateSSH(ctx context.Context, p model.SSHProfile) (model.SSHPro
 		return model.SSHProfile{}, fmt.Errorf("%w: %v", ErrValidation, err)
 	}
 	if err := validateSSHMetadata(p); err != nil {
+		return model.SSHProfile{}, fmt.Errorf("%w: %v", ErrValidation, err)
+	}
+	if err := normalizeSSHAuthentication(&p); err != nil {
 		return model.SSHProfile{}, fmt.Errorf("%w: %v", ErrValidation, err)
 	}
 
@@ -165,15 +182,18 @@ func (s *Store) CreateSSH(ctx context.Context, p model.SSHProfile) (model.SSHPro
 	if err := validateGroupID(ctx, tx, p.GroupID); err != nil {
 		return model.SSHProfile{}, err
 	}
+	if err := validateKeyPairID(ctx, tx, p.KeyPairID); err != nil {
+		return model.SSHProfile{}, err
+	}
 
 	ts := nowUTC()
 	res, err := tx.ExecContext(ctx, `
 		INSERT INTO ssh_connections
 			(name, host, port, username, proxy_host, proxy_port, proxy_username,
-			 jump_connection_ids, default_dir, group_id, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			 jump_connection_ids, default_dir, group_id, key_pair_id, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		p.Name, p.Host, p.Port, p.Username, p.ProxyHost, p.ProxyPort, p.ProxyUsername,
-		p.JumpConnectionIDs, p.DefaultDir, p.GroupID, ts, ts)
+		p.JumpConnectionIDs, p.DefaultDir, p.GroupID, p.KeyPairID, ts, ts)
 	if err != nil {
 		if isUniqueViolation(err) {
 			return model.SSHProfile{}, ErrDuplicate
@@ -219,9 +239,11 @@ func (s *Store) GetSSH(ctx context.Context, id int64) (model.SSHProfile, error) 
 		SELECT s.id, s.name, s.host, s.port, s.username, s.password,
 		       s.proxy_host, s.proxy_port, s.proxy_username,
 		       s.proxy_password, s.jump_connection_ids, s.default_dir,
-		       s.group_id, COALESCE(g.name, ''), s.created_at, s.updated_at
+		       s.group_id, COALESCE(g.name, ''), s.key_pair_id, COALESCE(k.name, ''),
+		       s.created_at, s.updated_at
 		FROM ssh_connections s
 		LEFT JOIN groups g ON g.id = s.group_id
+		LEFT JOIN key_pairs k ON k.id = s.key_pair_id
 		WHERE s.id = ?`, id)
 
 	var p model.SSHProfile
@@ -230,7 +252,7 @@ func (s *Store) GetSSH(ctx context.Context, id int64) (model.SSHProfile, error) 
 	err := row.Scan(&p.ID, &p.Name, &p.Host, &p.Port, &p.Username,
 		&password, &p.ProxyHost, &p.ProxyPort, &p.ProxyUsername,
 		&proxyPassword, &p.JumpConnectionIDs, &p.DefaultDir,
-		&p.GroupID, &p.GroupName, &createdAt, &updatedAt)
+		&p.GroupID, &p.GroupName, &p.KeyPairID, &p.KeyPairName, &createdAt, &updatedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return model.SSHProfile{}, ErrNotFound
 	}
@@ -299,6 +321,9 @@ func (s *Store) UpdateSSH(ctx context.Context, p model.SSHProfile) error {
 	if err := validateSSHMetadata(p); err != nil {
 		return fmt.Errorf("%w: %v", ErrValidation, err)
 	}
+	if err := normalizeSSHAuthentication(&p); err != nil {
+		return fmt.Errorf("%w: %v", ErrValidation, err)
+	}
 
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
@@ -307,6 +332,9 @@ func (s *Store) UpdateSSH(ctx context.Context, p model.SSHProfile) error {
 	defer tx.Rollback()
 
 	if err := validateGroupID(ctx, tx, p.GroupID); err != nil {
+		return err
+	}
+	if err := validateKeyPairID(ctx, tx, p.KeyPairID); err != nil {
 		return err
 	}
 
@@ -328,6 +356,23 @@ func (s *Store) UpdateSSH(ctx context.Context, p model.SSHProfile) error {
 		return fmt.Errorf("rows affected: %w", err)
 	} else if n == 0 {
 		return ErrNotFound
+	}
+
+	// Auth selection switching: a non-empty password deselects any stored
+	// key pair; a selected pair clears the stored password. When neither
+	// auth selection changes (nil password, zero key_pair_id) both stored
+	// values are preserved.
+	if len(p.Password) > 0 {
+		if _, err := tx.ExecContext(ctx,
+			"UPDATE ssh_connections SET key_pair_id=0 WHERE id=?", p.ID); err != nil {
+			return fmt.Errorf("clear key_pair_id: %w", err)
+		}
+	}
+	if p.KeyPairID > 0 {
+		if _, err := tx.ExecContext(ctx,
+			"UPDATE ssh_connections SET password=NULL, key_pair_id=? WHERE id=?", p.KeyPairID, p.ID); err != nil {
+			return fmt.Errorf("clear password: %w", err)
+		}
 	}
 
 	updates := []struct {

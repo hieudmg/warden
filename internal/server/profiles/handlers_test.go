@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -15,6 +16,14 @@ import (
 
 func TestListSSHRedactsSecrets(t *testing.T) {
 	mux, s, _ := newTestAPI(t)
+	ctx := context.Background()
+	pair, err := s.CreateKeyPair(ctx, model.KeyPair{
+		Name: "pair", PrivateKey: []byte("PRIVATE-KEY-MATERIAL"),
+		PrivateKeyPassphrase: []byte("PHRASE-MATERIAL"),
+	})
+	if err != nil {
+		t.Fatalf("CreateKeyPair: %v", err)
+	}
 	for _, p := range []model.SSHProfile{
 		{
 			Name: "password-secret", Host: "h.invalid", Port: 22, Username: "u",
@@ -22,10 +31,10 @@ func TestListSSHRedactsSecrets(t *testing.T) {
 		},
 		{
 			Name: "key-secret", Host: "h.invalid", Port: 22, Username: "u",
-			PrivateKey: []byte("PRIVATE-KEY-MATERIAL"), JumpConnectionIDs: "[]",
+			KeyPairID: pair.ID, JumpConnectionIDs: "[]",
 		},
 	} {
-		if _, err := s.CreateSSH(context.Background(), p); err != nil {
+		if _, err := s.CreateSSH(ctx, p); err != nil {
 			t.Fatalf("CreateSSH: %v", err)
 		}
 	}
@@ -35,14 +44,19 @@ func TestListSSHRedactsSecrets(t *testing.T) {
 		t.Fatalf("status = %d, body=%s", rec.Code, rec.Body.String())
 	}
 	body := rec.Body.String()
-	if strings.Contains(body, "s3cret-value") || strings.Contains(body, "PRIVATE-KEY-MATERIAL") {
+	if strings.Contains(body, "s3cret-value") ||
+		strings.Contains(body, "PRIVATE-KEY-MATERIAL") ||
+		strings.Contains(body, "PHRASE-MATERIAL") {
 		t.Errorf("list response leaks secrets: %s", body)
 	}
 	if !strings.Contains(body, `"has_password":true`) {
 		t.Errorf("list response missing has_password marker: %s", body)
 	}
-	if !strings.Contains(body, `"has_private_key":true`) {
-		t.Errorf("list response missing has_private_key marker: %s", body)
+	if !strings.Contains(body, `"key_pair_id":`+strconv.FormatInt(pair.ID, 10)) {
+		t.Errorf("list response missing key_pair_id marker: %s", body)
+	}
+	if !strings.Contains(body, `"key_pair_name":"pair"`) {
+		t.Errorf("list response missing key_pair_name: %s", body)
 	}
 }
 

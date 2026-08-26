@@ -60,6 +60,10 @@ func (r *Resolver) ResolveSSHBundle(ctx context.Context, id int64) (model.SSHBun
 	if err != nil {
 		return model.SSHBundle{}, err
 	}
+	targetNode, err := r.sshNode(ctx, target)
+	if err != nil {
+		return model.SSHBundle{}, err
+	}
 
 	var jumps []model.SSHNode
 	path := map[int64]bool{id: true}
@@ -70,7 +74,7 @@ func (r *Resolver) ResolveSSHBundle(ctx context.Context, id int64) (model.SSHBun
 		jumps = []model.SSHNode{}
 	}
 
-	return model.SSHBundle{Target: sshNode(target), Jumps: jumps}, nil
+	return model.SSHBundle{Target: targetNode, Jumps: jumps}, nil
 }
 
 // resolveJumps appends the ordered hop chain for ownerID's jump route to
@@ -102,7 +106,11 @@ func (r *Resolver) resolveJumps(ctx context.Context, ownerID int64, jumpJSON str
 		if err := r.resolveJumps(ctx, jid, node.JumpConnectionIDs, path, hops); err != nil {
 			return err
 		}
-		*hops = append(*hops, sshNode(node))
+		n, err := r.sshNode(ctx, node)
+		if err != nil {
+			return err
+		}
+		*hops = append(*hops, n)
 		delete(path, jid)
 	}
 	return nil
@@ -133,22 +141,43 @@ func (r *Resolver) ResolveDBBundle(ctx context.Context, id int64) (model.DBBundl
 	return bundle, nil
 }
 
-func sshNode(p model.SSHProfile) model.SSHNode {
-	return model.SSHNode{
-		ID:                   p.ID,
-		Name:                 p.Name,
-		Host:                 p.Host,
-		Port:                 p.Port,
-		Username:             p.Username,
-		Password:             p.Password,
-		PrivateKey:           p.PrivateKey,
-		PrivateKeyPassphrase: p.PrivateKeyPassphrase,
-		ProxyHost:            p.ProxyHost,
-		ProxyPort:            p.ProxyPort,
-		ProxyUsername:        p.ProxyUsername,
-		ProxyPassword:        p.ProxyPassword,
-		DefaultDir:           p.DefaultDir,
+// sshNode builds a transport node from a profile. When the profile selects
+// a stored key pair, the pair's private key and passphrase are injected
+// dynamically so transport bundles never carry raw key material from the
+// profile row itself. A deleted pair or a pair whose private key was cleared
+// is a graph error naming both the connection and the pair id; decryption
+// failures propagate unchanged.
+func (r *Resolver) sshNode(ctx context.Context, p model.SSHProfile) (model.SSHNode, error) {
+	node := model.SSHNode{
+		ID:            p.ID,
+		Name:          p.Name,
+		Host:          p.Host,
+		Port:          p.Port,
+		Username:      p.Username,
+		Password:      p.Password,
+		ProxyHost:     p.ProxyHost,
+		ProxyPort:     p.ProxyPort,
+		ProxyUsername: p.ProxyUsername,
+		ProxyPassword: p.ProxyPassword,
+		DefaultDir:    p.DefaultDir,
 	}
+	if p.KeyPairID == 0 {
+		return node, nil
+	}
+
+	pair, err := r.store.GetKeyPair(ctx, p.KeyPairID)
+	if err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			return model.SSHNode{}, graphErrorf("connection %d references deleted key pair %d", p.ID, p.KeyPairID)
+		}
+		return model.SSHNode{}, err
+	}
+	if len(pair.PrivateKey) == 0 {
+		return model.SSHNode{}, graphErrorf("connection %d references key pair %d without a private key", p.ID, p.KeyPairID)
+	}
+	node.PrivateKey = pair.PrivateKey
+	node.PrivateKeyPassphrase = pair.PrivateKeyPassphrase
+	return node, nil
 }
 
 // parseJumpIDs parses a stored jump_connection_ids value. Rows are written
