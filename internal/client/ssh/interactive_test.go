@@ -467,7 +467,7 @@ func TestRunInteractiveReportsConnectionProgress(t *testing.T) {
 func TestWriteProgressUsesGreenOutput(t *testing.T) {
 	var out bytes.Buffer
 	WriteProgress(&out, "Fetching credentials...")
-	if got, want := out.String(), "\x1b[32mFetching credentials...\x1b[0m\n"; got != want {
+	if got, want := out.String(), "\x1b[32mFetching credentials...\x1b[0m\r\n"; got != want {
 		t.Fatalf("WriteProgress() = %q, want %q", got, want)
 	}
 }
@@ -475,7 +475,7 @@ func TestWriteProgressUsesGreenOutput(t *testing.T) {
 func TestWriteProgressEscapesControlCharacters(t *testing.T) {
 	var out bytes.Buffer
 	WriteProgress(&out, "bad\x00\a\b\x1b[31m\x7f")
-	if got, want := out.String(), "\x1b[32mbad\\x00\\x07\\x08\\x1b[31m\\x7f\x1b[0m\n"; got != want {
+	if got, want := out.String(), "\x1b[32mbad\\x00\\x07\\x08\\x1b[31m\\x7f\x1b[0m\r\n"; got != want {
 		t.Fatalf("WriteProgress() = %q, want %q", got, want)
 	}
 }
@@ -648,8 +648,8 @@ func TestRunInteractiveRestoresTerminalOnDialFailure(t *testing.T) {
 // TestInteractiveShellCommand verifies the fixed remote command string
 // stays the portable login-shell form (documented contract).
 func TestInteractiveShellCommand(t *testing.T) {
-	if interactiveShellCommand != "exec ${SHELL:-sh} -l" {
-		t.Fatalf("interactiveShellCommand = %q, want %q", interactiveShellCommand, "exec ${SHELL:-sh} -l")
+	if interactiveShellCommand != `exec "$SHELL" -l` {
+		t.Fatalf("interactiveShellCommand = %q, want %q", interactiveShellCommand, `exec "$SHELL" -l`)
 	}
 }
 
@@ -657,13 +657,13 @@ func TestInteractiveShellCommand(t *testing.T) {
 // single quotes, embedded quotes are escaped, and an empty dir yields
 // the bare login-shell command.
 func TestBuildInteractiveShellCommand(t *testing.T) {
-	if got := buildInteractiveShellCommand(""); got != "exec ${SHELL:-sh} -l" {
+	if got := buildInteractiveShellCommand(""); got != `exec "$SHELL" -l` {
 		t.Errorf("empty dir = %q, want bare login-shell", got)
 	}
-	if got := buildInteractiveShellCommand("/srv/app"); got != "cd '/srv/app' && exec ${SHELL:-sh} -l" {
+	if got := buildInteractiveShellCommand("/srv/app"); got != `cd '/srv/app' && exec "$SHELL" -l` {
 		t.Errorf("plain dir = %q, want single-quoted prefix", got)
 	}
-	if got := buildInteractiveShellCommand("/srv/it's"); got != `cd '/srv/it'"'"'s' && exec ${SHELL:-sh} -l` {
+	if got := buildInteractiveShellCommand("/srv/it's"); got != `cd '/srv/it'"'"'s' && exec "$SHELL" -l` {
 		t.Errorf("quoted dir = %q, want embedded single quote escaped", got)
 	}
 }

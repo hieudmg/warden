@@ -17,12 +17,11 @@ import (
 // interactiveShellCommand is the remote command started for interactive
 // sessions when the target profile has no DefaultDir. It is interpreted by
 // the user's shell on the remote host and re-execs a fresh login shell so
-// login rc files load. -l is the portable login flag accepted by sh, bash,
-// zsh, dash, and fish; ${SHELL:-sh} guards the rare case where the remote
-// environment does not set $SHELL. When DefaultDir is non-empty, the
-// remote command is prefixed with `cd '<dir>' && ` (see
-// buildInteractiveShellCommand).
-const interactiveShellCommand = "exec ${SHELL:-sh} -l"
+// login rc files load. The command uses only shell syntax accepted by
+// common remote login shells, including fish; the SSH server supplies SHELL
+// from the account configuration. When DefaultDir is non-empty, the remote
+// command is prefixed with `cd '<dir>' && ` (see buildInteractiveShellCommand).
+const interactiveShellCommand = `exec "$SHELL" -l`
 
 // buildInteractiveShellCommand returns the remote shell command string
 // for the given default working directory. An empty dir yields the bare
@@ -70,7 +69,7 @@ func WriteProgress(w io.Writer, message string) {
 		return
 	}
 	message = escapeProgressControls(message)
-	_, _ = fmt.Fprintf(w, "\x1b[32m%s\x1b[0m\n", message)
+	_, _ = fmt.Fprintf(w, "\x1b[32m%s\x1b[0m\r\n", message)
 }
 
 func escapeProgressControls(message string) string {

@@ -303,7 +303,7 @@ func TestRunSSHPropagatesRemoteExitStatus(t *testing.T) {
 func TestWriteInteractiveProgressUsesGreenOutput(t *testing.T) {
 	var out bytes.Buffer
 	clientssh.WriteProgress(&out, "Fetching credentials...")
-	if got, want := out.String(), "\x1b[32mFetching credentials...\x1b[0m\n"; got != want {
+	if got, want := out.String(), "\x1b[32mFetching credentials...\x1b[0m\r\n"; got != want {
 		t.Fatalf("WriteProgress() = %q, want %q", got, want)
 	}
 }
