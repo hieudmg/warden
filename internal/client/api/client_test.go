@@ -20,8 +20,7 @@ const sshConnJSON = `{
 	"port": 2222,
 	"username": "ops",
 	"has_password": true,
-	"has_private_key": false,
-	"has_private_key_passphrase": false,
+	"key_pair_id": 0,
 	"proxy_host": "",
 	"proxy_port": 0,
 	"proxy_username": "",
@@ -95,7 +94,7 @@ func TestListSSHPathAndDecode(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListSSH: %v", err)
 	}
-	if len(conns) != 1 || conns[0].ID != 7 || conns[0].Name != "prod" || conns[0].HasPassword != true {
+	if len(conns) != 1 || conns[0].ID != 7 || conns[0].Name != "prod" || conns[0].HasPassword != true || conns[0].KeyPairID != 0 {
 		t.Fatalf("ListSSH = %+v, want one decoded prod connection", conns)
 	}
 }
@@ -115,7 +114,7 @@ func TestGetSSHPathAndDecode(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetSSH: %v", err)
 	}
-	if conn.ID != 7 || conn.Username != "ops" || conn.JumpConnectionIDs != "[]" {
+	if conn.ID != 7 || conn.Username != "ops" || conn.JumpConnectionIDs != "[]" || conn.KeyPairID != 0 {
 		t.Fatalf("GetSSH = %+v", conn)
 	}
 }
