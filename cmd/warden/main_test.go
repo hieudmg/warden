@@ -692,3 +692,107 @@ func TestRunReportCreateUnknownCommand(t *testing.T) {
 		t.Fatalf("stderr = %q, want unknown-command message", stderr.String())
 	}
 }
+
+func TestRunCPHelp(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	exitCode := run([]string{"cp", "--help"}, &stdout, &stderr, emptyLookupEnv)
+	if exitCode != 0 {
+		t.Fatalf("run() exitCode = %d, want 0, stderr=%q", exitCode, stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "warden cp <source> <destination>") {
+		t.Fatalf("stdout = %q, want cp usage", stdout.String())
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("stderr = %q, want empty", stderr.String())
+	}
+}
+
+func TestRunCPRejectsWrongArgumentCount(t *testing.T) {
+	lookupEnv := func(string) (string, bool) { return "", false }
+
+	for _, args := range [][]string{
+		{"cp"},
+		{"cp", "a"},
+		{"cp", "a", "b", "c"},
+	} {
+		var stdout, stderr bytes.Buffer
+		exitCode := run(args, &stdout, &stderr, lookupEnv)
+		if exitCode != 2 {
+			t.Errorf("run(%v) exitCode = %d, want 2, stderr=%q", args, exitCode, stderr.String())
+		}
+	}
+}
+
+func TestRunCPRejectsLocalToLocal(t *testing.T) {
+	apiSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/v1/ssh-connections" {
+			io.WriteString(w, `[]`)
+			return
+		}
+		http.NotFound(w, r)
+	}))
+	defer apiSrv.Close()
+
+	lookupEnv := func(key string) (string, bool) {
+		switch key {
+		case "HOME":
+			return t.TempDir(), true
+		case "WARDEN_CLIENT_API_BASE_URL":
+			return apiSrv.URL, true
+		case "WARDEN_CLIENT_TIMEOUT":
+			return "10s", true
+		}
+		return "", false
+	}
+
+	var stdout, stderr bytes.Buffer
+	exitCode := run([]string{"cp", "a", "b"}, &stdout, &stderr, lookupEnv)
+	if exitCode != 2 {
+		t.Fatalf("run() exitCode = %d, want 2, stderr=%q", exitCode, stderr.String())
+	}
+}
+
+func TestParseCPEndpointRecognizesWindowsVolume(t *testing.T) {
+	ep, err := parseCPEndpoint(`C:\tmp\file`, nil)
+	if err != nil {
+		t.Fatalf("parseCPEndpoint() error = %v", err)
+	}
+	if ep.connection != nil {
+		t.Fatalf("parseCPEndpoint() connection = %v, want nil (local)", ep.connection)
+	}
+	if ep.path != `C:\tmp\file` {
+		t.Fatalf("parseCPEndpoint() path = %q, want %q", ep.path, `C:\tmp\file`)
+	}
+}
+
+func TestRunCPRejectsUnknownConnection(t *testing.T) {
+	apiSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/v1/ssh-connections" {
+			io.WriteString(w, `[]`)
+			return
+		}
+		http.NotFound(w, r)
+	}))
+	defer apiSrv.Close()
+
+	lookupEnv := func(key string) (string, bool) {
+		switch key {
+		case "HOME":
+			return t.TempDir(), true
+		case "WARDEN_CLIENT_API_BASE_URL":
+			return apiSrv.URL, true
+		case "WARDEN_CLIENT_TIMEOUT":
+			return "10s", true
+		}
+		return "", false
+	}
+
+	var stdout, stderr bytes.Buffer
+	exitCode := run([]string{"cp", "missing:/tmp/file", "local"}, &stdout, &stderr, lookupEnv)
+	if exitCode != 1 {
+		t.Fatalf("run() exitCode = %d, want 1", exitCode)
+	}
+	if !strings.Contains(stderr.String(), `cp: connection "missing" not found`) {
+		t.Fatalf("stderr = %q, want not-found message", stderr.String())
+	}
+}
