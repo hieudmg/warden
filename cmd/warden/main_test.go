@@ -16,11 +16,15 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"golang.org/x/crypto/ssh"
 	"golang.org/x/crypto/ssh/knownhosts"
 	"golang.org/x/term"
+
+	pkgsftp "github.com/pkg/sftp"
 
 	clientssh "warden/internal/client/ssh"
 	"warden/internal/model"
@@ -490,10 +494,15 @@ func TestRunXSSHWithoutNameRequiresInteractiveTerminal(t *testing.T) {
 	}
 }
 
-// cliTestSSHServer is a minimal in-process SSH server for CLI tests.
+// cliTestSSHServer is a minimal in-process SSH server for CLI tests. It
+// serves exec requests (for ssh command tests) and the sftp subsystem
+// rooted at root (for cp tests). conns counts accepted SSH connections and
+// returns to zero only after every connection has fully closed.
 type cliTestSSHServer struct {
 	addr    string
+	root    string
 	hostKey ssh.PublicKey
+	conns   atomic.Int64
 }
 
 func newCLITestSSHServer(t *testing.T, password string) *cliTestSSHServer {
@@ -521,7 +530,7 @@ func newCLITestSSHServer(t *testing.T, password string) *cliTestSSHServer {
 	if err != nil {
 		t.Fatal(err)
 	}
-	s := &cliTestSSHServer{addr: ln.Addr().String(), hostKey: signer.PublicKey()}
+	s := &cliTestSSHServer{addr: ln.Addr().String(), root: t.TempDir(), hostKey: signer.PublicKey()}
 
 	go func() {
 		for {
@@ -529,14 +538,21 @@ func newCLITestSSHServer(t *testing.T, password string) *cliTestSSHServer {
 			if err != nil {
 				return
 			}
-			go handleCLITestConn(conn, cfg)
+			s.conns.Add(1)
+			go func() {
+				defer s.conns.Add(-1)
+				s.handleConn(conn, cfg)
+			}()
 		}
 	}()
 	t.Cleanup(func() { ln.Close() })
 	return s
 }
 
-func handleCLITestConn(conn net.Conn, cfg *ssh.ServerConfig) {
+// handleConn accepts one SSH connection and dispatches session channels to
+// handleSession. The connection counter is decremented by the caller when
+// the connection fully closes.
+func (s *cliTestSSHServer) handleConn(conn net.Conn, cfg *ssh.ServerConfig) {
 	sconn, chans, reqs, err := ssh.NewServerConn(conn, cfg)
 	if err != nil {
 		conn.Close()
@@ -553,40 +569,65 @@ func handleCLITestConn(conn net.Conn, cfg *ssh.ServerConfig) {
 		if err != nil {
 			continue
 		}
-		go func(ch ssh.Channel, reqs <-chan *ssh.Request) {
-			defer ch.Close()
-			for req := range reqs {
-				if req.Type != "exec" {
-					req.Reply(false, nil)
-					continue
-				}
-				var payload struct {
-					Command string
-				}
-				if err := ssh.Unmarshal(req.Payload, &payload); err != nil {
-					req.Reply(false, nil)
-					continue
-				}
-				req.Reply(true, nil)
+		go s.handleSession(ch, reqs)
+	}
+}
 
-				cmd := exec.Command("sh", "-c", payload.Command)
-				cmd.Stdout = ch
-				cmd.Stderr = ch.Stderr()
-				cmd.Stdin = ch
-				status := uint32(0)
-				if err := cmd.Run(); err != nil {
-					if ee, ok := err.(*exec.ExitError); ok {
-						status = uint32(ee.ExitCode())
-					} else {
-						status = 1
-					}
+// handleSession answers exec requests by running the command via sh and
+// reporting the exit status, and answers an sftp subsystem request by
+// serving the server's root directory over the channel. The channel is
+// closed by the caller of the exec path and by the SFTP server when the
+// session ends.
+func (s *cliTestSSHServer) handleSession(ch ssh.Channel, reqs <-chan *ssh.Request) {
+	for req := range reqs {
+		switch req.Type {
+		case "exec":
+			var payload struct {
+				Command string
+			}
+			if err := ssh.Unmarshal(req.Payload, &payload); err != nil {
+				req.Reply(false, nil)
+				continue
+			}
+			req.Reply(true, nil)
+
+			cmd := exec.Command("sh", "-c", payload.Command)
+			cmd.Stdout = ch
+			cmd.Stderr = ch.Stderr()
+			cmd.Stdin = ch
+			status := uint32(0)
+			if err := cmd.Run(); err != nil {
+				if ee, ok := err.(*exec.ExitError); ok {
+					status = uint32(ee.ExitCode())
+				} else {
+					status = 1
 				}
-				ch.SendRequest("exit-status", false, ssh.Marshal(struct {
-					Status uint32
-				}{Status: status}))
+			}
+			ch.SendRequest("exit-status", false, ssh.Marshal(struct {
+				Status uint32
+			}{Status: status}))
+			ch.Close()
+			return
+		case "subsystem":
+			var payload struct{ Name string }
+			if err := ssh.Unmarshal(req.Payload, &payload); err != nil || payload.Name != "sftp" {
+				req.Reply(false, nil)
+				continue
+			}
+			req.Reply(true, nil)
+			server, err := pkgsftp.NewServer(ch, pkgsftp.WithServerWorkingDirectory(s.root))
+			if err != nil {
+				ch.Close()
 				return
 			}
-		}(ch, reqs)
+			go func() {
+				defer server.Close()
+				_ = server.Serve()
+			}()
+			return
+		default:
+			req.Reply(false, nil)
+		}
 	}
 }
 
@@ -795,4 +836,215 @@ func TestRunCPRejectsUnknownConnection(t *testing.T) {
 	if !strings.Contains(stderr.String(), `cp: connection "missing" not found`) {
 		t.Fatalf("stderr = %q, want not-found message", stderr.String())
 	}
+}
+
+// TestRunCPEndToEnd exercises the full warden cp path against a real
+// in-process SSH/SFTP server: profile resolution via the API, transport
+// bundle retrieval, local->remote, remote->local, and remote->remote
+// transfers, recursive placement, destination overwrite, mode bits, silent
+// stdout, and connection closure.
+func TestRunCPEndToEnd(t *testing.T) {
+	srcSrv := newCLITestSSHServer(t, "s3cret")
+	dstSrv := newCLITestSSHServer(t, "s3cret")
+
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	knownHosts := filepath.Join(home, ".ssh", "known_hosts")
+	if err := os.MkdirAll(filepath.Dir(knownHosts), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	var hosts strings.Builder
+	for _, srv := range []*cliTestSSHServer{srcSrv, dstSrv} {
+		hosts.WriteString(knownhosts.Line([]string{srv.addr}, srv.hostKey))
+		hosts.WriteString("\n")
+	}
+	if err := os.WriteFile(knownHosts, []byte(hosts.String()), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	srcHost, srcPortStr, _ := net.SplitHostPort(srcSrv.addr)
+	srcPort, _ := strconv.Atoi(srcPortStr)
+	dstHost, dstPortStr, _ := net.SplitHostPort(dstSrv.addr)
+	dstPort, _ := strconv.Atoi(dstPortStr)
+
+	apiSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/v1/ssh-connections":
+			io.WriteString(w, fmt.Sprintf(`[
+				{"id":1,"name":"source","host":%q,"port":%d,"username":"user","has_password":true,"key_pair_id":0,"proxy_host":"","proxy_port":0,"proxy_username":"","has_proxy_password":false,"jump_connection_ids":"[]"},
+				{"id":2,"name":"destination","host":%q,"port":%d,"username":"user","has_password":true,"key_pair_id":0,"proxy_host":"","proxy_port":0,"proxy_username":"","has_proxy_password":false,"jump_connection_ids":"[]"}
+			]`, srcHost, srcPort, dstHost, dstPort))
+		case "/api/v1/transport/ssh/1":
+			w.Header().Set("Cache-Control", "no-store")
+			io.WriteString(w, fmt.Sprintf(`{"target":{"id":1,"name":"source","host":%q,"port":%d,"username":"user","password":%q},"jumps":[]}`, srcHost, srcPort, base64.StdEncoding.EncodeToString([]byte("s3cret"))))
+		case "/api/v1/transport/ssh/2":
+			w.Header().Set("Cache-Control", "no-store")
+			io.WriteString(w, fmt.Sprintf(`{"target":{"id":2,"name":"destination","host":%q,"port":%d,"username":"user","password":%q},"jumps":[]}`, dstHost, dstPort, base64.StdEncoding.EncodeToString([]byte("s3cret"))))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer apiSrv.Close()
+
+	lookupEnv := func(key string) (string, bool) {
+		switch key {
+		case "WARDEN_CLIENT_API_BASE_URL":
+			return apiSrv.URL, true
+		case "WARDEN_CLIENT_TIMEOUT":
+			return "10s", true
+		}
+		return "", false
+	}
+
+	runCP := func(args ...string) (stdout, stderr string, exitCode int) {
+		t.Helper()
+		var out, errOut bytes.Buffer
+		exitCode = run(args, &out, &errOut, lookupEnv)
+		return out.String(), errOut.String(), exitCode
+	}
+
+	// Local -> remote: a missing destination becomes the copied root, and
+	// the copy recurses into subdirectories preserving mode bits.
+	localSrc := filepath.Join(t.TempDir(), "local-src")
+	if err := os.MkdirAll(filepath.Join(localSrc, "sub"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(localSrc, "hello.txt"), []byte("hi"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(localSrc, "sub", "deep.txt"), []byte("deep"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	stdout, stderr, exitCode := runCP("cp", localSrc, "source:dest")
+	if exitCode != 0 {
+		t.Fatalf("local->remote exitCode = %d, stderr = %q", exitCode, stderr)
+	}
+	if stdout != "" {
+		t.Fatalf("local->remote stdout = %q, want empty", stdout)
+	}
+	assertCLIRemoteFile(t, srcSrv.root, "dest/hello.txt", "hi", 0o600)
+	assertCLIRemoteFile(t, srcSrv.root, "dest/sub/deep.txt", "deep", 0o644)
+
+	// A source directory is placed beneath an existing destination
+	// directory, preserving pre-existing entries.
+	if err := os.MkdirAll(filepath.Join(srcSrv.root, "dest2"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	marker := filepath.Join(srcSrv.root, "dest2", "marker.txt")
+	if err := os.WriteFile(marker, []byte("keep"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	stdout, stderr, exitCode = runCP("cp", localSrc, "source:dest2")
+	if exitCode != 0 {
+		t.Fatalf("local->remote existing-dir exitCode = %d, stderr = %q", exitCode, stderr)
+	}
+	if stdout != "" {
+		t.Fatalf("local->remote existing-dir stdout = %q, want empty", stdout)
+	}
+	assertCLIRemoteFile(t, srcSrv.root, "dest2/local-src/hello.txt", "hi", 0o600)
+	assertCLIRemoteFile(t, srcSrv.root, "dest2/local-src/sub/deep.txt", "deep", 0o644)
+	if _, err := os.Stat(marker); err != nil {
+		t.Fatalf("pre-existing destination entries must be preserved: %v", err)
+	}
+
+	// Destination overwrite: a file copy replaces an existing remote file
+	// and its mode.
+	single := filepath.Join(t.TempDir(), "single.txt")
+	if err := os.WriteFile(single, []byte("new"), 0o640); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(srcSrv.root, "dest", "hello.txt"), []byte("old"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	stdout, stderr, exitCode = runCP("cp", single, "source:dest/hello.txt")
+	if exitCode != 0 {
+		t.Fatalf("overwrite exitCode = %d, stderr = %q", exitCode, stderr)
+	}
+	if stdout != "" {
+		t.Fatalf("overwrite stdout = %q, want empty", stdout)
+	}
+	assertCLIRemoteFile(t, srcSrv.root, "dest/hello.txt", "new", 0o640)
+
+	// Remote -> local: bytes, placement, and modes survive the return trip.
+	out := filepath.Join(t.TempDir(), "out")
+	stdout, stderr, exitCode = runCP("cp", "source:dest", out)
+	if exitCode != 0 {
+		t.Fatalf("remote->local exitCode = %d, stderr = %q", exitCode, stderr)
+	}
+	if stdout != "" {
+		t.Fatalf("remote->local stdout = %q, want empty", stdout)
+	}
+	assertCLILocalFile(t, filepath.Join(out, "hello.txt"), "new", 0o640)
+	assertCLILocalFile(t, filepath.Join(out, "sub", "deep.txt"), "deep", 0o644)
+
+	// Remote -> remote: bytes relay through the local client.
+	stdout, stderr, exitCode = runCP("cp", "source:dest", "destination:import")
+	if exitCode != 0 {
+		t.Fatalf("remote->remote exitCode = %d, stderr = %q", exitCode, stderr)
+	}
+	if stdout != "" {
+		t.Fatalf("remote->remote stdout = %q, want empty", stdout)
+	}
+	assertCLIRemoteFile(t, dstSrv.root, "import/hello.txt", "new", 0o640)
+	assertCLIRemoteFile(t, dstSrv.root, "import/sub/deep.txt", "deep", 0o644)
+
+	// Every transport must be torn down: no SSH connection may outlive the
+	// cp invocations.
+	waitForCLIConnectionsClosed(t, srcSrv)
+	waitForCLIConnectionsClosed(t, dstSrv)
+}
+
+// assertCLIRemoteFile verifies content and mode of a file served by the CLI
+// test SSH server's SFTP root.
+func assertCLIRemoteFile(t *testing.T, root, rel, want string, mode os.FileMode) {
+	t.Helper()
+	p := filepath.Join(root, filepath.FromSlash(rel))
+	info, err := os.Lstat(p)
+	if err != nil {
+		t.Fatalf("Lstat %s: %v", rel, err)
+	}
+	if got := info.Mode().Perm(); got != mode {
+		t.Fatalf("mode of %s: got %v, want %v", rel, got, mode)
+	}
+	data, err := os.ReadFile(p)
+	if err != nil {
+		t.Fatalf("ReadFile %s: %v", rel, err)
+	}
+	if string(data) != want {
+		t.Fatalf("content of %s: got %q, want %q", rel, data, want)
+	}
+}
+
+// assertCLILocalFile verifies content and mode of a local file.
+func assertCLILocalFile(t *testing.T, path, want string, mode os.FileMode) {
+	t.Helper()
+	info, err := os.Lstat(path)
+	if err != nil {
+		t.Fatalf("Lstat %s: %v", path, err)
+	}
+	if got := info.Mode().Perm(); got != mode {
+		t.Fatalf("mode of %s: got %v, want %v", path, got, mode)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("ReadFile %s: %v", path, err)
+	}
+	if string(data) != want {
+		t.Fatalf("content of %s: got %q, want %q", path, data, want)
+	}
+}
+
+// waitForCLIConnectionsClosed waits until every accepted SSH connection on
+// the server has fully closed, proving the CLI tore down its transports.
+func waitForCLIConnectionsClosed(t *testing.T, srv *cliTestSSHServer) {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		if srv.conns.Load() == 0 {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatalf("SSH connections did not close; still %d open", srv.conns.Load())
 }

@@ -173,6 +173,12 @@ warden config search "production"
 # Interactive shell (PTY). Omit the name for the built-in picker.
 # --accept-new enables interactive host-key confirmation.
 warden xssh [--accept-new] [connection]
+
+# Copy files or directories between local paths and SSH hosts, or between
+# two hosts. Host-to-host copies relay bytes through this client.
+warden cp ./release.tar prod:/srv/releases/
+warden cp prod:/var/log/app ./app-logs
+warden cp source:/srv/export destination:/srv/import
 ```
 
 When invoked without `<connection>`, `xssh` opens a colorized native
@@ -188,6 +194,13 @@ proxy-password values are never shown and instead display whether they are
 configured. Terminals
 narrower than 80 columns use a stacked layout. Use a modern
 ANSI/VT-capable terminal on Windows.
+
+`cp` transfers recurse for directories, overwrite existing files by
+default, and place a source directory beneath an existing destination
+directory (a missing destination becomes the copied root). At least one
+configured host is required: local-to-local copies are rejected.
+Host-to-host copies relay bytes through the local Warden client; the two
+hosts never talk to each other directly.
 
 Exit status mirrors the remote command/query: 0 on success, nonzero on
 failure (remote exit status is propagated for `ssh`).
