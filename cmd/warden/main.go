@@ -13,15 +13,23 @@ import (
 	"time"
 	"unicode"
 
+	"warden/internal/client/agent"
 	"warden/internal/client/api"
 	clientdb "warden/internal/client/db"
 	"warden/internal/client/picker"
 	clientreport "warden/internal/client/report"
-	clienttransfer "warden/internal/client/sftp"
 	clientssh "warden/internal/client/ssh"
 	"warden/internal/client/terminal"
 	"warden/internal/config"
 	"warden/internal/model"
+)
+
+var (
+	runAgentSSH   = agent.RunSSH
+	runAgentCopy  = agent.RunCopy
+	runAgentDB    = agent.RunTunneledDB
+	runAgentServe = agent.Serve
+	runDirectDB   = clientdb.RunQuery
 )
 
 func main() {
@@ -56,6 +64,8 @@ func run(args []string, stdout, stderr io.Writer, lookupEnv func(string) (string
 	configPathSet := flagWasSet(root, "config")
 
 	switch rest[0] {
+	case "agent":
+		return runAgent(rest[1:], stderr)
 	case "ssh":
 		return runSSH(rest[1:], *configPath, configPathSet, stdout, stderr, lookupEnv)
 	case "db":
@@ -118,7 +128,7 @@ func runSSH(args []string, configPath string, configPathSet bool, stdout, stderr
 		return 1
 	}
 
-	err = clientssh.RunCommand(ctx, bundle, args[1], clientssh.Streams{Stdin: os.Stdin, Stdout: stdout, Stderr: stderr})
+	err = runAgentSSH(ctx, bundle, args[1], clientssh.Streams{Stdin: os.Stdin, Stdout: stdout, Stderr: stderr})
 	if err == nil {
 		return 0
 	}
@@ -179,8 +189,14 @@ func runDB(args []string, configPath string, configPathSet bool, stdout, stderr 
 		return 1
 	}
 
-	if err := clientdb.RunQuery(ctx, bundle, args[1], stdout); err != nil {
-		fmt.Fprintf(stderr, "db: %v\n", err)
+	var runErr error
+	if bundle.SSH != nil {
+		runErr = runAgentDB(ctx, bundle, args[1], stdout)
+	} else {
+		runErr = runDirectDB(ctx, bundle, args[1], stdout)
+	}
+	if runErr != nil {
+		fmt.Fprintf(stderr, "db: %v\n", runErr)
 		return 1
 	}
 	return 0
@@ -596,25 +612,18 @@ func runCP(args []string, configPath string, configPathSet bool, stdout, stderr 
 		return 2
 	}
 
-	var remotes []*clienttransfer.Remote
-	defer func() {
-		for _, r := range remotes {
-			r.Close()
-		}
-	}()
-
-	src, err := resolveCPEndpoint(source, cl, ctx, &remotes)
+	src, err := resolveAgentCPEndpoint(source, cl, ctx)
 	if err != nil {
 		fmt.Fprintf(stderr, "cp: %v\n", err)
 		return 1
 	}
-	dst, err := resolveCPEndpoint(destination, cl, ctx, &remotes)
+	dst, err := resolveAgentCPEndpoint(destination, cl, ctx)
 	if err != nil {
 		fmt.Fprintf(stderr, "cp: %v\n", err)
 		return 1
 	}
 
-	if err := clienttransfer.Copy(src, dst); err != nil {
+	if err := runAgentCopy(ctx, agent.CopyRequest{Source: src, Destination: dst}); err != nil {
 		fmt.Fprintf(stderr, "cp: %v\n", err)
 		return 1
 	}
@@ -634,29 +643,56 @@ func reportCPParseError(stderr io.Writer, err error) int {
 	return 1
 }
 
-// resolveCPEndpoint converts a parsed endpoint into a transfer endpoint.
-// Remote endpoints fetch their transport bundle and dial an SFTP session;
-// every dialed remote is appended to remotes so runCP closes them all
-// after the copy. Local endpoints wrap the OS filesystem with the "local"
-// identity.
-func resolveCPEndpoint(ep cpEndpoint, cl *api.Client, ctx context.Context, remotes *[]*clienttransfer.Remote) (clienttransfer.Endpoint, error) {
+// resolveAgentCPEndpoint converts a parsed endpoint into the serializable
+// request form consumed by the local agent. Remote endpoints fetch their
+// complete transport bundle; local paths are made absolute because the
+// detached agent may have a different working directory.
+func resolveAgentCPEndpoint(ep cpEndpoint, cl *api.Client, ctx context.Context) (agent.CopyEndpoint, error) {
 	if ep.connection == nil {
-		return clienttransfer.Endpoint{
-			FS:       clienttransfer.NewLocalFilesystem(),
-			Path:     ep.path,
-			Identity: "local",
-		}, nil
+		absolute, err := filepath.Abs(ep.path)
+		if err != nil {
+			return agent.CopyEndpoint{}, err
+		}
+		return agent.CopyEndpoint{Path: absolute}, nil
 	}
 	bundle, err := cl.GetSSHBundle(ctx, ep.connection.ID)
 	if err != nil {
-		return clienttransfer.Endpoint{}, err
+		return agent.CopyEndpoint{}, err
 	}
-	remote, err := clienttransfer.Dial(ctx, bundle)
+	return agent.CopyEndpoint{Path: ep.path, Bundle: &bundle}, nil
+}
+
+// runAgent serves the hidden lifecycle command used by the client-side agent
+// startup path. It deliberately does not appear in printUsage.
+func runAgent(args []string, stderr io.Writer) int {
+	if len(args) != 1 || args[0] != "serve" {
+		fmt.Fprintln(stderr, "usage: warden agent serve")
+		return 2
+	}
+
+	runtime, err := agent.NewRuntime()
 	if err != nil {
-		return clienttransfer.Endpoint{}, err
+		fmt.Fprintf(stderr, "agent: %v\n", err)
+		return 1
 	}
-	*remotes = append(*remotes, remote)
-	return remote.Endpoint(ep.path), nil
+	listener, err := runtime.Listen()
+	if err != nil {
+		fmt.Fprintf(stderr, "agent: %v\n", err)
+		return 1
+	}
+	defer runtime.Cleanup()
+
+	token, err := runtime.ReadToken()
+	if err != nil {
+		fmt.Fprintf(stderr, "agent: %v\n", err)
+		return 1
+	}
+	pool := agent.NewDefaultPool(time.Now, 10*time.Minute)
+	if err := runAgentServe(context.Background(), listener, token, pool); err != nil {
+		fmt.Fprintf(stderr, "agent: %v\n", err)
+		return 1
+	}
+	return 0
 }
 
 func printCPUsage(w io.Writer) {
