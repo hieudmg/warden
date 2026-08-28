@@ -11,11 +11,12 @@ import (
 )
 
 func TestFrameRoundTrip(t *testing.T) {
+	token := bytes.Repeat([]byte{0x42}, TokenBytes)
 	frames := []Frame{
 		{
 			Version: Version,
 			Kind:    FrameRequest,
-			Token:   []byte("token"),
+			Token:   token,
 			Request: &Request{Operation: "ssh", Command: "printf request"},
 		},
 		{Version: Version, Kind: FrameStdout, Data: []byte("output\x00")},
@@ -42,7 +43,13 @@ func TestFrameRoundTrip(t *testing.T) {
 	}()
 
 	for i, want := range frames {
-		got, err := ReadFrame(server)
+		var got Frame
+		var err error
+		if i == 0 {
+			got, err = ReadAuthenticatedFrame(server, token)
+		} else {
+			got, err = ReadFrame(server)
+		}
 		if err != nil {
 			t.Fatalf("ReadFrame(%d): %v", i, err)
 		}
@@ -75,25 +82,61 @@ func TestReadFrameRejectsOversizedDeclaration(t *testing.T) {
 
 func TestReadFrameRejectsUnknownVersionBeforePayloadDispatch(t *testing.T) {
 	var wire bytes.Buffer
-	body, err := json.Marshal(Frame{Version: Version + 1, Kind: FrameRequest, Data: []byte("must not dispatch")})
-	if err != nil {
+	if err := writeRawFrame(&wire, Frame{Version: Version + 1, Kind: FrameRequest, Data: []byte("must not dispatch")}); err != nil {
 		t.Fatal(err)
 	}
-	var size [4]byte
-	binary.BigEndian.PutUint32(size[:], uint32(len(body)))
-	wire.Write(size[:])
-	wire.Write(body)
 
-	_, err = ReadFrame(&wire)
+	_, err := ReadFrame(&wire)
 	if !errors.Is(err, ErrVersionMismatch) {
 		t.Fatalf("ReadFrame() error = %v, want ErrVersionMismatch", err)
 	}
 }
 
-func TestFrameRejectsTokenMismatch(t *testing.T) {
-	frame := Frame{Version: Version, Kind: FrameRequest, Token: []byte("wrong")}
-	if err := frame.ValidateToken([]byte("expected")); !errors.Is(err, ErrTokenMismatch) {
-		t.Fatalf("ValidateToken() error = %v, want ErrTokenMismatch", err)
+func TestReadFrameRejectsUnauthenticatedRequestDispatch(t *testing.T) {
+	var wire bytes.Buffer
+	payload, err := json.Marshal(Request{Operation: "ssh", Command: "must not run"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := writeRawFrame(&wire, Frame{Version: Version, Kind: FrameRequest, Data: payload}); err != nil {
+		t.Fatal(err)
+	}
+
+	structuredDispatched := false
+	structuredDispatch := func(frame Frame) {
+		var request Request
+		if json.Unmarshal(frame.Data, &request) == nil && request.Operation != "" {
+			structuredDispatched = true
+		}
+	}
+	frame, err := ReadFrame(&wire)
+	if err == nil {
+		structuredDispatch(frame)
+	}
+	if !errors.Is(err, ErrAuthenticationRequired) {
+		t.Fatalf("ReadFrame() error = %v, want ErrAuthenticationRequired", err)
+	}
+	if structuredDispatched {
+		t.Fatal("unauthenticated request reached structured dispatch")
+	}
+}
+
+func TestReadAuthenticatedFrameRejectsTokenMismatch(t *testing.T) {
+	var wire bytes.Buffer
+	wrong := bytes.Repeat([]byte{0x11}, TokenBytes)
+	expected := bytes.Repeat([]byte{0x22}, TokenBytes)
+	if err := writeRawFrame(&wire, Frame{Version: Version, Kind: FrameRequest, Token: wrong}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ReadAuthenticatedFrame(&wire, expected); !errors.Is(err, ErrTokenMismatch) {
+		t.Fatalf("ReadAuthenticatedFrame() error = %v, want ErrTokenMismatch", err)
+	}
+}
+
+func TestWriteFrameRejectsUnauthenticatedRequest(t *testing.T) {
+	err := WriteFrame(io.Discard, Frame{Version: Version, Kind: FrameRequest, Data: []byte(`{"operation":"ssh"}`)})
+	if !errors.Is(err, ErrAuthenticationRequired) {
+		t.Fatalf("WriteFrame() error = %v, want ErrAuthenticationRequired", err)
 	}
 }
 
@@ -102,4 +145,18 @@ func TestWriteFrameRejectsUnknownVersion(t *testing.T) {
 	if !errors.Is(err, ErrVersionMismatch) {
 		t.Fatalf("WriteFrame() error = %v, want ErrVersionMismatch", err)
 	}
+}
+
+func writeRawFrame(w io.Writer, frame Frame) error {
+	body, err := json.Marshal(frame)
+	if err != nil {
+		return err
+	}
+	var size [4]byte
+	binary.BigEndian.PutUint32(size[:], uint32(len(body)))
+	if _, err := w.Write(size[:]); err != nil {
+		return err
+	}
+	_, err = w.Write(body)
+	return err
 }

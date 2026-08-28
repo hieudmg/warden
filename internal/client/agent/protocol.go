@@ -88,14 +88,32 @@ var (
 	ErrVersionMismatch = errors.New("agent protocol version mismatch")
 	// ErrTokenMismatch reports failed local-agent authentication.
 	ErrTokenMismatch = errors.New("agent token mismatch")
+	// ErrAuthenticationRequired reports a request read through the raw frame
+	// API. Request dispatch must use ReadAuthenticatedFrame instead.
+	ErrAuthenticationRequired = errors.New("agent request authentication required")
 	// ErrInvalidFrame reports a syntactically invalid or incomplete envelope.
 	ErrInvalidFrame = errors.New("invalid agent frame")
 )
 
-// ReadFrame reads and validates one length-prefixed JSON frame. The version is
-// checked before any structured request/response payload is decoded, so an
-// unknown peer cannot reach operation dispatch through a newer envelope.
+// ReadFrame reads and validates one length-prefixed JSON frame. It is the
+// unauthenticated reader for stream/terminal frames; request frames must be
+// read with ReadAuthenticatedFrame so operation dispatch cannot accidentally
+// consume an unauthenticated request.
 func ReadFrame(r io.Reader) (Frame, error) {
+	frame, err := readFrame(r)
+	if err != nil {
+		return Frame{}, err
+	}
+	if frame.Kind == FrameRequest {
+		return Frame{}, ErrAuthenticationRequired
+	}
+	return frame, nil
+}
+
+// readFrame is the raw length-prefixed decoder. Keeping it private prevents a
+// caller outside this package from bypassing the authentication boundary for
+// request dispatch.
+func readFrame(r io.Reader) (Frame, error) {
 	if r == nil {
 		return Frame{}, fmt.Errorf("%w: nil reader", ErrInvalidFrame)
 	}
@@ -149,6 +167,9 @@ func WriteFrame(w io.Writer, f Frame) error {
 	if f.Version != Version {
 		return fmt.Errorf("%w: got %d, want %d", ErrVersionMismatch, f.Version, Version)
 	}
+	if f.Kind == FrameRequest && len(tokenFromFrame(f)) != TokenBytes {
+		return ErrAuthenticationRequired
+	}
 	body, err := json.Marshal(f)
 	if err != nil {
 		return fmt.Errorf("%w: %v", ErrInvalidFrame, err)
@@ -173,16 +194,7 @@ func (f Frame) ValidateToken(expected []byte) error {
 	if f.Version != Version {
 		return ErrVersionMismatch
 	}
-	actual := f.Token
-	if len(actual) == 0 && f.Request != nil {
-		actual = f.Request.Token
-	}
-	if len(actual) == 0 && f.Kind == FrameRequest && len(f.Data) != 0 {
-		var request Request
-		if err := json.Unmarshal(f.Data, &request); err == nil {
-			actual = request.Token
-		}
-	}
+	actual := tokenFromFrame(f)
 	if len(actual) != TokenBytes || len(expected) != TokenBytes || subtle.ConstantTimeCompare(actual, expected) != 1 {
 		return ErrTokenMismatch
 	}
@@ -198,14 +210,33 @@ func ValidateToken(f Frame, expected []byte) error {
 // ReadAuthenticatedFrame reads one frame and validates its authentication
 // token before returning it to an operation dispatcher.
 func ReadAuthenticatedFrame(r io.Reader, expected []byte) (Frame, error) {
-	frame, err := ReadFrame(r)
+	frame, err := readFrame(r)
 	if err != nil {
 		return Frame{}, err
+	}
+	if frame.Kind != FrameRequest {
+		return Frame{}, ErrAuthenticationRequired
 	}
 	if err := frame.ValidateToken(expected); err != nil {
 		return Frame{}, err
 	}
 	return frame, nil
+}
+
+func tokenFromFrame(f Frame) []byte {
+	if len(f.Token) != 0 {
+		return f.Token
+	}
+	if f.Request != nil && len(f.Request.Token) != 0 {
+		return f.Request.Token
+	}
+	if f.Kind == FrameRequest && len(f.Data) != 0 {
+		var request Request
+		if err := json.Unmarshal(f.Data, &request); err == nil {
+			return request.Token
+		}
+	}
+	return nil
 }
 
 func writeAll(w io.Writer, p []byte) error {

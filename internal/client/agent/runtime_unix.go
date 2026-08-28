@@ -13,6 +13,10 @@ import (
 	"time"
 )
 
+var dialUnixEndpoint = func(path string, timeout time.Duration) (net.Conn, error) {
+	return net.DialTimeout("unix", path, timeout)
+}
+
 func runtimeEndpointPath(dir string) string {
 	return filepath.Join(dir, runtimeEndpoint)
 }
@@ -34,8 +38,14 @@ func listenRuntime(runtime *Runtime, path string) (net.Listener, error) {
 	// An endpoint that accepts a connection belongs to a live agent and must
 	// never be removed. Only an actual Unix-socket entry at the exact runtime
 	// path is eligible for stale cleanup.
-	if probe, probeErr := net.DialTimeout("unix", path, 100*time.Millisecond); probeErr == nil {
-		_ = probe.Close()
+	probe, probeErr := dialUnixEndpoint(path, 100*time.Millisecond)
+	if probeErr == nil {
+		if probe != nil {
+			_ = probe.Close()
+		}
+		return nil, err
+	}
+	if !errors.Is(probeErr, syscall.ECONNREFUSED) {
 		return nil, err
 	}
 	info, statErr := os.Lstat(path)

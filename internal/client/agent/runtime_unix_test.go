@@ -3,11 +3,73 @@
 package agent
 
 import (
+	"errors"
+	"net"
 	"os"
 	"path/filepath"
 	"syscall"
 	"testing"
+	"time"
 )
+
+func TestRuntimeUnixProbeErrorKeepsSocket(t *testing.T) {
+	tests := []struct {
+		name   string
+		err    error
+		remove bool
+	}{
+		{name: "connection refused", err: syscall.ECONNREFUSED, remove: true},
+		{name: "timeout", err: os.ErrDeadlineExceeded},
+		{name: "permission", err: os.ErrPermission},
+		{name: "other", err: errors.New("probe failed")},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			dir := filepath.Join(t.TempDir(), "warden", "agent")
+			if err := os.MkdirAll(dir, 0700); err != nil {
+				t.Fatal(err)
+			}
+			endpoint := filepath.Join(dir, runtimeEndpoint)
+			createStaleUnixSocket(t, endpoint)
+
+			originalProbe := dialUnixEndpoint
+			dialUnixEndpoint = func(_ string, _ time.Duration) (net.Conn, error) {
+				return nil, test.err
+			}
+			defer func() { dialUnixEndpoint = originalProbe }()
+
+			runtime, err := NewRuntimeAt(dir)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if test.remove {
+				if _, err := runtime.Listen(); err != nil {
+					t.Fatalf("Listen over refused probe: %v", err)
+				}
+				if err := runtime.Cleanup(); err != nil {
+					t.Fatalf("Cleanup: %v", err)
+				}
+				if _, err := os.Lstat(endpoint); !os.IsNotExist(err) {
+					t.Fatalf("socket after refused cleanup: %v", err)
+				}
+				return
+			}
+
+			if _, err := runtime.Listen(); err == nil {
+				t.Fatal("Listen succeeded after non-definitive probe error")
+			}
+			if _, err := os.Lstat(endpoint); err != nil {
+				t.Fatalf("socket removed after %s probe: %v", test.name, err)
+			}
+			if err := os.Remove(endpoint); err != nil {
+				t.Fatal(err)
+			}
+			if err := runtime.Cleanup(); err != nil {
+				t.Fatalf("Cleanup: %v", err)
+			}
+		})
+	}
+}
 
 func TestRuntimeUnixRemovesOnlyStaleSocket(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "warden", "agent")
@@ -15,17 +77,7 @@ func TestRuntimeUnixRemovesOnlyStaleSocket(t *testing.T) {
 		t.Fatal(err)
 	}
 	endpoint := filepath.Join(dir, runtimeEndpoint)
-	fd, err := syscall.Socket(syscall.AF_UNIX, syscall.SOCK_STREAM, 0)
-	if err != nil {
-		t.Fatalf("create stale socket: %v", err)
-	}
-	if err := syscall.Bind(fd, &syscall.SockaddrUnix{Name: endpoint}); err != nil {
-		_ = syscall.Close(fd)
-		t.Fatalf("bind stale socket: %v", err)
-	}
-	if err := syscall.Close(fd); err != nil {
-		t.Fatal(err)
-	}
+	createStaleUnixSocket(t, endpoint)
 	if _, err := os.Lstat(endpoint); err != nil {
 		t.Fatalf("stale socket disappeared before test: %v", err)
 	}
@@ -59,6 +111,21 @@ func TestRuntimeUnixRemovesOnlyStaleSocket(t *testing.T) {
 	}
 	if err := runtime.Cleanup(); err != nil {
 		t.Fatalf("Cleanup after regular endpoint: %v", err)
+	}
+}
+
+func createStaleUnixSocket(t *testing.T, endpoint string) {
+	t.Helper()
+	fd, err := syscall.Socket(syscall.AF_UNIX, syscall.SOCK_STREAM, 0)
+	if err != nil {
+		t.Fatalf("create stale socket: %v", err)
+	}
+	if err := syscall.Bind(fd, &syscall.SockaddrUnix{Name: endpoint}); err != nil {
+		_ = syscall.Close(fd)
+		t.Fatalf("bind stale socket: %v", err)
+	}
+	if err := syscall.Close(fd); err != nil {
+		t.Fatal(err)
 	}
 }
 
