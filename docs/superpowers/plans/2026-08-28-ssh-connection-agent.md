@@ -404,11 +404,11 @@ Keep CLI validation while reusing local SSH transport graphs.
 **Interfaces:**
 - Documents implementation behavior from prior tasks; no runtime interface changes.
 
-- [ ] **Step 1: Add documentation assertions first**
+- [x] **Step 1: Add documentation assertions first**
 
 Add/update README CLI behavior text stating: `ssh`, remote `cp`, and SSH-backed `db` reuse per-user connections; each connection is closed ten minutes after final operation; agent exits when last cached connection closes; credentials never persist; `xssh` and direct DB bypass cache. Add a plan completion checklist marking only tasks whose test output has passed.
 
-- [ ] **Step 2: Verify docs and full Go test suite**
+- [x] **Step 2: Verify docs and full Go test suite**
 
 Run:
 
@@ -424,7 +424,7 @@ git status --short
 
 Expected: all tests and cross-platform client builds PASS; status lists only intended README/plan changes before staging.
 
-- [ ] **Step 3: Commit documentation and plan record**
+- [x] **Step 3: Commit documentation and plan record**
 
 Stage only `README.md` and plan file. Commit message file content:
 
@@ -433,6 +433,15 @@ docs: describe SSH connection agent lifecycle
 
 Document transparent connection reuse, expiry, and exclusions.
 ```
+
+## Completion checklist
+
+- [x] Task 1 — SSH graph tests are covered by the passing full Go test suite.
+- [x] Task 2 — SFTP and DB borrowing tests are covered by the passing full Go test suite.
+- [x] Task 3 — Agent IPC tests and client cross-builds passed.
+- [x] Task 4 — Agent pool, server, and client tests are covered by the passing full Go test suite.
+- [x] Task 5 — CLI routing tests are covered by the passing full Go test suite.
+- [x] Task 6 — Documentation checks, the full Go test suite, and both client cross-builds passed.
 
 ## Plan Self-Review
 
