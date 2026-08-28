@@ -2,6 +2,7 @@ package sftp
 
 import (
 	"context"
+	"strconv"
 	"sync"
 
 	pkgsftp "github.com/pkg/sftp"
@@ -15,10 +16,11 @@ import (
 // Closing the Remote tears down the SFTP session first and then every SSH
 // connection in the chain, so no socket or goroutine outlives the copy.
 type Remote struct {
-	client *pkgsftp.Client
-	target *ssh.Client
-	chain  []*ssh.Client
-	mu     sync.Mutex
+	client   *pkgsftp.Client
+	target   *ssh.Client
+	chain    []*ssh.Client
+	identity string
+	mu       sync.Mutex
 }
 
 // Dial connects through the bundle's ordered jump chain and opens an SFTP
@@ -36,19 +38,22 @@ func Dial(ctx context.Context, bundle model.SSHBundle) (*Remote, error) {
 		}
 		return nil, err
 	}
-	return &Remote{client: client, target: target, chain: chain}, nil
+	return &Remote{
+		client:   client,
+		target:   target,
+		chain:    chain,
+		identity: strconv.FormatInt(bundle.Target.ID, 10),
+	}, nil
 }
 
-// Endpoint returns an endpoint on this remote's filesystem. The identity
-// is the SSH session ID of the target connection: stable for the
-// connection's lifetime and unique per connection, so two endpoints on the
-// same Remote share an identity while endpoints on different connections do
-// not.
+// Endpoint returns an endpoint on this remote's filesystem. The identity is
+// the selected profile ID from the transport bundle, so two independent
+// dials for the same named profile still share a namespace identity.
 func (r *Remote) Endpoint(name string) Endpoint {
 	return Endpoint{
 		FS:       NewRemoteFilesystem(r.client),
 		Path:     name,
-		Identity: string(r.target.SessionID()),
+		Identity: r.identity,
 	}
 }
 

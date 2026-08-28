@@ -27,17 +27,23 @@ import (
 // errAuthFailed is returned by the test server's auth callbacks.
 var errAuthFailed = errors.New("authentication failed")
 
+var nextSFTPTestProfileID atomic.Int64
+
 // sftpTestServer is an in-process password-authenticated SSH server that
 // serves an isolated directory over the sftp subsystem and forwards
 // direct-tcpip channels so jump chains can be tested. conns counts accepted
 // SSH connections and returns to zero only after every connection has fully
 // closed.
 type sftpTestServer struct {
-	addr    string
-	root    string
-	hostKey ssh.PublicKey
-	conns   atomic.Int64
-	ln      net.Listener
+	addr                string
+	root                string
+	profileID           int64
+	hostKey             ssh.PublicKey
+	conns               atomic.Int64
+	standardRenameCalls atomic.Int64
+	posixRenameCalls    atomic.Int64
+	posixRenameOnly     bool
+	ln                  net.Listener
 }
 
 // newSFTPTestServer starts a server that authenticates the fixed password
@@ -45,6 +51,14 @@ type sftpTestServer struct {
 // pkg/sftp's server resolves relative paths against the working directory
 // but passes absolute paths through to the real filesystem root.
 func newSFTPTestServer(t *testing.T, password string) *sftpTestServer {
+	return newSFTPTestServerWithRenameMode(t, password, false)
+}
+
+func newSFTPPosixRenameTestServer(t *testing.T, password string) *sftpTestServer {
+	return newSFTPTestServerWithRenameMode(t, password, true)
+}
+
+func newSFTPTestServerWithRenameMode(t *testing.T, password string, posixRenameOnly bool) *sftpTestServer {
 	t.Helper()
 
 	cfg := &ssh.ServerConfig{
@@ -63,10 +77,12 @@ func newSFTPTestServer(t *testing.T, password string) *sftpTestServer {
 		t.Fatalf("listen: %v", err)
 	}
 	srv := &sftpTestServer{
-		addr:    ln.Addr().String(),
-		root:    t.TempDir(),
-		hostKey: signer.PublicKey(),
-		ln:      ln,
+		addr:            ln.Addr().String(),
+		root:            t.TempDir(),
+		profileID:       nextSFTPTestProfileID.Add(1),
+		hostKey:         signer.PublicKey(),
+		posixRenameOnly: posixRenameOnly,
+		ln:              ln,
 	}
 
 	go func() {
@@ -129,6 +145,20 @@ func (s *sftpTestServer) handleSession(ch ssh.Channel, reqs <-chan *ssh.Request)
 			continue
 		}
 		req.Reply(true, nil)
+		if s.posixRenameOnly {
+			handlers := pkgsftp.InMemHandler()
+			handlers.FileCmd = &renameTrackingHandler{
+				Handlers:            handlers,
+				standardRenameCalls: &s.standardRenameCalls,
+				posixRenameCalls:    &s.posixRenameCalls,
+			}
+			server := pkgsftp.NewRequestServer(ch, handlers)
+			go func() {
+				defer server.Close()
+				_ = server.Serve()
+			}()
+			return
+		}
 		server, err := pkgsftp.NewServer(ch, pkgsftp.WithServerWorkingDirectory(s.root))
 		if err != nil {
 			return
@@ -179,6 +209,35 @@ func handleDirectTCPIP(newCh ssh.NewChannel) {
 	}()
 }
 
+// renameTrackingHandler makes the overwrite regression test fail if the
+// client sends the ordinary SFTP v3 Rename request instead of the
+// posix-rename extension. The in-memory backend rejects ordinary replacement
+// but implements the extension's overwrite semantics.
+type renameTrackingHandler struct {
+	pkgsftp.Handlers
+	standardRenameCalls *atomic.Int64
+	posixRenameCalls    *atomic.Int64
+}
+
+func (h *renameTrackingHandler) Filecmd(req *pkgsftp.Request) error {
+	if req.Method == "Rename" {
+		h.standardRenameCalls.Add(1)
+		return errors.New("standard rename unsupported")
+	}
+	return h.Handlers.FileCmd.Filecmd(req)
+}
+
+func (h *renameTrackingHandler) PosixRename(req *pkgsftp.Request) error {
+	h.posixRenameCalls.Add(1)
+	posixRenamer, ok := h.Handlers.FileCmd.(interface {
+		PosixRename(*pkgsftp.Request) error
+	})
+	if !ok {
+		return errors.New("posix rename unsupported by test backend")
+	}
+	return posixRenamer.PosixRename(req)
+}
+
 // newTestSigner returns an ed25519 signer for the test server host key.
 func newTestSigner(t *testing.T) ssh.Signer {
 	t.Helper()
@@ -204,6 +263,7 @@ func (s *sftpTestServer) node(name string) model.SSHNode {
 		panic(err)
 	}
 	return model.SSHNode{
+		ID:       s.profileID,
 		Name:     name,
 		Host:     host,
 		Port:     port,
@@ -351,6 +411,127 @@ func TestCopyLocalToRemoteAndBack(t *testing.T) {
 	}
 	assertLocalFile(t, filepath.Join(out, "hello.txt"), "hi", 0o600)
 	assertLocalFile(t, filepath.Join(out, "sub", "deep.txt"), "deep", 0o644)
+}
+
+func TestRemoteSameProfileRejectsDirectoryDescendants(t *testing.T) {
+	srv := newSFTPTestServer(t, "secret")
+	writeKnownHosts(t, srv)
+
+	source, err := Dial(context.Background(), srv.bundle())
+	if err != nil {
+		t.Fatalf("Dial source: %v", err)
+	}
+	defer source.Close()
+	destination, err := Dial(context.Background(), srv.bundle())
+	if err != nil {
+		t.Fatalf("Dial destination: %v", err)
+	}
+	defer destination.Close()
+
+	wantIdentity := strconv.FormatInt(srv.profileID, 10)
+	if got := source.Endpoint(".").Identity; got != wantIdentity {
+		t.Fatalf("source identity: got %q, want profile ID %q", got, wantIdentity)
+	}
+	if got := destination.Endpoint(".").Identity; got != wantIdentity {
+		t.Fatalf("destination identity: got %q, want profile ID %q", got, wantIdentity)
+	}
+
+	sfs := source.Endpoint(".").FS
+	if err := sfs.MkdirAll("src", 0o755); err != nil {
+		t.Fatal(err)
+	}
+	w, err := sfs.Create("src/file.txt")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := w.Write([]byte("source")); err != nil {
+		t.Fatal(err)
+	}
+	if err := w.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	// Existing files make the pre-fix implementation fail immediately rather
+	// than walking a newly created descendant forever. Both targets are still
+	// below the source directory and must be rejected before any destination
+	// mutation.
+	dfs := destination.Endpoint(".").FS
+	for _, child := range []string{"child", "..child"} {
+		t.Run(child, func(t *testing.T) {
+			name := "src/" + child
+			w, err := dfs.Create(name)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := w.Write([]byte("keep")); err != nil {
+				t.Fatal(err)
+			}
+			if err := w.Close(); err != nil {
+				t.Fatal(err)
+			}
+
+			err = Copy(source.Endpoint("src"), destination.Endpoint(name))
+			if err == nil {
+				t.Fatal("Copy: expected self-copy rejection, got nil")
+			}
+			if !strings.Contains(err.Error(), "itself or a descendant") {
+				t.Fatalf("Copy: error = %v, want self-copy rejection", err)
+			}
+		})
+	}
+}
+
+func TestRemoteOverwriteUsesPosixRename(t *testing.T) {
+	srv := newSFTPPosixRenameTestServer(t, "secret")
+	writeKnownHosts(t, srv)
+
+	remote, err := Dial(context.Background(), srv.bundle())
+	if err != nil {
+		t.Fatalf("Dial: %v", err)
+	}
+	defer remote.Close()
+
+	fs := remote.Endpoint(".").FS
+	w, err := fs.Create("target.txt")
+	if err != nil {
+		t.Fatalf("Create existing target: %v", err)
+	}
+	if _, err := w.Write([]byte("old")); err != nil {
+		t.Fatal(err)
+	}
+	if err := w.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	src := filepath.Join(t.TempDir(), "source.txt")
+	if err := os.WriteFile(src, []byte("new"), 0o640); err != nil {
+		t.Fatal(err)
+	}
+	if err := Copy(Endpoint{FS: NewLocalFilesystem(), Path: src, Identity: "local"}, remote.Endpoint("target.txt")); err != nil {
+		t.Fatalf("Copy overwrite: %v", err)
+	}
+	reader, err := fs.Open("target.txt")
+	if err != nil {
+		t.Fatalf("Open overwritten target: %v", err)
+	}
+	data, err := io.ReadAll(reader)
+	closeErr := reader.Close()
+	if err != nil {
+		t.Fatalf("Read overwritten target: %v", err)
+	}
+	if closeErr != nil {
+		t.Fatalf("Close overwritten target: %v", closeErr)
+	}
+	if string(data) != "new" {
+		t.Fatalf("overwritten target content: got %q, want %q", data, "new")
+	}
+
+	if got := srv.standardRenameCalls.Load(); got != 0 {
+		t.Fatalf("ordinary Rename requests: got %d, want 0", got)
+	}
+	if got := srv.posixRenameCalls.Load(); got == 0 {
+		t.Fatal("expected at least one PosixRename request")
+	}
 }
 
 func TestCopyRemoteToRemoteRelaysThroughClient(t *testing.T) {

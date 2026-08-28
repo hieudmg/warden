@@ -195,10 +195,11 @@ configured. Terminals
 narrower than 80 columns use a stacked layout. Use a modern
 ANSI/VT-capable terminal on Windows.
 
-`cp` transfers recurse for directories, overwrite existing files by
-default, and place a source directory beneath an existing destination
-directory (a missing destination becomes the copied root). At least one
-configured host is required: local-to-local copies are rejected.
+`cp` recursively transfers directories and overwrites existing files by
+default. Files and directories are placed beneath an existing destination
+directory using the source basename (a missing destination becomes the
+copied root). At least one configured host is required: local-to-local
+copies are rejected.
 Host-to-host copies relay bytes through the local Warden client; the two
 hosts never talk to each other directly.
 

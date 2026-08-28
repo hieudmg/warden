@@ -527,6 +527,16 @@ func isWindowsDrivePath(raw string) bool {
 		(raw[2] == '\\' || raw[2] == '/')
 }
 
+// isCPRemoteSyntax identifies an operand that requires profile lookup. A
+// Windows drive path is local even on a non-Windows build, while any other
+// colon remains the remote connection/path separator.
+func isCPRemoteSyntax(raw string) bool {
+	if filepath.VolumeName(raw) != "" || isWindowsDrivePath(raw) {
+		return false
+	}
+	return strings.Contains(raw, ":")
+}
+
 func runCP(args []string, configPath string, configPathSet bool, stdout, stderr io.Writer, lookupEnv func(string) (string, bool)) int {
 	if len(args) == 1 && isFlagHelp(args[0]) {
 		printCPUsage(stdout)
@@ -534,6 +544,10 @@ func runCP(args []string, configPath string, configPathSet bool, stdout, stderr 
 	}
 	if len(args) != 2 {
 		fmt.Fprintln(stderr, "usage: warden cp <source> <destination>")
+		return 2
+	}
+	if !isCPRemoteSyntax(args[0]) && !isCPRemoteSyntax(args[1]) {
+		fmt.Fprintln(stderr, "cp: local-to-local copies are not supported")
 		return 2
 	}
 

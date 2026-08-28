@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -237,6 +238,35 @@ func TestCopyFileOverwritesDestination(t *testing.T) {
 	}
 }
 
+func TestCopyFileIntoExistingDirectoryUsesSourceBase(t *testing.T) {
+	src := filepath.Join(t.TempDir(), "source.txt")
+	dstDir := t.TempDir()
+	if err := os.WriteFile(src, []byte("file content"), 0o640); err != nil {
+		t.Fatal(err)
+	}
+
+	source := Endpoint{FS: NewLocalFilesystem(), Path: src, Identity: "local"}
+	destination := Endpoint{FS: NewLocalFilesystem(), Path: dstDir, Identity: "local"}
+	if err := Copy(source, destination); err != nil {
+		t.Fatalf("Copy: %v", err)
+	}
+
+	got, err := os.ReadFile(filepath.Join(dstDir, filepath.Base(src)))
+	if err != nil {
+		t.Fatalf("copied file: %v", err)
+	}
+	if string(got) != "file content" {
+		t.Fatalf("copied content: got %q, want %q", got, "file content")
+	}
+	info, err := os.Stat(filepath.Join(dstDir, filepath.Base(src)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := info.Mode().Perm(), os.FileMode(0o640); got != want {
+		t.Fatalf("copied mode: got %v, want %v", got, want)
+	}
+}
+
 func TestCopyDirectoryIntoExistingDirectoryUsesSourceBase(t *testing.T) {
 	src := filepath.Join(t.TempDir(), "src")
 	dstDir := t.TempDir()
@@ -373,6 +403,41 @@ func TestCopyRejectsLocalDirectoryIntoItself(t *testing.T) {
 			t.Fatalf("expected copied file: %v", err)
 		}
 	})
+}
+
+func TestCopyRejectsLocalDirectoryThroughSymlinkedDestinationComponents(t *testing.T) {
+	root := t.TempDir()
+	src := filepath.Join(root, "source")
+	if err := os.MkdirAll(src, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// Keep the final target as a file so the pre-fix implementation fails
+	// immediately instead of recursing indefinitely after following alias.
+	target := filepath.Join(src, "child")
+	if err := os.WriteFile(target, []byte("keep"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	alias := filepath.Join(root, "alias")
+	if err := os.Symlink(src, alias); err != nil {
+		t.Fatal(err)
+	}
+
+	source := Endpoint{FS: NewLocalFilesystem(), Path: src, Identity: "local"}
+	destination := Endpoint{FS: NewLocalFilesystem(), Path: filepath.Join(alias, "child"), Identity: "local"}
+	err := Copy(source, destination)
+	if err == nil {
+		t.Fatal("Copy: expected symlinked destination rejection, got nil")
+	}
+	if !strings.Contains(err.Error(), "destination path component") {
+		t.Fatalf("Copy: error = %v, want symlink rejection", err)
+	}
+	got, err := os.ReadFile(target)
+	if err != nil {
+		t.Fatalf("original target: %v", err)
+	}
+	if string(got) != "keep" {
+		t.Fatalf("original target changed: got %q, want %q", got, "keep")
+	}
 }
 
 func TestCopyRejectsSourceSymlink(t *testing.T) {

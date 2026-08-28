@@ -24,11 +24,17 @@ func Copy(source, destination Endpoint) error {
 		return err
 	}
 	if sourceInfo.IsDir() {
+		// A symlink in the destination path can redirect creation into the
+		// source tree after the lexical self-copy check. Reject it before any
+		// destination directory is created.
+		if err := rejectSymlinkedDestination(destination.FS, target); err != nil {
+			return err
+		}
 		// Same identity means source and destination share a namespace, so a
 		// target inside the source tree would recurse forever.
 		if source.Identity == destination.Identity {
 			if rel, relErr := source.FS.Rel(source.Path, target); relErr == nil &&
-				(rel == "." || !strings.HasPrefix(rel, "..")) {
+				(rel == "." || !isOutsideRelative(source.FS, rel)) {
 				return fmt.Errorf("copy: refusing to copy directory %q into itself or a descendant (%q)", source.Path, target)
 			}
 		}
@@ -42,13 +48,40 @@ func Copy(source, destination Endpoint) error {
 // directory, using the source's base name; otherwise the destination path is
 // used as the target root (a missing destination becomes the copied root).
 func destinationPath(source, destination Endpoint, sourceInfo os.FileInfo) (string, error) {
-	if !sourceInfo.IsDir() {
-		return destination.Path, nil
-	}
 	if destInfo, err := destination.FS.Stat(destination.Path); err == nil && destInfo.IsDir() {
 		return destination.FS.Join(destination.Path, source.FS.Base(source.Path)), nil
 	}
 	return destination.Path, nil
+}
+
+// isOutsideRelative reports whether rel leaves base through a parent path.
+// A name such as "..child" is not a parent component and therefore remains
+// inside the source tree; only an exact ".." or a separator-delimited parent
+// prefix is outside.
+func isOutsideRelative(fs Filesystem, rel string) bool {
+	if rel == ".." {
+		return true
+	}
+	parentPrefix := strings.TrimSuffix(fs.Join("..", "child"), "child")
+	return parentPrefix != "" && strings.HasPrefix(rel, parentPrefix)
+}
+
+// rejectSymlinkedDestination checks every existing component of target with
+// Lstat. This prevents a local symlink from redirecting recursive directory
+// creation into the source tree. It is intentionally conservative for any
+// filesystem adapter: an existing symlink component is never a safe recursive
+// destination.
+func rejectSymlinkedDestination(fs Filesystem, target string) error {
+	for current := target; ; {
+		if info, err := fs.Lstat(current); err == nil && info.Mode()&os.ModeSymlink != 0 {
+			return fmt.Errorf("copy: destination path component %q is a symlink", current)
+		}
+		parent := fs.Dir(current)
+		if parent == current {
+			return nil
+		}
+		current = parent
+	}
 }
 
 // validateSource verifies that name exists and is a regular file or
@@ -118,6 +151,9 @@ func copyFile(source, destination Filesystem, sourcePath, targetPath string, mod
 // every directory and copying regular files. Symlink and special children are
 // rejected through validateSource.
 func copyDirectory(source, destination Filesystem, sourceRoot, targetRoot string) error {
+	if err := rejectSymlinkedDestination(destination, targetRoot); err != nil {
+		return err
+	}
 	if err := destination.MkdirAll(targetRoot, 0o755); err != nil {
 		return err
 	}

@@ -116,7 +116,10 @@ func (r *remoteFilesystem) Chmod(p string, mode os.FileMode) error {
 	return r.client.Chmod(p, mode)
 }
 func (r *remoteFilesystem) Rename(oldname, newname string) error {
-	return r.client.Rename(oldname, newname)
+	// Temporary file replacement needs the POSIX extension: SFTP v3 Rename
+	// may reject an existing destination, while PosixRename provides the
+	// overwrite semantics required by cp.
+	return r.client.PosixRename(oldname, newname)
 }
 func (r *remoteFilesystem) Remove(p string) error { return r.client.Remove(p) }
 func (r *remoteFilesystem) Join(elems ...string) string {

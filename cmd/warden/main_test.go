@@ -793,6 +793,43 @@ func TestRunCPRejectsLocalToLocal(t *testing.T) {
 	}
 }
 
+func TestRunCPRejectsLocalToLocalBeforeConfigOrAPICall(t *testing.T) {
+	var apiCalls atomic.Int64
+	apiSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		apiCalls.Add(1)
+		http.Error(w, "unexpected API request", http.StatusInternalServerError)
+	}))
+	defer apiSrv.Close()
+
+	var configLookups atomic.Int64
+	lookupEnv := func(key string) (string, bool) {
+		configLookups.Add(1)
+		switch key {
+		case "WARDEN_CLIENT_API_BASE_URL":
+			return apiSrv.URL, true
+		case "WARDEN_CLIENT_TIMEOUT":
+			return "not-a-duration", true
+		default:
+			return "", false
+		}
+	}
+
+	var stdout, stderr bytes.Buffer
+	exitCode := run([]string{"cp", "local-source", "local-destination"}, &stdout, &stderr, lookupEnv)
+	if exitCode != 2 {
+		t.Fatalf("run() exitCode = %d, want 2, stdout=%q stderr=%q", exitCode, stdout.String(), stderr.String())
+	}
+	if !strings.Contains(stderr.String(), "local-to-local copies are not supported") {
+		t.Fatalf("stderr = %q, want local-to-local usage error", stderr.String())
+	}
+	if got := configLookups.Load(); got != 0 {
+		t.Fatalf("config lookups: got %d, want 0", got)
+	}
+	if got := apiCalls.Load(); got != 0 {
+		t.Fatalf("API calls: got %d, want 0", got)
+	}
+}
+
 func TestParseCPEndpointRecognizesWindowsVolume(t *testing.T) {
 	ep, err := parseCPEndpoint(`C:\tmp\file`, nil)
 	if err != nil {
@@ -947,6 +984,25 @@ func TestRunCPEndToEnd(t *testing.T) {
 	if _, err := os.Stat(marker); err != nil {
 		t.Fatalf("pre-existing destination entries must be preserved: %v", err)
 	}
+
+	// A regular file source is also placed beneath an existing destination
+	// directory using its basename.
+	fileSrc := filepath.Join(t.TempDir(), "single-local.txt")
+	if err := os.WriteFile(fileSrc, []byte("file placement"), 0o640); err != nil {
+		t.Fatal(err)
+	}
+	fileDestDir := filepath.Join(srcSrv.root, "file-dest")
+	if err := os.MkdirAll(fileDestDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	stdout, stderr, exitCode = runCP("cp", fileSrc, "source:file-dest")
+	if exitCode != 0 {
+		t.Fatalf("file into existing dir exitCode = %d, stderr = %q", exitCode, stderr)
+	}
+	if stdout != "" {
+		t.Fatalf("file into existing dir stdout = %q, want empty", stdout)
+	}
+	assertCLIRemoteFile(t, fileDestDir, "single-local.txt", "file placement", 0o640)
 
 	// Destination overwrite: a file copy replaces an existing remote file
 	// and its mode.
