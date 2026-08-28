@@ -2,7 +2,9 @@ package sftp
 
 import (
 	"context"
+	"net"
 	"strconv"
+	"strings"
 	"sync"
 
 	pkgsftp "github.com/pkg/sftp"
@@ -16,11 +18,12 @@ import (
 // Closing the Remote tears down the SFTP session first and then every SSH
 // connection in the chain, so no socket or goroutine outlives the copy.
 type Remote struct {
-	client   *pkgsftp.Client
-	target   *ssh.Client
-	chain    []*ssh.Client
-	identity string
-	mu       sync.Mutex
+	client       *pkgsftp.Client
+	target       *ssh.Client
+	chain        []*ssh.Client
+	identity     string
+	hostIdentity string
+	mu           sync.Mutex
 }
 
 // Dial connects through the bundle's ordered jump chain and opens an SFTP
@@ -39,11 +42,20 @@ func Dial(ctx context.Context, bundle model.SSHBundle) (*Remote, error) {
 		return nil, err
 	}
 	return &Remote{
-		client:   client,
-		target:   target,
-		chain:    chain,
-		identity: strconv.FormatInt(bundle.Target.ID, 10),
+		client:       client,
+		target:       target,
+		chain:        chain,
+		identity:     strconv.FormatInt(bundle.Target.ID, 10),
+		hostIdentity: remoteHostIdentity(bundle.Target.Host, bundle.Target.Port),
 	}, nil
+}
+
+// remoteHostIdentity identifies a configured target by its case-insensitive
+// host and port. It deliberately uses the configured address rather than a
+// DNS lookup so aliases remain distinct unless their profiles spell the same
+// host and port.
+func remoteHostIdentity(host string, port int) string {
+	return net.JoinHostPort(strings.ToLower(host), strconv.Itoa(port))
 }
 
 // Endpoint returns an endpoint on this remote's filesystem. The identity is
@@ -51,9 +63,10 @@ func Dial(ctx context.Context, bundle model.SSHBundle) (*Remote, error) {
 // dials for the same named profile still share a namespace identity.
 func (r *Remote) Endpoint(name string) Endpoint {
 	return Endpoint{
-		FS:       NewRemoteFilesystem(r.client),
-		Path:     name,
-		Identity: r.identity,
+		FS:           NewRemoteFilesystem(r.client),
+		Path:         name,
+		Identity:     r.identity,
+		HostIdentity: r.hostIdentity,
 	}
 }
 

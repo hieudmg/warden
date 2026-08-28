@@ -519,6 +519,17 @@ func parseCPEndpoint(raw string, connections []model.SSHConnection) (cpEndpoint,
 	return cpEndpoint{}, fmt.Errorf("connection %q not found", name)
 }
 
+// sameCPRemoteHost reports whether two remote cp operands refer to the same
+// configured host and port. Host names are compared case-insensitively and
+// without resolving them, so the preflight does not perform network work.
+func sameCPRemoteHost(source, destination cpEndpoint) bool {
+	if source.connection == nil || destination.connection == nil {
+		return false
+	}
+	return source.connection.Port == destination.connection.Port &&
+		strings.EqualFold(source.connection.Host, destination.connection.Host)
+}
+
 // isWindowsDrivePath reports whether raw starts with a Windows drive-letter
 // volume such as C:\ or C:/.
 func isWindowsDrivePath(raw string) bool {
@@ -573,6 +584,11 @@ func runCP(args []string, configPath string, configPathSet bool, stdout, stderr 
 	destination, err := parseCPEndpoint(args[1], conns)
 	if err != nil {
 		return reportCPParseError(stderr, err)
+	}
+
+	if sameCPRemoteHost(source, destination) {
+		fmt.Fprintf(stderr, "cp: refusing to copy between remote endpoints on same host %q:%d\n", source.connection.Host, source.connection.Port)
+		return 1
 	}
 
 	if source.connection == nil && destination.connection == nil {

@@ -36,12 +36,15 @@ type Filesystem interface {
 // Endpoint pairs a filesystem with a path on it. Identity distinguishes
 // filesystems that share a namespace: local endpoints use the identity
 // "local", and remote endpoints use the stable SSH connection ID of the
-// dialed profile. Copy rejects a directory when source and destination
-// identities match and the final target is the source or a descendant.
+// dialed profile. HostIdentity identifies a remote host and port across
+// profiles. Copy rejects a directory when source and destination identities
+// match and the final target is the source or a descendant; it rejects any
+// remote-to-remote copy whose host identities match.
 type Endpoint struct {
-	FS       Filesystem
-	Path     string
-	Identity string
+	FS           Filesystem
+	Path         string
+	Identity     string
+	HostIdentity string
 }
 
 type localFilesystem struct{}

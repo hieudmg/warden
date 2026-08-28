@@ -830,6 +830,49 @@ func TestRunCPRejectsLocalToLocalBeforeConfigOrAPICall(t *testing.T) {
 	}
 }
 
+func TestRunCPRejectsSameRemoteHostBeforeTransport(t *testing.T) {
+	var bundleCalls atomic.Int64
+	apiSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/v1/ssh-connections":
+			io.WriteString(w, `[
+				{"id":101,"name":"source","host":"HP-SERVER","port":22,"username":"user"},
+				{"id":202,"name":"destination","host":"hp-server","port":22,"username":"user"}
+			]`)
+		case "/api/v1/transport/ssh/101", "/api/v1/transport/ssh/202":
+			bundleCalls.Add(1)
+			http.Error(w, "transport must not be requested for same-host copies", http.StatusInternalServerError)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer apiSrv.Close()
+
+	lookupEnv := func(key string) (string, bool) {
+		switch key {
+		case "HOME":
+			return t.TempDir(), true
+		case "WARDEN_CLIENT_API_BASE_URL":
+			return apiSrv.URL, true
+		case "WARDEN_CLIENT_TIMEOUT":
+			return "10s", true
+		}
+		return "", false
+	}
+
+	var stdout, stderr bytes.Buffer
+	exitCode := run([]string{"cp", "source:/tmp/source", "destination:/tmp/destination"}, &stdout, &stderr, lookupEnv)
+	if exitCode != 1 {
+		t.Fatalf("run() exitCode = %d, want 1, stdout=%q stderr=%q", exitCode, stdout.String(), stderr.String())
+	}
+	if !strings.Contains(stderr.String(), "same host") {
+		t.Fatalf("stderr = %q, want same-host rejection", stderr.String())
+	}
+	if got := bundleCalls.Load(); got != 0 {
+		t.Fatalf("transport bundle calls: got %d, want 0", got)
+	}
+}
+
 func TestParseCPEndpointRecognizesWindowsVolume(t *testing.T) {
 	ep, err := parseCPEndpoint(`C:\tmp\file`, nil)
 	if err != nil {

@@ -11,9 +11,10 @@ import (
 // Copy copies source to destination. Files are staged in a unique sibling
 // temporary file and renamed into place only after the source reader and the
 // temporary writer have both closed. Directories are copied recursively,
-// creating and chmodding every directory. A directory copy is rejected when
-// source and destination share an identity and the final target is the source
-// or a descendant of it.
+// creating and chmodding every directory. Remote-to-remote copies are
+// rejected when both endpoints identify the same configured host and port. A
+// directory copy is also rejected when source and destination share an
+// identity and the final target is the source or a descendant of it.
 func Copy(source, destination Endpoint) error {
 	sourceInfo, err := validateSource(source.FS, source.Path)
 	if err != nil {
@@ -24,19 +25,26 @@ func Copy(source, destination Endpoint) error {
 		return err
 	}
 	if sourceInfo.IsDir() {
-		// A symlink in the destination path can redirect creation into the
-		// source tree after the lexical self-copy check. Reject it before any
-		// destination directory is created.
-		if err := rejectSymlinkedDestination(destination.FS, target); err != nil {
-			return err
-		}
 		// Same identity means source and destination share a namespace, so a
-		// target inside the source tree would recurse forever.
+		// target inside the source tree would recurse forever. Check this
+		// before the same-host rule so the more specific self-copy safeguard
+		// remains in effect for two dials of one profile.
 		if source.Identity == destination.Identity {
 			if rel, relErr := source.FS.Rel(source.Path, target); relErr == nil &&
 				(rel == "." || !isOutsideRelative(source.FS, rel)) {
 				return fmt.Errorf("copy: refusing to copy directory %q into itself or a descendant (%q)", source.Path, target)
 			}
+		}
+	}
+	if source.HostIdentity != "" && source.HostIdentity == destination.HostIdentity {
+		return fmt.Errorf("copy: refusing to copy between remote endpoints on same host %q", source.HostIdentity)
+	}
+	if sourceInfo.IsDir() {
+		// A symlink in the destination path can redirect creation into the
+		// source tree after the lexical self-copy check. Reject it before any
+		// destination directory is created.
+		if err := rejectSymlinkedDestination(destination.FS, target); err != nil {
+			return err
 		}
 		return copyDirectory(source.FS, destination.FS, source.Path, target)
 	}

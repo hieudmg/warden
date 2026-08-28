@@ -201,7 +201,8 @@ directory using the source basename (a missing destination becomes the
 copied root). At least one configured host is required: local-to-local
 copies are rejected.
 Host-to-host copies relay bytes through the local Warden client; the two
-hosts never talk to each other directly.
+hosts never talk to each other directly. Remote-to-remote copies between
+profiles configured for the same host and port are rejected.
 
 Exit status mirrors the remote command/query: 0 on success, nonzero on
 failure (remote exit status is propagated for `ssh`).

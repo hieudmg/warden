@@ -481,6 +481,56 @@ func TestRemoteSameProfileRejectsDirectoryDescendants(t *testing.T) {
 	}
 }
 
+func TestRemoteHostIdentityNormalizesHostCase(t *testing.T) {
+	if got := remoteHostIdentity("Hp-Server", 2222); got != "hp-server:2222" {
+		t.Fatalf("remoteHostIdentity: got %q, want %q", got, "hp-server:2222")
+	}
+}
+
+func TestCopyRejectsDistinctProfilesOnSameRemoteHost(t *testing.T) {
+	srv := newSFTPTestServer(t, "secret")
+	writeKnownHosts(t, srv)
+
+	sourceBundle := srv.bundle()
+	destinationBundle := srv.bundle()
+	destinationBundle.Target.ID = sourceBundle.Target.ID + 1
+
+	source, err := Dial(context.Background(), sourceBundle)
+	if err != nil {
+		t.Fatalf("Dial source: %v", err)
+	}
+	defer source.Close()
+	destination, err := Dial(context.Background(), destinationBundle)
+	if err != nil {
+		t.Fatalf("Dial destination: %v", err)
+	}
+	defer destination.Close()
+
+	sourceEndpoint := source.Endpoint("source.txt")
+	destinationEndpoint := destination.Endpoint("destination.txt")
+	if sourceEndpoint.Identity == destinationEndpoint.Identity {
+		t.Fatal("test setup: expected distinct profile identities")
+	}
+	writer, err := sourceEndpoint.FS.Create(sourceEndpoint.Path)
+	if err != nil {
+		t.Fatalf("Create source: %v", err)
+	}
+	if _, err := writer.Write([]byte("source")); err != nil {
+		t.Fatal(err)
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	err = Copy(sourceEndpoint, destinationEndpoint)
+	if err == nil {
+		t.Fatal("Copy: expected same-host rejection, got nil")
+	}
+	if _, err := destinationEndpoint.FS.Lstat(destinationEndpoint.Path); !os.IsNotExist(err) {
+		t.Fatalf("destination after rejected Copy: err = %v, want not exist", err)
+	}
+}
+
 func TestRemoteOverwriteUsesPosixRename(t *testing.T) {
 	srv := newSFTPPosixRenameTestServer(t, "secret")
 	writeKnownHosts(t, srv)
