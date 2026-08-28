@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 	"unicode"
@@ -16,6 +17,7 @@ import (
 	clientdb "warden/internal/client/db"
 	"warden/internal/client/picker"
 	clientreport "warden/internal/client/report"
+	clienttransfer "warden/internal/client/sftp"
 	clientssh "warden/internal/client/ssh"
 	"warden/internal/client/terminal"
 	"warden/internal/config"
@@ -64,6 +66,8 @@ func run(args []string, stdout, stderr io.Writer, lookupEnv func(string) (string
 		return runReport(rest[1:], *configPath, configPathSet, stdout, stderr, lookupEnv)
 	case "config":
 		return runConfig(rest[1:], *configPath, configPathSet, stdout, stderr, lookupEnv)
+	case "cp":
+		return runCP(rest[1:], *configPath, configPathSet, stdout, stderr, lookupEnv)
 	default:
 		fmt.Fprintf(stderr, "unknown command %q\n\n", rest[0])
 		printUsage(stderr)
@@ -473,6 +477,178 @@ func sanitizeConfigSearchField(value string) string {
 	return b.String()
 }
 
+// cpEndpoint is one parsed cp operand: a local path or a remote
+// connection:path pair. connection is nil for local operands.
+type cpEndpoint struct {
+	path       string
+	connection *model.SSHConnection
+}
+
+// cpUsageError marks a malformed endpoint operand (empty connection name
+// or path). runCP reports these as usage errors with exit code 2.
+type cpUsageError struct{ message string }
+
+func (e cpUsageError) Error() string { return e.message }
+
+// parseCPEndpoint splits a cp operand into a local path or a remote
+// connection:path pair. Windows drive-letter volumes (C:\... or C:/...)
+// are local paths on every host: filepath.VolumeName only recognizes them
+// on Windows, so the drive-letter pattern is checked explicitly as well.
+// Operands without a colon are local. For remote operands the connection
+// name must match a configured profile exactly.
+func parseCPEndpoint(raw string, connections []model.SSHConnection) (cpEndpoint, error) {
+	if filepath.VolumeName(raw) != "" || isWindowsDrivePath(raw) {
+		return cpEndpoint{path: raw}, nil
+	}
+	idx := strings.Index(raw, ":")
+	if idx < 0 {
+		return cpEndpoint{path: raw}, nil
+	}
+	name, path := raw[:idx], raw[idx+1:]
+	if name == "" {
+		return cpEndpoint{}, cpUsageError{message: fmt.Sprintf("empty connection name in %q", raw)}
+	}
+	if path == "" {
+		return cpEndpoint{}, cpUsageError{message: fmt.Sprintf("empty path in %q", raw)}
+	}
+	for i := range connections {
+		if connections[i].Name == name {
+			return cpEndpoint{path: path, connection: &connections[i]}, nil
+		}
+	}
+	return cpEndpoint{}, fmt.Errorf("connection %q not found", name)
+}
+
+// isWindowsDrivePath reports whether raw starts with a Windows drive-letter
+// volume such as C:\ or C:/.
+func isWindowsDrivePath(raw string) bool {
+	return len(raw) >= 3 && raw[1] == ':' &&
+		(raw[0] >= 'A' && raw[0] <= 'Z' || raw[0] >= 'a' && raw[0] <= 'z') &&
+		(raw[2] == '\\' || raw[2] == '/')
+}
+
+// isCPRemoteSyntax identifies an operand that requires profile lookup. A
+// Windows drive path is local even on a non-Windows build, while any other
+// colon remains the remote connection/path separator.
+func isCPRemoteSyntax(raw string) bool {
+	if filepath.VolumeName(raw) != "" || isWindowsDrivePath(raw) {
+		return false
+	}
+	return strings.Contains(raw, ":")
+}
+
+func runCP(args []string, configPath string, configPathSet bool, stdout, stderr io.Writer, lookupEnv func(string) (string, bool)) int {
+	if len(args) == 1 && isFlagHelp(args[0]) {
+		printCPUsage(stdout)
+		return 0
+	}
+	if len(args) != 2 {
+		fmt.Fprintln(stderr, "usage: warden cp <source> <destination>")
+		return 2
+	}
+	if !isCPRemoteSyntax(args[0]) && !isCPRemoteSyntax(args[1]) {
+		fmt.Fprintln(stderr, "cp: local-to-local copies are not supported")
+		return 2
+	}
+
+	cfg, err := loadClient(configPath, configPathSet, lookupEnv)
+	if err != nil {
+		fmt.Fprintf(stderr, "invalid client config: %v\n", err)
+		return 1
+	}
+
+	cl := api.New(cfg.APIBaseURL, &http.Client{Timeout: cfg.Timeout})
+	ctx := context.Background()
+
+	conns, err := cl.ListSSH(ctx)
+	if err != nil {
+		fmt.Fprintf(stderr, "cp: %v\n", err)
+		return 1
+	}
+
+	source, err := parseCPEndpoint(args[0], conns)
+	if err != nil {
+		return reportCPParseError(stderr, err)
+	}
+	destination, err := parseCPEndpoint(args[1], conns)
+	if err != nil {
+		return reportCPParseError(stderr, err)
+	}
+
+	if source.connection == nil && destination.connection == nil {
+		fmt.Fprintln(stderr, "cp: local-to-local copies are not supported")
+		return 2
+	}
+
+	var remotes []*clienttransfer.Remote
+	defer func() {
+		for _, r := range remotes {
+			r.Close()
+		}
+	}()
+
+	src, err := resolveCPEndpoint(source, cl, ctx, &remotes)
+	if err != nil {
+		fmt.Fprintf(stderr, "cp: %v\n", err)
+		return 1
+	}
+	dst, err := resolveCPEndpoint(destination, cl, ctx, &remotes)
+	if err != nil {
+		fmt.Fprintf(stderr, "cp: %v\n", err)
+		return 1
+	}
+
+	if err := clienttransfer.Copy(src, dst); err != nil {
+		fmt.Fprintf(stderr, "cp: %v\n", err)
+		return 1
+	}
+	return 0
+}
+
+// reportCPParseError reports an endpoint parse failure. Malformed operands
+// (empty connection name or path) are usage errors with exit 2; unknown
+// connection names are lookup failures with exit 1.
+func reportCPParseError(stderr io.Writer, err error) int {
+	var usageErr cpUsageError
+	if errors.As(err, &usageErr) {
+		fmt.Fprintf(stderr, "cp: %v\n", err)
+		return 2
+	}
+	fmt.Fprintf(stderr, "cp: %v\n", err)
+	return 1
+}
+
+// resolveCPEndpoint converts a parsed endpoint into a transfer endpoint.
+// Remote endpoints fetch their transport bundle and dial an SFTP session;
+// every dialed remote is appended to remotes so runCP closes them all
+// after the copy. Local endpoints wrap the OS filesystem with the "local"
+// identity.
+func resolveCPEndpoint(ep cpEndpoint, cl *api.Client, ctx context.Context, remotes *[]*clienttransfer.Remote) (clienttransfer.Endpoint, error) {
+	if ep.connection == nil {
+		return clienttransfer.Endpoint{
+			FS:       clienttransfer.NewLocalFilesystem(),
+			Path:     ep.path,
+			Identity: "local",
+		}, nil
+	}
+	bundle, err := cl.GetSSHBundle(ctx, ep.connection.ID)
+	if err != nil {
+		return clienttransfer.Endpoint{}, err
+	}
+	remote, err := clienttransfer.Dial(ctx, bundle)
+	if err != nil {
+		return clienttransfer.Endpoint{}, err
+	}
+	*remotes = append(*remotes, remote)
+	return remote.Endpoint(ep.path), nil
+}
+
+func printCPUsage(w io.Writer) {
+	fmt.Fprint(w, `Usage:
+  warden cp <source> <destination>
+`)
+}
+
 func loadClient(configPath string, configPathSet bool, lookupEnv func(string) (string, bool)) (config.Client, error) {
 	return config.LoadClient(config.ClientOptions{
 		ConfigPath:    configPath,
@@ -488,6 +664,7 @@ func printUsage(w io.Writer) {
   warden [--config path] xssh [connection]
   warden [--config path] report create <project> --title <title> --summary <summary> --agent-model <name>
   warden [--config path] config search <query>
+  warden [--config path] cp <source> <destination>
   warden --help
 
 Environment overrides:
