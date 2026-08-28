@@ -31,6 +31,47 @@ const handshakeTimeout = 15 * time.Second
 // established client so sessions can request agent forwarding.
 var clientAgents sync.Map // *ssh.Client -> agent.Agent
 
+// Graph owns the SSH clients that connect a target through its ordered jump
+// chain. The target client is borrowed by operation-specific callers until
+// Close is called.
+type Graph struct {
+	target *ssh.Client
+	chain  []*ssh.Client
+	once   sync.Once
+	err    error
+}
+
+// DialGraph connects through the bundle's ordered jump chain and returns a
+// reusable graph owning every established client. On failure all partially
+// established clients are closed and no graph is returned.
+func DialGraph(ctx context.Context, bundle model.SSHBundle, opts DialOptions) (*Graph, error) {
+	target, chain, err := DialChain(ctx, bundle, opts)
+	if err != nil {
+		return nil, err
+	}
+	return &Graph{target: target, chain: chain}, nil
+}
+
+// Target returns the client connected to the bundle target. The graph owns
+// the returned client; callers must not close it independently.
+func (g *Graph) Target() *ssh.Client {
+	return g.target
+}
+
+// Close disconnects the target and then each jump in reverse order. It is
+// safe to call more than once and returns the first close error, if any.
+func (g *Graph) Close() error {
+	g.once.Do(func() {
+		for i := len(g.chain) - 1; i >= 0; i-- {
+			if err := g.chain[i].Close(); err != nil && g.err == nil {
+				g.err = err
+			}
+			clientAgents.Delete(g.chain[i])
+		}
+	})
+	return g.err
+}
+
 // DefaultKnownHostsPath returns the platform-standard known_hosts path.
 func DefaultKnownHostsPath() string {
 	home, err := os.UserHomeDir()
