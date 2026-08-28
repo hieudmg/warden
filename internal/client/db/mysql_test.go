@@ -36,6 +36,33 @@ func directBundle(addr, username, password string) model.DBBundle {
 	}
 }
 
+func TestRunQueryWithDialContext(t *testing.T) {
+	srv := newFakeMySQLServer(t, []string{"id", "name"}, [][]string{{"1", "alice"}})
+	bundle := directBundle("127.0.0.1:3306", "dbuser", "dbpass")
+	var gotNetwork, gotAddr string
+	dial := func(ctx context.Context, network, addr string) (net.Conn, error) {
+		gotNetwork, gotAddr = network, addr
+		return (&net.Dialer{}).DialContext(ctx, "tcp", srv.addr)
+	}
+
+	var out bytes.Buffer
+	if err := RunQueryWithDialContext(context.Background(), bundle, "SELECT id, name FROM users", &out, dial); err != nil {
+		t.Fatalf("RunQueryWithDialContext: %v", err)
+	}
+	want := "" +
+		"+----+-------+\n" +
+		"| id | name  |\n" +
+		"+----+-------+\n" +
+		"| 1  | alice |\n" +
+		"+----+-------+\n"
+	if out.String() != want {
+		t.Fatalf("output = %q, want %q", out.String(), want)
+	}
+	if gotNetwork != "tcp" || gotAddr != "127.0.0.1:3306" {
+		t.Fatalf("dial arguments = (%q, %q), want (tcp, 127.0.0.1:3306)", gotNetwork, gotAddr)
+	}
+}
+
 func TestRunQueryDirectOutput(t *testing.T) {
 	srv := newFakeMySQLServer(t, []string{"id", "name"}, [][]string{{"1", "alice"}, {"2", "bob"}})
 
@@ -284,4 +311,3 @@ func writeKnownHosts(t *testing.T, srvs ...*tunnelSSHServer) {
 		t.Fatal(err)
 	}
 }
-

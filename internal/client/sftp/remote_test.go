@@ -1,6 +1,7 @@
 package sftp
 
 import (
+	"bytes"
 	"context"
 	"crypto/ed25519"
 	"crypto/rand"
@@ -21,6 +22,7 @@ import (
 	"golang.org/x/crypto/ssh"
 	"golang.org/x/crypto/ssh/knownhosts"
 
+	clientssh "warden/internal/client/ssh"
 	"warden/internal/model"
 )
 
@@ -131,43 +133,58 @@ func (s *sftpTestServer) handleConn(conn net.Conn, cfg *ssh.ServerConfig) {
 // (and the channel) are closed when Serve returns.
 func (s *sftpTestServer) handleSession(ch ssh.Channel, reqs <-chan *ssh.Request) {
 	for req := range reqs {
-		if req.Type != "subsystem" {
-			req.Reply(false, nil)
-			continue
-		}
-		var payload struct{ Name string }
-		if err := ssh.Unmarshal(req.Payload, &payload); err != nil {
-			req.Reply(false, nil)
-			continue
-		}
-		if payload.Name != "sftp" {
-			req.Reply(false, nil)
-			continue
-		}
-		req.Reply(true, nil)
-		if s.posixRenameOnly {
-			handlers := pkgsftp.InMemHandler()
-			handlers.FileCmd = &renameTrackingHandler{
-				Handlers:            handlers,
-				standardRenameCalls: &s.standardRenameCalls,
-				posixRenameCalls:    &s.posixRenameCalls,
+		switch req.Type {
+		case "exec":
+			var payload struct{ Command string }
+			if err := ssh.Unmarshal(req.Payload, &payload); err != nil {
+				req.Reply(false, nil)
+				return
 			}
-			server := pkgsftp.NewRequestServer(ch, handlers)
+			req.Reply(true, nil)
+			status := uint32(1)
+			if payload.Command == "true" {
+				status = 0
+			}
+			_, _ = ch.SendRequest("exit-status", false, ssh.Marshal(struct{ Status uint32 }{status}))
+			_ = ch.Close()
+			return
+		case "subsystem":
+			var payload struct{ Name string }
+			if err := ssh.Unmarshal(req.Payload, &payload); err != nil {
+				req.Reply(false, nil)
+				continue
+			}
+			if payload.Name != "sftp" {
+				req.Reply(false, nil)
+				continue
+			}
+			req.Reply(true, nil)
+			if s.posixRenameOnly {
+				handlers := pkgsftp.InMemHandler()
+				handlers.FileCmd = &renameTrackingHandler{
+					Handlers:            handlers,
+					standardRenameCalls: &s.standardRenameCalls,
+					posixRenameCalls:    &s.posixRenameCalls,
+				}
+				server := pkgsftp.NewRequestServer(ch, handlers)
+				go func() {
+					defer server.Close()
+					_ = server.Serve()
+				}()
+				return
+			}
+			server, err := pkgsftp.NewServer(ch, pkgsftp.WithServerWorkingDirectory(s.root))
+			if err != nil {
+				return
+			}
 			go func() {
 				defer server.Close()
 				_ = server.Serve()
 			}()
 			return
+		default:
+			req.Reply(false, nil)
 		}
-		server, err := pkgsftp.NewServer(ch, pkgsftp.WithServerWorkingDirectory(s.root))
-		if err != nil {
-			return
-		}
-		go func() {
-			defer server.Close()
-			_ = server.Serve()
-		}()
-		return
 	}
 }
 
@@ -350,6 +367,34 @@ func assertLocalFile(t *testing.T, path, want string, mode os.FileMode) {
 	}
 	if string(data) != want {
 		t.Fatalf("content of %s: got %q, want %q", path, data, want)
+	}
+}
+
+func TestOpenBorrowed(t *testing.T) {
+	srv := newSFTPTestServer(t, "secret")
+	writeKnownHosts(t, srv)
+
+	bundle := srv.bundle()
+	graph, err := clientssh.DialGraph(context.Background(), bundle, clientssh.DialOptions{})
+	if err != nil {
+		t.Fatalf("DialGraph: %v", err)
+	}
+	defer graph.Close()
+
+	remote, err := Open(graph.Target(), bundle)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	if err := remote.Endpoint(".").FS.MkdirAll("borrowed", 0o755); err != nil {
+		t.Fatalf("MkdirAll through borrowed remote: %v", err)
+	}
+	if err := remote.Close(); err != nil {
+		t.Fatalf("Remote.Close: %v", err)
+	}
+
+	var stdout bytes.Buffer
+	if err := clientssh.RunCommandOnClient(context.Background(), graph.Target(), "true", clientssh.Streams{Stdout: &stdout}); err != nil {
+		t.Fatalf("RunCommandOnClient after Remote.Close: %v", err)
 	}
 }
 

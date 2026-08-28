@@ -19,24 +19,59 @@ import (
 // maxSQLBytes bounds a single SQL statement sent to the database.
 const maxSQLBytes = 1 << 20 // 1 MiB
 
+// DialContextFunc dials a database connection for the MySQL driver. The
+// network and address arguments match mysql.Config.DialFunc.
+type DialContextFunc func(context.Context, string, string) (net.Conn, error)
+
 // RunQuery connects to the bundle's database locally and executes one SQL
 // statement, streaming the result to out in a stable tabular format.
 // Profiles with an SSH graph are tunneled through it. The password never
 // appears in returned errors or output.
 func RunQuery(ctx context.Context, bundle model.DBBundle, sqlText string, out io.Writer) error {
+	if err := validateSQL(sqlText); err != nil {
+		return err
+	}
+
+	var dial DialContextFunc
+	if bundle.SSH != nil {
+		addr := net.JoinHostPort(bundle.Host, strconv.Itoa(bundle.Port))
+		tunnel, err := NewTunnelDialer(ctx, *bundle.SSH, addr)
+		if err != nil {
+			return sanitize(err, bundle)
+		}
+		defer tunnel.Close()
+		dial = tunnel.DialContext
+	}
+	return runQueryWithDialContext(ctx, bundle, sqlText, out, dial)
+}
+
+// RunQueryWithDialContext executes one SQL statement using dial when it is
+// non-nil. A nil dial leaves the MySQL driver on its normal direct TCP path;
+// callers with a borrowed SSH graph provide the graph-backed dial function.
+func RunQueryWithDialContext(ctx context.Context, bundle model.DBBundle, sqlText string, out io.Writer, dial DialContextFunc) error {
+	if err := validateSQL(sqlText); err != nil {
+		return err
+	}
+	return runQueryWithDialContext(ctx, bundle, sqlText, out, dial)
+}
+
+func validateSQL(sqlText string) error {
 	if strings.TrimSpace(sqlText) == "" {
 		return errors.New("empty SQL query")
 	}
 	if len(sqlText) > maxSQLBytes {
 		return fmt.Errorf("SQL query exceeds %d bytes", maxSQLBytes)
 	}
+	return nil
+}
 
+func runQueryWithDialContext(ctx context.Context, bundle model.DBBundle, sqlText string, out io.Writer, dial DialContextFunc) error {
 	cfg := mysql.Config{
-		User:                 bundle.Username,
-		Passwd:               string(bundle.Password),
-		Net:                  "tcp",
-		Addr:                 net.JoinHostPort(bundle.Host, strconv.Itoa(bundle.Port)),
-		DBName:               bundle.Database,
+		User:   bundle.Username,
+		Passwd: string(bundle.Password),
+		Net:    "tcp",
+		Addr:   net.JoinHostPort(bundle.Host, strconv.Itoa(bundle.Port)),
+		DBName: bundle.Database,
 		// The MySQL wire packet adds a 1-byte COM_QUERY header to the SQL
 		// text, so MaxAllowedPacket must be one byte larger than the input
 		// bound: a query of exactly maxSQLBytes must not be rejected by the
@@ -44,14 +79,8 @@ func RunQuery(ctx context.Context, bundle model.DBBundle, sqlText string, out io
 		MaxAllowedPacket:     maxSQLBytes + 1,
 		AllowNativePasswords: true,
 	}
-
-	if bundle.SSH != nil {
-		d, err := NewTunnelDialer(ctx, *bundle.SSH, cfg.Addr)
-		if err != nil {
-			return sanitize(err, bundle)
-		}
-		defer d.Close()
-		cfg.DialFunc = d.DialContext
+	if dial != nil {
+		cfg.DialFunc = dial
 	}
 
 	connector, err := mysql.NewConnector(&cfg)
