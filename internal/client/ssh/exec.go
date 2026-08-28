@@ -63,17 +63,18 @@ func RunCommand(ctx context.Context, bundle model.SSHBundle, command string, str
 // runCommand is RunCommand with explicit dial options (used by tests to
 // inject host-key callbacks).
 func runCommand(ctx context.Context, bundle model.SSHBundle, command string, streams Streams, opts DialOptions) error {
-	client, err := DialTarget(ctx, bundle, opts)
+	graph, err := DialGraph(ctx, bundle, opts)
 	if err != nil {
 		return err
 	}
-	defer client.Close()
-	return runOnClient(ctx, client, command, streams)
+	defer graph.Close()
+	return RunCommandOnClient(ctx, graph.Target(), command, streams)
 }
 
-// runOnClient executes one command on an established SSH client, streaming
-// the local I/O endpoints and propagating the remote exit status.
-func runOnClient(ctx context.Context, client *golangssh.Client, command string, streams Streams) error {
+// RunCommandOnClient executes one command on an established SSH client,
+// borrowing the client's connection without closing it. It streams the local
+// I/O endpoints and propagates the remote exit status.
+func RunCommandOnClient(ctx context.Context, client *golangssh.Client, command string, streams Streams) error {
 	session, err := client.NewSession()
 	if err != nil {
 		return fmt.Errorf("open ssh session: %w", err)

@@ -14,37 +14,46 @@ import (
 	"warden/internal/model"
 )
 
-// Remote owns one SFTP session and the whole SSH jump chain behind it.
-// Closing the Remote tears down the SFTP session first and then every SSH
-// connection in the chain, so no socket or goroutine outlives the copy.
+// Remote owns one SFTP session. A Remote returned by Dial also owns the SSH
+// graph created for that one-shot operation; a Remote returned by Open borrows
+// its target and never closes the graph.
 type Remote struct {
 	client       *pkgsftp.Client
-	target       *ssh.Client
-	chain        []*ssh.Client
+	closeGraph   func() error
 	identity     string
 	hostIdentity string
 	mu           sync.Mutex
 }
 
 // Dial connects through the bundle's ordered jump chain and opens an SFTP
-// session on the target. If the SFTP handshake fails, every established
-// SSH connection is closed before returning.
+// session on the target. The returned Remote owns the graph for this
+// one-shot compatibility API and closes it after the SFTP session. If the
+// SFTP handshake fails, every established SSH connection is closed before
+// returning.
 func Dial(ctx context.Context, bundle model.SSHBundle) (*Remote, error) {
-	target, chain, err := clientssh.DialChain(ctx, bundle, clientssh.DialOptions{})
+	graph, err := clientssh.DialGraph(ctx, bundle, clientssh.DialOptions{})
 	if err != nil {
 		return nil, err
 	}
+	remote, err := Open(graph.Target(), bundle)
+	if err != nil {
+		_ = graph.Close()
+		return nil, err
+	}
+	remote.closeGraph = graph.Close
+	return remote, nil
+}
+
+// Open starts one SFTP session on an established SSH target. The returned
+// Remote borrows target: its Close method closes only the SFTP session and
+// leaves the SSH graph available to other operations.
+func Open(target *ssh.Client, bundle model.SSHBundle) (*Remote, error) {
 	client, err := pkgsftp.NewClient(target)
 	if err != nil {
-		for _, c := range chain {
-			c.Close()
-		}
 		return nil, err
 	}
 	return &Remote{
 		client:       client,
-		target:       target,
-		chain:        chain,
 		identity:     strconv.FormatInt(bundle.Target.ID, 10),
 		hostIdentity: remoteHostIdentity(bundle.Target.Host, bundle.Target.Port),
 	}, nil
@@ -70,10 +79,9 @@ func (r *Remote) Endpoint(name string) Endpoint {
 	}
 }
 
-// Close tears down the SFTP session and then every SSH connection in the
-// chain, retaining the first error. The chain is closed from the target
-// backwards: each hop's transport runs through the previous hop, so closing
-// a jump first would tear down the connections behind it. It is idempotent:
+// Close tears down the SFTP session and, when this Remote was created by
+// Dial, then closes its owned SSH graph. A borrowed Remote created by Open
+// leaves the target untouched. It retains the first error and is idempotent:
 // a second Close returns nil.
 func (r *Remote) Close() error {
 	r.mu.Lock()
@@ -86,11 +94,12 @@ func (r *Remote) Close() error {
 		}
 		r.client = nil
 	}
-	for i := len(r.chain) - 1; i >= 0; i-- {
-		if err := r.chain[i].Close(); err != nil && firstErr == nil {
+	closeGraph := r.closeGraph
+	r.closeGraph = nil
+	if closeGraph != nil {
+		if err := closeGraph(); err != nil && firstErr == nil {
 			firstErr = err
 		}
 	}
-	r.chain = nil
 	return firstErr
 }

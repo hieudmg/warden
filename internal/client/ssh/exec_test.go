@@ -53,6 +53,29 @@ func TestRunCommandPasswordAuth(t *testing.T) {
 	}
 }
 
+func TestRunCommandOnClient(t *testing.T) {
+	t.Parallel()
+
+	srv := newTestSSHServer(t, "s3cret", nil)
+	target := targetNode("t", srv.addr)
+	target.Username = "user"
+	target.Password = []byte("s3cret")
+
+	client, err := DialTarget(context.Background(), model.SSHBundle{Target: target}, testOptions())
+	if err != nil {
+		t.Fatalf("DialTarget: %v", err)
+	}
+	defer client.Close()
+
+	var stdout bytes.Buffer
+	if err := RunCommandOnClient(context.Background(), client, "echo borrowed", Streams{Stdout: &stdout}); err != nil {
+		t.Fatalf("RunCommandOnClient: %v", err)
+	}
+	if got, want := strings.TrimSpace(stdout.String()), "borrowed"; got != want {
+		t.Fatalf("stdout = %q, want %q", got, want)
+	}
+}
+
 func TestRunCommandKeyAuth(t *testing.T) {
 	t.Parallel()
 

@@ -207,6 +207,13 @@ profiles configured for the same host and port are rejected.
 Exit status mirrors the remote command/query: 0 on success, nonzero on
 failure (remote exit status is propagated for `ssh`).
 
+Noninteractive `ssh`, remote `cp`, and SSH-backed `db` commands reuse each
+user's cached SSH connections through a local connection agent. Each cached
+connection closes ten minutes after its final operation; when the last cached
+connection closes, the agent exits. The agent never persists credentials,
+private keys, or transport bundles. Interactive `xssh` and direct (non-SSH)
+`db` commands bypass the cache.
+
 ## Native Windows usage
 
 Build the client:

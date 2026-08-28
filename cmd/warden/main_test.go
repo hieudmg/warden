@@ -2,10 +2,12 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"crypto/ed25519"
 	"crypto/rand"
 	"crypto/subtle"
 	"encoding/base64"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -16,6 +18,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -26,6 +29,7 @@ import (
 
 	pkgsftp "github.com/pkg/sftp"
 
+	clientagent "warden/internal/client/agent"
 	clientssh "warden/internal/client/ssh"
 	"warden/internal/model"
 )
@@ -82,6 +86,281 @@ func TestRunHelpCommandsSkipArgAndConfigValidation(t *testing.T) {
 				t.Fatalf("run(%v) stderr = %q, want empty", tc.args, stderr.String())
 			}
 		})
+	}
+}
+
+func TestRunSSHUsesAgent(t *testing.T) {
+	apiSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/v1/ssh-connections":
+			io.WriteString(w, `[{"id":7,"name":"prod","host":"ssh.example","port":22,"username":"user"}]`)
+		case "/api/v1/transport/ssh/7":
+			io.WriteString(w, `{"target":{"id":7,"name":"prod","host":"ssh.example","port":22,"username":"user","password":"c2VjcmV0"},"jumps":[]}`)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer apiSrv.Close()
+
+	lookupEnv := func(key string) (string, bool) {
+		switch key {
+		case "HOME":
+			return t.TempDir(), true
+		case "WARDEN_CLIENT_API_BASE_URL":
+			return apiSrv.URL, true
+		case "WARDEN_CLIENT_TIMEOUT":
+			return "10s", true
+		}
+		return "", false
+	}
+
+	var stdout, stderr bytes.Buffer
+	var gotBundle model.SSHBundle
+	var gotCommand string
+	var gotStreams clientssh.Streams
+	var calls int
+	oldRunAgentSSH := runAgentSSH
+	defer func() { runAgentSSH = oldRunAgentSSH }()
+	runAgentSSH = func(_ context.Context, bundle model.SSHBundle, command string, streams clientssh.Streams) error {
+		calls++
+		gotBundle = bundle
+		gotCommand = command
+		gotStreams = streams
+		return nil
+	}
+
+	exitCode := run([]string{"ssh", "prod", "printf exact"}, &stdout, &stderr, lookupEnv)
+	if exitCode != 0 {
+		t.Fatalf("run() exitCode = %d, want 0, stderr=%q", exitCode, stderr.String())
+	}
+	if calls != 1 {
+		t.Fatalf("agent calls = %d, want 1", calls)
+	}
+	if gotBundle.Target.ID != 7 || gotBundle.Target.Host != "ssh.example" || string(gotBundle.Target.Password) != "secret" {
+		t.Fatalf("agent bundle = %+v, want resolved connection bundle", gotBundle)
+	}
+	if gotCommand != "printf exact" {
+		t.Fatalf("agent command = %q, want exact command", gotCommand)
+	}
+	if gotStreams.Stdin != os.Stdin || gotStreams.Stdout != &stdout || gotStreams.Stderr != &stderr {
+		t.Fatalf("agent streams = %#v, want CLI streams", gotStreams)
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("stderr = %q, want empty", stderr.String())
+	}
+}
+
+func TestRunCPUsesAgent(t *testing.T) {
+	apiSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/v1/ssh-connections":
+			io.WriteString(w, `[
+				{"id":1,"name":"source","host":"source.example","port":22,"username":"user"},
+				{"id":2,"name":"destination","host":"destination.example","port":22,"username":"user"}
+			]`)
+		case "/api/v1/transport/ssh/1":
+			io.WriteString(w, `{"target":{"id":1,"name":"source","host":"source.example","port":22,"username":"user","password":"c291cmNl"},"jumps":[]}`)
+		case "/api/v1/transport/ssh/2":
+			io.WriteString(w, `{"target":{"id":2,"name":"destination","host":"destination.example","port":22,"username":"user","password":"ZGVzdGluYXRpb24="},"jumps":[]}`)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer apiSrv.Close()
+
+	lookupEnv := func(key string) (string, bool) {
+		switch key {
+		case "HOME":
+			return t.TempDir(), true
+		case "WARDEN_CLIENT_API_BASE_URL":
+			return apiSrv.URL, true
+		case "WARDEN_CLIENT_TIMEOUT":
+			return "10s", true
+		}
+		return "", false
+	}
+
+	var requests []clientagent.CopyRequest
+	oldRunAgentCopy := runAgentCopy
+	defer func() { runAgentCopy = oldRunAgentCopy }()
+	runAgentCopy = func(_ context.Context, requestOrSource interface{}, destination ...clientagent.CopyEndpoint) error {
+		if len(destination) != 0 {
+			t.Fatalf("agent copy destination operands = %#v, want request form", destination)
+		}
+		request, ok := requestOrSource.(clientagent.CopyRequest)
+		if !ok {
+			t.Fatalf("agent copy request = %T, want clientagent.CopyRequest", requestOrSource)
+		}
+		requests = append(requests, request)
+		return nil
+	}
+
+	var stdout, stderr bytes.Buffer
+	exitCode := run([]string{"cp", "relative-source", "destination:/remote/path"}, &stdout, &stderr, lookupEnv)
+	if exitCode != 0 {
+		t.Fatalf("local-to-remote exitCode = %d, stderr=%q", exitCode, stderr.String())
+	}
+	if len(requests) != 1 {
+		t.Fatalf("copy requests = %d, want 1", len(requests))
+	}
+	request := requests[0]
+	if !filepath.IsAbs(request.Source.Path) {
+		t.Fatalf("local source path = %q, want absolute", request.Source.Path)
+	}
+	if request.Source.Bundle != nil {
+		t.Fatalf("local source bundle = %#v, want nil", request.Source.Bundle)
+	}
+	if request.Destination.Path != "/remote/path" || request.Destination.Bundle == nil || request.Destination.Bundle.Target.ID != 2 {
+		t.Fatalf("copy destination = %#v, want remote path and destination bundle", request.Destination)
+	}
+
+	exitCode = run([]string{"cp", "source:/remote/source", "destination:/remote/destination"}, &stdout, &stderr, lookupEnv)
+	if exitCode != 0 {
+		t.Fatalf("remote-to-remote exitCode = %d, stderr=%q", exitCode, stderr.String())
+	}
+	if len(requests) != 2 {
+		t.Fatalf("copy requests = %d, want 2", len(requests))
+	}
+	request = requests[1]
+	if request.Source.Path != "/remote/source" || request.Destination.Path != "/remote/destination" {
+		t.Fatalf("remote paths = %q, %q, want exact paths", request.Source.Path, request.Destination.Path)
+	}
+	if request.Source.Bundle == nil || request.Source.Bundle.Target.ID != 1 || request.Destination.Bundle == nil || request.Destination.Bundle.Target.ID != 2 {
+		t.Fatalf("remote bundles = %#v, %#v, want source and destination bundles", request.Source.Bundle, request.Destination.Bundle)
+	}
+
+	exitCode = run([]string{"cp", "source:/remote/source", "relative-destination"}, &stdout, &stderr, lookupEnv)
+	if exitCode != 0 {
+		t.Fatalf("remote-to-local exitCode = %d, stderr=%q", exitCode, stderr.String())
+	}
+	if len(requests) != 3 || !filepath.IsAbs(requests[2].Destination.Path) {
+		t.Fatalf("local destination path = %q, want absolute", requests[2].Destination.Path)
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("stderr = %q, want empty", stderr.String())
+	}
+}
+
+func TestRunDBRoutesTunnel(t *testing.T) {
+	apiSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/v1/db-connections":
+			io.WriteString(w, `[
+				{"id":10,"name":"direct","host":"db.example","port":3306,"username":"user","database":"main"},
+				{"id":20,"name":"tunneled","host":"db.internal","port":3306,"username":"user","database":"main","ssh_connection_id":7}
+			]`)
+		case "/api/v1/transport/db/10":
+			io.WriteString(w, `{"host":"db.example","port":3306,"username":"user","password":"ZGlyZWN0","database":"main"}`)
+		case "/api/v1/transport/db/20":
+			io.WriteString(w, `{"host":"db.internal","port":3306,"username":"user","password":"dHVubmVsZWQ=","database":"main","ssh":{"target":{"id":7,"name":"bastion","host":"ssh.example","port":22,"username":"user","password":"c2VjcmV0"},"jumps":[]}}`)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer apiSrv.Close()
+
+	lookupEnv := func(key string) (string, bool) {
+		switch key {
+		case "HOME":
+			return t.TempDir(), true
+		case "WARDEN_CLIENT_API_BASE_URL":
+			return apiSrv.URL, true
+		case "WARDEN_CLIENT_TIMEOUT":
+			return "10s", true
+		}
+		return "", false
+	}
+
+	var directCalls, tunneledCalls int
+	var gotBundle model.DBBundle
+	var gotSQL string
+	var gotWriter io.Writer
+	oldRunDirectDB := runDirectDB
+	oldRunAgentDB := runAgentDB
+	defer func() {
+		runDirectDB = oldRunDirectDB
+		runAgentDB = oldRunAgentDB
+	}()
+	runDirectDB = func(_ context.Context, bundle model.DBBundle, sqlText string, out io.Writer) error {
+		directCalls++
+		if bundle.SSH != nil {
+			t.Errorf("direct bundle SSH = %#v, want nil", bundle.SSH)
+		}
+		gotSQL = sqlText
+		gotWriter = out
+		return nil
+	}
+	runAgentDB = func(_ context.Context, bundle model.DBBundle, sqlText string, out io.Writer) error {
+		tunneledCalls++
+		if bundle.SSH == nil {
+			t.Errorf("tunneled bundle SSH = nil, want resolved SSH bundle")
+		}
+		gotBundle = bundle
+		gotSQL = sqlText
+		gotWriter = out
+		return nil
+	}
+
+	var stdout, stderr bytes.Buffer
+	if exitCode := run([]string{"db", "direct", "SELECT 1"}, &stdout, &stderr, lookupEnv); exitCode != 0 {
+		t.Fatalf("direct DB exitCode = %d, stderr=%q", exitCode, stderr.String())
+	}
+	if directCalls != 1 || tunneledCalls != 0 {
+		t.Fatalf("after direct DB direct=%d tunneled=%d, want 1/0", directCalls, tunneledCalls)
+	}
+	if exitCode := run([]string{"db", "tunneled", "SELECT 2"}, &stdout, &stderr, lookupEnv); exitCode != 0 {
+		t.Fatalf("tunneled DB exitCode = %d, stderr=%q", exitCode, stderr.String())
+	}
+	if directCalls != 1 || tunneledCalls != 1 {
+		t.Fatalf("after tunneled DB direct=%d tunneled=%d, want 1/1", directCalls, tunneledCalls)
+	}
+	if gotBundle.Host != "db.internal" || gotBundle.SSH == nil || gotBundle.SSH.Target.ID != 7 {
+		t.Fatalf("tunneled bundle = %+v, want SSH-backed DB bundle", gotBundle)
+	}
+	if gotSQL != "SELECT 2" || gotWriter != &stdout {
+		t.Fatalf("tunneled query = %q writer=%#v, want exact query and stdout", gotSQL, gotWriter)
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("stderr = %q, want empty", stderr.String())
+	}
+}
+
+func TestAgentServeHidden(t *testing.T) {
+	cacheDir := t.TempDir()
+	t.Setenv("HOME", cacheDir)
+	t.Setenv("XDG_CACHE_HOME", cacheDir)
+
+	var calls int
+	oldRunAgentServe := runAgentServe
+	defer func() { runAgentServe = oldRunAgentServe }()
+	runAgentServe = func(_ context.Context, listener net.Listener, token []byte, pool *clientagent.Pool) error {
+		calls++
+		if listener == nil || len(token) != clientagent.TokenBytes || pool == nil {
+			t.Errorf("agent serve arguments = listener:%v token:%d pool:%v, want initialized values", listener, len(token), pool)
+		}
+		return nil
+	}
+
+	var stdout, stderr bytes.Buffer
+	exitCode := run([]string{"agent", "serve"}, &stdout, &stderr, func(key string) (string, bool) {
+		if key == "WARDEN_CLIENT_TIMEOUT" {
+			return "not-a-duration", true
+		}
+		return "", false
+	})
+	if exitCode != 0 {
+		t.Fatalf("run() exitCode = %d, want 0, stderr=%q", exitCode, stderr.String())
+	}
+	if calls != 1 {
+		t.Fatalf("agent serve calls = %d, want 1", calls)
+	}
+	var usage bytes.Buffer
+	printUsage(&usage)
+	if strings.Contains(usage.String(), "warden agent") {
+		t.Fatalf("printUsage = %q, must not advertise agent command", usage.String())
+	}
+	if stdout.Len() != 0 || stderr.Len() != 0 {
+		t.Fatalf("agent serve output stdout=%q stderr=%q, want empty", stdout.String(), stderr.String())
 	}
 }
 
@@ -216,6 +495,7 @@ func TestRunSSHEndToEnd(t *testing.T) {
 	if err := os.WriteFile(knownHosts, []byte(line+"\n"), 0600); err != nil {
 		t.Fatal(err)
 	}
+	startCLITestAgent(t)
 
 	host, portStr, _ := net.SplitHostPort(srv.addr)
 	port, _ := strconv.Atoi(portStr)
@@ -268,6 +548,7 @@ func TestRunSSHPropagatesRemoteExitStatus(t *testing.T) {
 	if err := os.WriteFile(knownHosts, []byte(line+"\n"), 0600); err != nil {
 		t.Fatal(err)
 	}
+	startCLITestAgent(t)
 
 	host, portStr, _ := net.SplitHostPort(srv.addr)
 	port, _ := strconv.Atoi(portStr)
@@ -492,6 +773,60 @@ func TestRunXSSHWithoutNameRequiresInteractiveTerminal(t *testing.T) {
 	if exitCode != 1 || !strings.Contains(stderr.String(), "interactive mode requires one") {
 		t.Fatalf("xssh picker error = %d, %q", exitCode, stderr.String())
 	}
+}
+
+// startCLITestAgent injects a real local agent server so end-to-end CLI
+// tests exercise the same IPC and pooled transport used by production. The
+// runtime directory is isolated per test to avoid cross-test clients.
+func startCLITestAgent(t *testing.T) func() {
+	t.Helper()
+	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+
+	runtime, err := clientagent.NewRuntime()
+	if err != nil {
+		t.Fatal(err)
+	}
+	listener, err := runtime.Listen()
+	if err != nil {
+		t.Fatal(err)
+	}
+	token, err := runtime.ReadToken()
+	if err != nil {
+		_ = runtime.Cleanup()
+		t.Fatal(err)
+	}
+	pool := clientagent.NewDefaultPool(time.Now, time.Minute)
+	ctx, cancel := context.WithCancel(context.Background())
+	serveDone := make(chan error, 1)
+	go func() {
+		serveDone <- clientagent.Serve(ctx, listener, token, pool)
+	}()
+
+	var stopOnce sync.Once
+	stop := func() {
+		stopOnce.Do(func() {
+			cancel()
+			select {
+			case err := <-serveDone:
+				if err != nil && !errors.Is(err, context.Canceled) {
+					t.Errorf("agent serve: %v", err)
+				}
+			case <-time.After(time.Second):
+				_ = runtime.Cleanup()
+				select {
+				case err := <-serveDone:
+					if err != nil && !errors.Is(err, context.Canceled) {
+						t.Errorf("agent serve after cleanup: %v", err)
+					}
+				case <-time.After(time.Second):
+					t.Errorf("agent server did not stop")
+				}
+			}
+			_ = runtime.Cleanup()
+		})
+	}
+	t.Cleanup(stop)
+	return stop
 }
 
 // cliTestSSHServer is a minimal in-process SSH server for CLI tests. It
@@ -941,6 +1276,7 @@ func TestRunCPEndToEnd(t *testing.T) {
 	if err := os.WriteFile(knownHosts, []byte(hosts.String()), 0o600); err != nil {
 		t.Fatal(err)
 	}
+	stopAgent := startCLITestAgent(t)
 
 	srcHost, srcPortStr, _ := net.SplitHostPort(srcSrv.addr)
 	srcPort, _ := strconv.Atoi(srcPortStr)
@@ -1088,8 +1424,9 @@ func TestRunCPEndToEnd(t *testing.T) {
 	assertCLIRemoteFile(t, dstSrv.root, "import/hello.txt", "new", 0o640)
 	assertCLIRemoteFile(t, dstSrv.root, "import/sub/deep.txt", "deep", 0o644)
 
-	// Every transport must be torn down: no SSH connection may outlive the
-	// cp invocations.
+	// Stop the intentionally injected agent before checking that its pooled
+	// SSH graphs have closed.
+	stopAgent()
 	waitForCLIConnectionsClosed(t, srcSrv)
 	waitForCLIConnectionsClosed(t, dstSrv)
 }
