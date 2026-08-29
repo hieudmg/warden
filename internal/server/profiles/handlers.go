@@ -516,13 +516,18 @@ func redactSSH(p model.SSHProfile) model.SSHConnection {
 }
 
 func dbProfileFromRequest(id int64, req model.DBConnectionRequest) (model.DBProfile, error) {
-	databases := req.Databases
-	if len(databases) == 0 {
-		if req.Database == "" {
+	databasesProvided := req.HasDatabasesField()
+	databaseProvided := req.HasDatabaseField()
+	databases := append([]model.DatabaseInfo(nil), req.Databases...)
+	if !databasesProvided {
+		if !databaseProvided || req.Database == "" {
 			return model.DBProfile{}, fmt.Errorf("%w: database or databases must be provided", store.ErrValidation)
 		}
 		databases = []model.DatabaseInfo{{Name: req.Database, IsDefault: true}}
-	} else if req.Database != "" {
+	} else if databaseProvided {
+		if len(databases) == 0 {
+			return model.DBProfile{}, fmt.Errorf("%w: database cannot be combined with an empty databases list", store.ErrValidation)
+		}
 		defaultName := ""
 		for _, database := range databases {
 			if database.IsDefault {

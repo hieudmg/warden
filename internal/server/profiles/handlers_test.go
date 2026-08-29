@@ -804,6 +804,48 @@ func TestCreateDBRejectsConflictingDatabaseFields(t *testing.T) {
 	}
 }
 
+func TestCreateDBRejectsDatabaseWithEmptyDatabasesList(t *testing.T) {
+	for _, databases := range []string{"[]", "null"} {
+		t.Run(databases, func(t *testing.T) {
+			mux, _, _ := newTestAPI(t)
+			body := fmt.Sprintf(`{"name":"conflict-empty","host":"db.invalid","port":3306,"username":"u","database":"main","databases":%s}`, databases)
+			rec := doRequest(t, mux, "POST", "/api/v1/db-connections", body)
+			if rec.Code != http.StatusBadRequest {
+				t.Fatalf("status = %d, want 400, body=%s", rec.Code, rec.Body.String())
+			}
+		})
+	}
+}
+
+func TestTransportDBOverSSHSelectsNamedDatabase(t *testing.T) {
+	mux, s, _ := newTestAPI(t)
+	target := createSSH(t, s, "named-jump", "[]")
+	db, err := s.CreateDB(context.Background(), model.DBProfile{
+		Name: "named-tunneled", Host: "db.invalid", Port: 3306, Username: "app",
+		Password: []byte("db-password"), Databases: []model.DatabaseInfo{
+			{Name: "main", IsDefault: true}, {Name: "audit"},
+		}, SSHConnectionID: target.ID,
+	})
+	if err != nil {
+		t.Fatalf("CreateDB: %v", err)
+	}
+
+	rec := doRequest(t, mux, "GET", fmt.Sprintf("/api/v1/transport/db/%d?database=audit", db.ID), "")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body=%s", rec.Code, rec.Body.String())
+	}
+	var bundle model.DBBundle
+	if err := json.Unmarshal(rec.Body.Bytes(), &bundle); err != nil {
+		t.Fatalf("decode transport response: %v", err)
+	}
+	if bundle.Database != "audit" {
+		t.Fatalf("database = %q, want audit", bundle.Database)
+	}
+	if bundle.SSH == nil || bundle.SSH.Target.Name != "named-jump" {
+		t.Fatalf("transport bundle ssh = %#v, want named-jump graph", bundle.SSH)
+	}
+}
+
 func TestGetDBReturnsDatabasesAndDefaultAlias(t *testing.T) {
 	mux, s, _ := newTestAPI(t)
 	created, err := s.CreateDB(context.Background(), model.DBProfile{

@@ -596,6 +596,19 @@ func TestSSHDependentsAndDeletionAllowed(t *testing.T) {
 	}
 }
 
+func TestDecodeDatabasesReadsLegacyJSONScalars(t *testing.T) {
+	for _, raw := range []string{"123", "true", "null"} {
+		databases, err := decodeDatabases(raw)
+		if err != nil {
+			t.Fatalf("decodeDatabases(%q): %v", raw, err)
+		}
+		want := []model.DatabaseInfo{{Name: raw, IsDefault: true}}
+		if !reflect.DeepEqual(databases, want) {
+			t.Errorf("decodeDatabases(%q) = %#v, want %#v", raw, databases, want)
+		}
+	}
+}
+
 func TestDBCreateGetUpdateListDelete(t *testing.T) {
 	s := newTestStore(t)
 	ctx := context.Background()

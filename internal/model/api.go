@@ -1,6 +1,10 @@
 package model
 
-import "time"
+import (
+	"bytes"
+	"encoding/json"
+	"time"
+)
 
 // SSHConnection is the redacted API representation of an SSH profile.
 // Secret values are never serialized; Has* booleans report presence so the
@@ -78,6 +82,43 @@ type DBConnectionRequest struct {
 	Databases       []DatabaseInfo `json:"databases"`
 	SSHConnectionID int64          `json:"ssh_connection_id"`
 	GroupID         int64          `json:"group_id"`
+
+	databaseFieldSet  bool
+	databasesFieldSet bool
+}
+
+// UnmarshalJSON records whether the compatibility fields were present while
+// retaining a plain slice for callers that construct requests in Go. The
+// nested decoder keeps decodeStrict's unknown-field guarantee even though this
+// type implements custom unmarshalling.
+func (r *DBConnectionRequest) UnmarshalJSON(data []byte) error {
+	type plain DBConnectionRequest
+	var decoded plain
+	decoder := json.NewDecoder(bytes.NewReader(data))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&decoded); err != nil {
+		return err
+	}
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(data, &fields); err != nil {
+		return err
+	}
+	*r = DBConnectionRequest(decoded)
+	_, r.databaseFieldSet = fields["database"]
+	_, r.databasesFieldSet = fields["databases"]
+	return nil
+}
+
+// HasDatabaseField reports whether database was present in decoded JSON or a
+// non-empty value was assigned by a Go caller.
+func (r DBConnectionRequest) HasDatabaseField() bool {
+	return r.databaseFieldSet || r.Database != ""
+}
+
+// HasDatabasesField reports whether databases was present in decoded JSON or
+// a non-nil slice was assigned by a Go caller.
+func (r DBConnectionRequest) HasDatabasesField() bool {
+	return r.databasesFieldSet || r.Databases != nil
 }
 
 // DependentsResponse lists profiles referencing a connection id. It is the

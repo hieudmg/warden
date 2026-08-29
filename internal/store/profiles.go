@@ -50,14 +50,28 @@ func decodeDatabases(raw string) ([]model.DatabaseInfo, error) {
 		return []model.DatabaseInfo{{Name: raw, IsDefault: true}}, nil
 	}
 
-	var databases []model.DatabaseInfo
-	if err := json.Unmarshal([]byte(trimmed), &databases); err != nil {
+	var value json.RawMessage
+	if err := json.Unmarshal([]byte(trimmed), &value); err != nil {
 		return nil, fmt.Errorf("decode databases: %w", err)
 	}
-	if err := validateDatabases(databases); err != nil {
-		return nil, err
+	switch value[0] {
+	case '[':
+		var databases []model.DatabaseInfo
+		if err := json.Unmarshal(value, &databases); err != nil {
+			return nil, fmt.Errorf("decode databases: %w", err)
+		}
+		if err := validateDatabases(databases); err != nil {
+			return nil, err
+		}
+		return databases, nil
+	case '{':
+		return nil, errors.New("decode databases: expected a JSON array")
+	default:
+		if err := validateDatabaseName(raw); err != nil {
+			return nil, fmt.Errorf("decode databases: %w", err)
+		}
+		return []model.DatabaseInfo{{Name: raw, IsDefault: true}}, nil
 	}
-	return databases, nil
 }
 
 // validateDatabases enforces the database-list invariant shared by storage,

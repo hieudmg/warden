@@ -6,6 +6,7 @@ import (
 	"crypto/rand"
 	"database/sql"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -329,6 +330,105 @@ func TestOpenMigratesLegacyDatabaseScalar(t *testing.T) {
 // group) survives. The prior schema is seeded from the embedded migration
 // files and schema_migrations is stamped at version 3 so Open applies only
 // 004.
+// TestOpenMigratesLegacyScalarVariants proves migration 005 upgrades JSON
+// scalar values that SQLite considers valid JSON, while leaving malformed
+// container-shaped values for the decoder to reject.
+func TestOpenMigratesLegacyScalarVariants(t *testing.T) {
+	var key [32]byte
+	if _, err := rand.Read(key[:]); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(t.TempDir(), "warden.db")
+	db, err := sql.Open("sqlite", sqliteDSN(path))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{
+		"001_initial.up.sql", "002_default_dir.up.sql", "003_groups.up.sql", "004_key_pairs.up.sql",
+	} {
+		statement, err := migrations.FS.ReadFile(name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := db.Exec(string(statement)); err != nil {
+			t.Fatalf("apply %s: %v", name, err)
+		}
+	}
+	if _, err := db.Exec("CREATE TABLE schema_migrations (version uint64, dirty bool)"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec("INSERT INTO schema_migrations (version, dirty) VALUES (4, false)"); err != nil {
+		t.Fatal(err)
+	}
+
+	type legacyRow struct {
+		name string
+		raw  string
+	}
+	rows := []legacyRow{
+		{name: "legacy-number", raw: "123"},
+		{name: "legacy-boolean", raw: "true"},
+		{name: "legacy-null", raw: "null"},
+		{name: "malformed-array", raw: "[broken"},
+		{name: "malformed-object", raw: "{broken"},
+	}
+	ts := time.Now().UTC().Format(time.RFC3339Nano)
+	for _, row := range rows {
+		if _, err := db.Exec(`INSERT INTO db_connections
+			(name, host, port, username, database, created_at, updated_at)
+			VALUES (?, 'db.invalid', 3306, 'user', ?, ?, ?)`, row.name, row.raw, ts, ts); err != nil {
+			t.Fatalf("insert %s: %v", row.name, err)
+		}
+	}
+	if err := db.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	s, err := Open(context.Background(), path, key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+
+	for _, row := range rows[:3] {
+		var raw string
+		if err := s.db.QueryRow("SELECT database FROM db_connections WHERE name=?", row.name).Scan(&raw); err != nil {
+			t.Fatalf("read %s: %v", row.name, err)
+		}
+		want := fmt.Sprintf(`[{"name":%q,"is_default":true}]`, row.raw)
+		if raw != want {
+			t.Errorf("migrated %s = %q, want %q", row.name, raw, want)
+		}
+		var id int64
+		if err := s.db.QueryRow("SELECT id FROM db_connections WHERE name=?", row.name).Scan(&id); err != nil {
+			t.Fatalf("read %s id: %v", row.name, err)
+		}
+		profile, err := s.GetDB(context.Background(), id)
+		if err != nil {
+			t.Fatalf("GetDB %s: %v", row.name, err)
+		}
+		if len(profile.Databases) != 1 || profile.Databases[0].Name != row.raw || !profile.Databases[0].IsDefault {
+			t.Errorf("decoded %s = %#v", row.name, profile.Databases)
+		}
+	}
+	for _, row := range rows[3:] {
+		var raw string
+		if err := s.db.QueryRow("SELECT database FROM db_connections WHERE name=?", row.name).Scan(&raw); err != nil {
+			t.Fatalf("read %s: %v", row.name, err)
+		}
+		if raw != row.raw {
+			t.Errorf("malformed %s migrated to %q", row.name, raw)
+		}
+		var id int64
+		if err := s.db.QueryRow("SELECT id FROM db_connections WHERE name=?", row.name).Scan(&id); err != nil {
+			t.Fatalf("read %s id: %v", row.name, err)
+		}
+		if _, err := s.GetDB(context.Background(), id); err == nil {
+			t.Errorf("GetDB accepted malformed %s value %q", row.name, row.raw)
+		}
+	}
+}
+
 func TestOpenMigratesSSHKeysToKeyPairReferences(t *testing.T) {
 	var key [32]byte
 	if _, err := rand.Read(key[:]); err != nil {
