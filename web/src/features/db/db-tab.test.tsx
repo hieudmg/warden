@@ -31,7 +31,7 @@ vi.mock("@/api/client", () => {
 const mockedAPI = vi.mocked(api)
 
 function db(id: number, name: string, overrides: Partial<DBConnection> = {}): DBConnection {
-  return {
+  const connection = {
     id,
     name,
     host: "127.0.0.1",
@@ -39,12 +39,17 @@ function db(id: number, name: string, overrides: Partial<DBConnection> = {}): DB
     username: "app",
     has_password: false,
     database: "warden",
+    databases: [{ name: "warden", is_default: true }],
     ssh_connection_id: 0,
     group_id: 0,
     created_at: "2026-08-24T00:00:00Z",
     updated_at: "2026-08-24T00:00:00Z",
     ...overrides,
   }
+  if (!("databases" in overrides)) {
+    connection.databases = [{ name: connection.database, is_default: true }]
+  }
+  return connection
 }
 
 function ssh(id: number, name: string): SSHConnection {
@@ -113,6 +118,22 @@ describe("DBTab", () => {
     expect(screen.getByRole("alert")).toHaveTextContent("Unable to load database connections")
     await user.click(screen.getByRole("button", { name: "Retry" }))
     expect(reload).toHaveBeenCalledTimes(1)
+  })
+
+  test("renders every database and marks the default", () => {
+    const connection = db(1, "db-1", {
+      database: "main",
+      databases: [
+        { name: "main", is_default: true },
+        { name: "audit", is_default: false },
+      ],
+    })
+    render(<DBTab resource={resource({ data: [connection] })} sshProfiles={[]} groups={[]} notify={notify} />)
+
+    const row = screen.getAllByRole("row")[1]
+    expect(within(row).getByText("main")).toBeInTheDocument()
+    expect(within(row).getByText("audit")).toBeInTheDocument()
+    expect(within(row).getByText("Default")).toBeInTheDocument()
   })
 
   test("renders row columns with Direct, named, and missing SSH values", () => {
@@ -191,7 +212,7 @@ describe("DBTab", () => {
     await user.type(within(dialog).getByLabelText("Name"), "db-1")
     await user.type(within(dialog).getByLabelText("Host"), "127.0.0.1")
     await user.type(within(dialog).getByLabelText("Username"), "app")
-    await user.type(within(dialog).getByLabelText("Database"), "warden")
+    await user.type(within(dialog).getByLabelText("Database 1"), "warden")
     await user.click(within(dialog).getByRole("button", { name: "Save" }))
 
     await waitFor(() => expect(mockedAPI.createDB).toHaveBeenCalledTimes(1))
@@ -202,6 +223,7 @@ describe("DBTab", () => {
       username: "app",
       password: null,
       database: "warden",
+      databases: [{ name: "warden", is_default: true }],
       ssh_connection_id: 0,
       group_id: 0,
     })
@@ -249,7 +271,7 @@ describe("DBTab", () => {
     await user.type(within(dialog).getByLabelText("Name"), "dup")
     await user.type(within(dialog).getByLabelText("Host"), "127.0.0.9")
     await user.type(within(dialog).getByLabelText("Username"), "app")
-    await user.type(within(dialog).getByLabelText("Database"), "warden")
+    await user.type(within(dialog).getByLabelText("Database 1"), "warden")
     await user.click(within(dialog).getByRole("button", { name: "Save" }))
 
     const alert = await within(dialog).findByRole("alert")
@@ -269,7 +291,7 @@ describe("DBTab", () => {
     await user.type(within(dialog).getByLabelText("Name"), "slow")
     await user.type(within(dialog).getByLabelText("Host"), "127.0.0.1")
     await user.type(within(dialog).getByLabelText("Username"), "app")
-    await user.type(within(dialog).getByLabelText("Database"), "warden")
+    await user.type(within(dialog).getByLabelText("Database 1"), "warden")
     await user.click(within(dialog).getByRole("button", { name: "Save" }))
 
     expect(mockedAPI.createDB).toHaveBeenCalledTimes(1)

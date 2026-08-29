@@ -17,7 +17,7 @@ function group(id: number, name: string): Group {
 }
 
 function db(id: number, name: string, overrides: Partial<DBConnection> = {}): DBConnection {
-  return {
+  const connection = {
     id,
     name,
     host: "127.0.0.1",
@@ -25,12 +25,17 @@ function db(id: number, name: string, overrides: Partial<DBConnection> = {}): DB
     username: "app",
     has_password: true,
     database: "warden",
+    databases: [{ name: "warden", is_default: true }],
     ssh_connection_id: 0,
     group_id: 0,
     created_at: "2026-08-24T00:00:00Z",
     updated_at: "2026-08-24T00:00:00Z",
     ...overrides,
   }
+  if (!("databases" in overrides)) {
+    connection.databases = [{ name: connection.database, is_default: true }]
+  }
+  return connection
 }
 
 function ssh(id: number, name: string, overrides: Partial<SSHConnection> = {}): SSHConnection {
@@ -64,19 +69,40 @@ describe("emptyDBForm", () => {
     expect(form.name).toBe("")
     expect(form.host).toBe("")
     expect(form.username).toBe("")
-    expect(form.database).toBe("")
+    expect(form.databases).toEqual([{ name: "", isDefault: true }])
     expect(form.groupID).toBe("0")
   })
 })
 
 describe("dbFormFromConnection", () => {
+  test("maps all databases and their default state", () => {
+    const form = dbFormFromConnection(db(1, "db-1", {
+      database: "main",
+      databases: [
+        { name: "main", is_default: true },
+        { name: "audit", is_default: false },
+      ],
+    }))
+    expect(form.databases).toEqual([
+      { name: "main", isDefault: true },
+      { name: "audit", isDefault: false },
+    ])
+  })
+
+  test("falls back to the legacy database field", () => {
+    const legacy = db(1, "db-1", { databases: undefined, database: "legacy" })
+    expect(dbFormFromConnection(legacy).databases).toEqual([
+      { name: "legacy", isDefault: true },
+    ])
+  })
+
   test("keeps non-secret values and stringifies the SSH ID", () => {
     const form = dbFormFromConnection(db(1, "db-1", { ssh_connection_id: 91 }))
     expect(form.name).toBe("db-1")
     expect(form.host).toBe("127.0.0.1")
     expect(form.port).toBe("3306")
     expect(form.username).toBe("app")
-    expect(form.database).toBe("warden")
+    expect(form.databases).toEqual([{ name: "warden", isDefault: true }])
     expect(form.sshConnectionID).toBe("91")
   })
 
@@ -90,6 +116,23 @@ describe("dbFormFromConnection", () => {
 })
 
 describe("toDBRequest", () => {
+  test("serializes all databases and the default compatibility alias", () => {
+    const form: DBFormState = {
+      ...emptyDBForm(),
+      databases: [
+        { name: "main", isDefault: true },
+        { name: "audit", isDefault: false },
+      ],
+    }
+    expect(toDBRequest(form)).toMatchObject({
+      database: "main",
+      databases: [
+        { name: "main", is_default: true },
+        { name: "audit", is_default: false },
+      ],
+    })
+  })
+
   test("serializes a blank password as null, never an empty string", () => {
     const form: DBFormState = {
       ...emptyDBForm(),
@@ -97,7 +140,7 @@ describe("toDBRequest", () => {
       host: "127.0.0.1",
       username: "app",
       password: "",
-      database: "warden",
+      databases: [{ name: "warden", isDefault: true }],
     }
     expect(toDBRequest(form)).toEqual({
       name: "db-1",
@@ -106,6 +149,7 @@ describe("toDBRequest", () => {
       username: "app",
       password: null,
       database: "warden",
+      databases: [{ name: "warden", is_default: true }],
       ssh_connection_id: 0,
       group_id: 0,
     })
@@ -160,6 +204,49 @@ describe("DBForm", () => {
     )
     return { onSubmit, onCancel }
   }
+
+  test("adds rows, changes the default, and removes a row", async () => {
+    const user = userEvent.setup()
+    const { onSubmit } = renderForm()
+
+    await user.type(screen.getByLabelText("Name"), "db-1")
+    await user.type(screen.getByLabelText("Host"), "127.0.0.1")
+    await user.type(screen.getByLabelText("Username"), "app")
+    expect(screen.getAllByRole("textbox", { name: /Database/ })).toHaveLength(1)
+    await user.click(screen.getByRole("button", { name: "Add database" }))
+    expect(screen.getAllByRole("textbox", { name: /Database/ })).toHaveLength(2)
+
+    await user.type(screen.getByRole("textbox", { name: "Database 1" }), "main")
+    await user.type(screen.getByRole("textbox", { name: "Database 2" }), "audit")
+    await user.click(screen.getByRole("radio", { name: "Default database 2" }))
+    expect(screen.getByRole("radio", { name: "Default database 1" })).not.toBeChecked()
+    expect(screen.getByRole("radio", { name: "Default database 2" })).toBeChecked()
+
+    await user.click(screen.getByRole("button", { name: "Remove database 1" }))
+    expect(screen.getAllByRole("textbox", { name: /Database/ })).toHaveLength(1)
+    expect(screen.getByRole("textbox", { name: "Database 1" })).toHaveValue("audit")
+
+    await user.click(screen.getByRole("button", { name: "Save" }))
+    expect(onSubmit).toHaveBeenCalledWith(expect.objectContaining({
+      database: "audit",
+      databases: [{ name: "audit", is_default: true }],
+    }))
+  })
+
+  test("blocks submission when database names are duplicated", async () => {
+    const user = userEvent.setup()
+    const { onSubmit } = renderForm()
+    await user.type(screen.getByLabelText("Name"), "db-1")
+    await user.type(screen.getByLabelText("Host"), "127.0.0.1")
+    await user.type(screen.getByLabelText("Username"), "app")
+    await user.click(screen.getByRole("button", { name: "Add database" }))
+    await user.type(screen.getByRole("textbox", { name: "Database 1" }), "main")
+    await user.type(screen.getByRole("textbox", { name: "Database 2" }), "main")
+    await user.click(screen.getByRole("button", { name: "Save" }))
+
+    expect(onSubmit).not.toHaveBeenCalled()
+    expect(screen.getByRole("alert")).toHaveTextContent("unique")
+  })
 
   test("shows Missing SSH #91 for a saved missing ID and preserves it on submit", async () => {
     const user = userEvent.setup()
@@ -234,7 +321,7 @@ describe("DBForm", () => {
     await user.type(screen.getByLabelText("Name"), "db-1")
     await user.type(screen.getByLabelText("Host"), "127.0.0.1")
     await user.type(screen.getByLabelText("Username"), "app")
-    await user.type(screen.getByLabelText("Database"), "warden")
+    await user.type(screen.getByLabelText("Database 1"), "warden")
     await user.click(screen.getByRole("combobox", { name: "SSH connection" }))
     await user.click(await screen.findByRole("option", { name: "jump-a — jump-a.example:22" }))
     await user.click(screen.getByRole("button", { name: "Save" }))
@@ -256,7 +343,7 @@ describe("DBForm", () => {
     await user.type(screen.getByLabelText("Name"), "db-1")
     await user.type(screen.getByLabelText("Host"), "127.0.0.1")
     await user.type(screen.getByLabelText("Username"), "app")
-    await user.type(screen.getByLabelText("Database"), "warden")
+    await user.type(screen.getByLabelText("Database 1"), "warden")
     await user.click(screen.getByRole("combobox", { name: "Group" }))
     await user.click(await screen.findByRole("option", { name: "prod" }))
     await user.click(screen.getByRole("button", { name: "Save" }))

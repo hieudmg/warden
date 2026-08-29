@@ -23,6 +23,11 @@ export interface SSHConnection {
   updated_at: string
 }
 
+export interface DatabaseInfo {
+  name: string
+  is_default: boolean
+}
+
 export interface DBConnection {
   id: number
   name: string
@@ -30,7 +35,10 @@ export interface DBConnection {
   port: number
   username: string
   has_password: boolean
+  /** Legacy compatibility alias for the default database. */
   database: string
+  /** Canonical ordered database list. Older responses may omit it. */
+  databases?: DatabaseInfo[]
   ssh_connection_id: number
   group_id: number
   group_name?: string
@@ -136,7 +144,9 @@ export interface DBConnectionRequest {
   port: number
   username: string
   password: string | null
+  /** Legacy compatibility alias for the default database. */
   database: string
+  databases: DatabaseInfo[]
   ssh_connection_id: number
   group_id: number
 }

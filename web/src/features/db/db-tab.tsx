@@ -1,6 +1,13 @@
 import { useRef, useState } from "react"
 import { api } from "@/api/client"
-import type { DBConnection, DBConnectionRequest, DependentsResponse, Group, SSHConnection } from "@/api/types"
+import type {
+  DBConnection,
+  DBConnectionRequest,
+  DatabaseInfo,
+  DependentsResponse,
+  Group,
+  SSHConnection,
+} from "@/api/types"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import {
@@ -51,6 +58,24 @@ function sshCell(connection: DBConnection, profiles: readonly SSHConnection[]): 
   if (connection.ssh_connection_id === 0) return "Direct"
   const profile = profiles.find(candidate => candidate.id === connection.ssh_connection_id)
   return profile ? profile.name : `Missing SSH #${connection.ssh_connection_id}`
+}
+
+function databaseEntries(connection: DBConnection): DatabaseInfo[] {
+  if (connection.databases && connection.databases.length > 0) return connection.databases
+  return [{ name: connection.database, is_default: true }]
+}
+
+function databaseCell(connection: DBConnection) {
+  return (
+    <div className="grid gap-1">
+      {databaseEntries(connection).map((database, index) => (
+        <div key={`${database.name}-${index}`} className="flex items-center gap-1.5">
+          <span>{database.name}</span>
+          {database.is_default && <Badge variant="secondary">Default</Badge>}
+        </div>
+      ))}
+    </div>
+  )
 }
 
 export function DBTab({ resource, sshProfiles, groups, notify }: DBTabProps) {
@@ -193,7 +218,7 @@ export function DBTab({ resource, sshProfiles, groups, notify }: DBTabProps) {
                     <span className="text-sm text-muted-foreground">None</span>
                   )}
                 </TableCell>
-                <TableCell>{connection.database}</TableCell>
+                <TableCell>{databaseCell(connection)}</TableCell>
                 <TableCell>{sshCell(connection, sshProfiles)}</TableCell>
                 <TableCell className="text-right">
                   <div className="flex justify-end gap-1">
