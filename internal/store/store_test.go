@@ -233,6 +233,79 @@ func TestDBSSHReferenceHasNoForeignKey(t *testing.T) {
 	}
 }
 
+// TestOpenMigratesLegacyDatabaseScalar proves migration 005 upgrades the
+// pre-list database column in place without changing the row identity.
+func TestOpenMigratesLegacyDatabaseScalar(t *testing.T) {
+	var key [32]byte
+	if _, err := rand.Read(key[:]); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(t.TempDir(), "warden.db")
+	db, err := sql.Open("sqlite", sqliteDSN(path))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{
+		"001_initial.up.sql", "002_default_dir.up.sql", "003_groups.up.sql", "004_key_pairs.up.sql",
+	} {
+		statement, err := migrations.FS.ReadFile(name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := db.Exec(string(statement)); err != nil {
+			t.Fatalf("apply %s: %v", name, err)
+		}
+	}
+	if _, err := db.Exec("CREATE TABLE schema_migrations (version uint64, dirty bool)"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec("INSERT INTO schema_migrations (version, dirty) VALUES (4, false)"); err != nil {
+		t.Fatal(err)
+	}
+
+	ts := time.Now().UTC().Format(time.RFC3339Nano)
+	result, err := db.Exec(`INSERT INTO db_connections
+		(name, host, port, username, database, created_at, updated_at)
+		VALUES ('legacy-profile', 'db.invalid', 3306, 'user', 'legacy', ?, ?)`, ts, ts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	legacyID, err := result.LastInsertId()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	s, err := Open(context.Background(), path, key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+
+	var id int64
+	var raw string
+	if err := s.db.QueryRow("SELECT id, database FROM db_connections WHERE name=?", "legacy-profile").Scan(&id, &raw); err != nil {
+		t.Fatal(err)
+	}
+	want := `[{"name":"legacy","is_default":true}]`
+	if id != legacyID {
+		t.Fatalf("migrated id = %d, want unchanged id %d", id, legacyID)
+	}
+	if raw != want {
+		t.Fatalf("migrated database = %q, want %q", raw, want)
+	}
+
+	profile, err := s.GetDB(context.Background(), legacyID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(profile.Databases) != 1 || profile.Databases[0].Name != "legacy" || !profile.Databases[0].IsDefault {
+		t.Fatalf("migrated profile databases = %#v", profile.Databases)
+	}
+}
+
 // TestOpenMigratesSSHKeysToKeyPairReferences proves migration 004 rebuilds
 // ssh_connections: legacy per-connection private-key ciphertext columns are
 // dropped (key material is intentionally destroyed), key_pair_id defaults to
