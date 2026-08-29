@@ -58,7 +58,7 @@ func createDB(t *testing.T, s *store.Store, name string, sshID int64) model.DBPr
 	t.Helper()
 	p, err := s.CreateDB(context.Background(), model.DBProfile{
 		Name: name, Host: name + ".invalid", Port: 3306, Username: "app",
-		Password: []byte("dbpw-" + name), Database: "appdb", SSHConnectionID: sshID,
+		Password: []byte("dbpw-" + name), Databases: []model.DatabaseInfo{{Name: "appdb", IsDefault: true}}, SSHConnectionID: sshID,
 	})
 	if err != nil {
 		t.Fatalf("CreateDB(%s): %v", name, err)

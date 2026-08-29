@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
@@ -265,17 +266,11 @@ func (h *Handler) createDB(w http.ResponseWriter, r *http.Request) {
 		writeDecodeError(w, err)
 		return
 	}
-	p := model.DBProfile{
-		Name:            req.Name,
-		Host:            req.Host,
-		Port:            req.Port,
-		Username:        req.Username,
-		Database:        req.Database,
-		SSHConnectionID: req.SSHConnectionID,
-		GroupID:         req.GroupID,
-	}
-	if req.Password != nil {
-		p.Password = []byte(*req.Password)
+	p, err := dbProfileFromRequest(0, req)
+	if err != nil {
+		h.record(r, "db_connection.create", "db_connection", "", "failure", err, nil)
+		writeStoreError(w, err)
+		return
 	}
 
 	created, err := h.store.CreateDB(r.Context(), p)
@@ -321,18 +316,11 @@ func (h *Handler) updateDB(w http.ResponseWriter, r *http.Request) {
 		writeDecodeError(w, err)
 		return
 	}
-	p := model.DBProfile{
-		ID:              id,
-		Name:            req.Name,
-		Host:            req.Host,
-		Port:            req.Port,
-		Username:        req.Username,
-		Database:        req.Database,
-		SSHConnectionID: req.SSHConnectionID,
-		GroupID:         req.GroupID,
-	}
-	if req.Password != nil {
-		p.Password = []byte(*req.Password)
+	p, err := dbProfileFromRequest(id, req)
+	if err != nil {
+		h.record(r, "db_connection.update", "db_connection", strconv.FormatInt(id, 10), "failure", err, nil)
+		writeStoreError(w, err)
+		return
 	}
 
 	if err := h.store.UpdateDB(r.Context(), p); err != nil {
@@ -524,7 +512,53 @@ func redactSSH(p model.SSHProfile) model.SSHConnection {
 	}
 }
 
+func dbProfileFromRequest(id int64, req model.DBConnectionRequest) (model.DBProfile, error) {
+	databases := req.Databases
+	if len(databases) == 0 {
+		if req.Database == "" {
+			return model.DBProfile{}, fmt.Errorf("%w: database or databases must be provided", store.ErrValidation)
+		}
+		databases = []model.DatabaseInfo{{Name: req.Database, IsDefault: true}}
+	} else if req.Database != "" {
+		defaultName := ""
+		for _, database := range databases {
+			if database.IsDefault {
+				if defaultName != "" {
+					return model.DBProfile{}, fmt.Errorf("%w: database alias conflicts with multiple defaults", store.ErrValidation)
+				}
+				defaultName = database.Name
+			}
+		}
+		if defaultName == "" || req.Database != defaultName {
+			return model.DBProfile{}, fmt.Errorf("%w: database must match the default database entry", store.ErrValidation)
+		}
+	}
+
+	p := model.DBProfile{
+		ID:              id,
+		Name:            req.Name,
+		Host:            req.Host,
+		Port:            req.Port,
+		Username:        req.Username,
+		Databases:       append([]model.DatabaseInfo(nil), databases...),
+		SSHConnectionID: req.SSHConnectionID,
+		GroupID:         req.GroupID,
+	}
+	if req.Password != nil {
+		p.Password = []byte(*req.Password)
+	}
+	return p, nil
+}
+
 func redactDB(p model.DBProfile) model.DBConnection {
+	databases := append([]model.DatabaseInfo(nil), p.Databases...)
+	defaultName := ""
+	for _, database := range databases {
+		if database.IsDefault {
+			defaultName = database.Name
+			break
+		}
+	}
 	return model.DBConnection{
 		ID:              p.ID,
 		Name:            p.Name,
@@ -532,7 +566,8 @@ func redactDB(p model.DBProfile) model.DBConnection {
 		Port:            p.Port,
 		Username:        p.Username,
 		HasPassword:     len(p.Password) > 0,
-		Database:        p.Database,
+		Database:        defaultName,
+		Databases:       databases,
 		SSHConnectionID: p.SSHConnectionID,
 		GroupID:         p.GroupID,
 		GroupName:       p.GroupName,

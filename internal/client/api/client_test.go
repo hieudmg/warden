@@ -38,6 +38,7 @@ const dbConnJSON = `{
 	"username": "reader",
 	"has_password": true,
 	"database": "warehouse",
+	"databases": [{"name":"warehouse","is_default":true},{"name":"archive","is_default":false}],
 	"ssh_connection_id": 0,
 	"created_at": "2026-08-21T00:00:00Z",
 	"updated_at": "2026-08-21T00:00:00Z"
@@ -142,7 +143,7 @@ func TestListDBAndGetDB(t *testing.T) {
 		t.Fatalf("ListDB = %+v, err = %v", dbs, err)
 	}
 	db, err := cl.GetDB(context.Background(), 3)
-	if err != nil || db.Database != "warehouse" {
+	if err != nil || db.Database != "warehouse" || len(db.Databases) != 2 || db.Databases[1].Name != "archive" {
 		t.Fatalf("GetDB = %+v, err = %v", db, err)
 	}
 	want := []string{"GET /api/v1/db-connections", "GET /api/v1/db-connections/3"}

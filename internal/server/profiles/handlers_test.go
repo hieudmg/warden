@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"reflect"
 	"strconv"
 	"strings"
 	"testing"
@@ -688,6 +689,96 @@ func TestTransportDBOverSSH(t *testing.T) {
 	}
 	if string(bundle.SSH.Target.Password) != "pw-jump" {
 		t.Errorf("ssh target password = %q, want decrypted pw-jump", bundle.SSH.Target.Password)
+	}
+}
+
+func TestCreateDBAcceptsDatabasesAndReturnsLegacyDefaultAlias(t *testing.T) {
+	mux, s, _ := newTestAPI(t)
+	body := `{"name":"multi","host":"db.invalid","port":3306,"username":"u","databases":[{"name":"main","is_default":true},{"name":"audit","is_default":false}]}`
+	rec := doRequest(t, mux, "POST", "/api/v1/db-connections", body)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("status = %d, body=%s", rec.Code, rec.Body.String())
+	}
+	var got model.DBConnection
+	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if got.Database != "main" {
+		t.Errorf("database alias = %q, want main", got.Database)
+	}
+	want := []model.DatabaseInfo{{Name: "main", IsDefault: true}, {Name: "audit", IsDefault: false}}
+	if !reflect.DeepEqual(got.Databases, want) {
+		t.Errorf("databases = %+v, want %+v", got.Databases, want)
+	}
+	stored, err := s.GetDB(context.Background(), got.ID)
+	if err != nil {
+		t.Fatalf("GetDB: %v", err)
+	}
+	if !reflect.DeepEqual(stored.Databases, want) {
+		t.Errorf("stored databases = %+v, want %+v", stored.Databases, want)
+	}
+}
+
+func TestCreateDBAcceptsLegacyDatabaseAndUpgradesStoredValue(t *testing.T) {
+	mux, s, path := newTestAPI(t)
+	body := `{"name":"legacy","host":"db.invalid","port":3306,"username":"u","database":"main"}`
+	rec := doRequest(t, mux, "POST", "/api/v1/db-connections", body)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("status = %d, body=%s", rec.Code, rec.Body.String())
+	}
+	var got model.DBConnection
+	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if got.Database != "main" || !reflect.DeepEqual(got.Databases, []model.DatabaseInfo{{Name: "main", IsDefault: true}}) {
+		t.Errorf("response = %+v, want legacy alias and one default", got)
+	}
+	var raw string
+	if err := rawDB(t, path).QueryRow("SELECT database FROM db_connections WHERE id=?", got.ID).Scan(&raw); err != nil {
+		t.Fatalf("read stored database: %v", err)
+	}
+	if raw != `[{"name":"main","is_default":true}]` {
+		t.Errorf("stored database = %q, want canonical JSON", raw)
+	}
+}
+
+func TestCreateDBRejectsConflictingDatabaseFields(t *testing.T) {
+	mux, _, _ := newTestAPI(t)
+	body := `{"name":"conflict","host":"db.invalid","port":3306,"username":"u","database":"main","databases":[{"name":"audit","is_default":true}]}`
+	rec := doRequest(t, mux, "POST", "/api/v1/db-connections", body)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400, body=%s", rec.Code, rec.Body.String())
+	}
+	var errBody struct {
+		Code string `json:"code"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &errBody); err != nil {
+		t.Fatalf("decode error response: %v", err)
+	}
+	if errBody.Code != "validation_error" {
+		t.Errorf("error code = %q, want validation_error", errBody.Code)
+	}
+}
+
+func TestGetDBReturnsDatabasesAndDefaultAlias(t *testing.T) {
+	mux, s, _ := newTestAPI(t)
+	created, err := s.CreateDB(context.Background(), model.DBProfile{
+		Name: "multi", Host: "db.invalid", Port: 3306, Username: "u",
+		Databases: []model.DatabaseInfo{{Name: "main", IsDefault: true}, {Name: "audit"}},
+	})
+	if err != nil {
+		t.Fatalf("CreateDB: %v", err)
+	}
+	rec := doRequest(t, mux, "GET", fmt.Sprintf("/api/v1/db-connections/%d", created.ID), "")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body=%s", rec.Code, rec.Body.String())
+	}
+	var got model.DBConnection
+	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if got.Database != "main" || len(got.Databases) != 2 || got.Databases[0].Name != "main" || !got.Databases[0].IsDefault {
+		t.Errorf("response = %+v, want default alias and database list", got)
 	}
 }
 
