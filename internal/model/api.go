@@ -30,18 +30,19 @@ type SSHConnection struct {
 
 // DBConnection is the redacted API representation of a DB profile.
 type DBConnection struct {
-	ID              int64     `json:"id"`
-	Name            string    `json:"name"`
-	Host            string    `json:"host"`
-	Port            int       `json:"port"`
-	Username        string    `json:"username"`
-	HasPassword     bool      `json:"has_password"`
-	Database        string    `json:"database"`
-	SSHConnectionID int64     `json:"ssh_connection_id"`
-	GroupID         int64     `json:"group_id"`
-	GroupName       string    `json:"group_name,omitempty"`
-	CreatedAt       time.Time `json:"created_at"`
-	UpdatedAt       time.Time `json:"updated_at"`
+	ID              int64          `json:"id"`
+	Name            string         `json:"name"`
+	Host            string         `json:"host"`
+	Port            int            `json:"port"`
+	Username        string         `json:"username"`
+	HasPassword     bool           `json:"has_password"`
+	Database        string         `json:"database"`
+	Databases       []DatabaseInfo `json:"databases"`
+	SSHConnectionID int64          `json:"ssh_connection_id"`
+	GroupID         int64          `json:"group_id"`
+	GroupName       string         `json:"group_name,omitempty"`
+	CreatedAt       time.Time      `json:"created_at"`
+	UpdatedAt       time.Time      `json:"updated_at"`
 }
 
 // SSHConnectionRequest is the write payload for creating/updating an SSH
@@ -68,14 +69,15 @@ type SSHConnectionRequest struct {
 
 // DBConnectionRequest is the write payload for a DB profile.
 type DBConnectionRequest struct {
-	Name            string  `json:"name"`
-	Host            string  `json:"host"`
-	Port            int     `json:"port"`
-	Username        string  `json:"username"`
-	Password        *string `json:"password"`
-	Database        string  `json:"database"`
-	SSHConnectionID int64   `json:"ssh_connection_id"`
-	GroupID         int64   `json:"group_id"`
+	Name            string         `json:"name"`
+	Host            string         `json:"host"`
+	Port            int            `json:"port"`
+	Username        string         `json:"username"`
+	Password        *string        `json:"password"`
+	Database        string         `json:"database"`
+	Databases       []DatabaseInfo `json:"databases"`
+	SSHConnectionID int64          `json:"ssh_connection_id"`
+	GroupID         int64          `json:"group_id"`
 }
 
 // DependentsResponse lists profiles referencing a connection id. It is the

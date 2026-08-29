@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"reflect"
 	"strconv"
 	"strings"
 	"testing"
@@ -31,12 +32,14 @@ func SSHProfileForTest(name string, jumpIDs string) model.SSHProfile {
 // DBProfileForTest builds a valid DB profile.
 func DBProfileForTest(name string, sshConnectionID int64) model.DBProfile {
 	return model.DBProfile{
-		Name:            name,
-		Host:            "db.invalid",
-		Port:            3306,
-		Username:        "app",
-		Password:        []byte("dbsecret"),
-		Database:        "appdb",
+		Name:     name,
+		Host:     "db.invalid",
+		Port:     3306,
+		Username: "app",
+		Password: []byte("dbsecret"),
+		Databases: []model.DatabaseInfo{
+			{Name: "appdb", IsDefault: true},
+		},
 		SSHConnectionID: sshConnectionID,
 	}
 }
@@ -609,7 +612,7 @@ func TestDBCreateGetUpdateListDelete(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetDB: %v", err)
 	}
-	if string(got.Password) != "dbsecret" || got.Database != "appdb" {
+	if string(got.Password) != "dbsecret" || !reflect.DeepEqual(got.Databases, []model.DatabaseInfo{{Name: "appdb", IsDefault: true}}) {
 		t.Errorf("GetDB round trip mismatch: %+v", got)
 	}
 
@@ -864,5 +867,103 @@ func TestDBGroupOrphanedReferenceTolerated(t *testing.T) {
 	}
 	if got.GroupID != 999999 || got.GroupName != "" {
 		t.Errorf("group = %d/%q, want 999999/\"\"", got.GroupID, got.GroupName)
+	}
+}
+
+func TestCreateDBStoresCanonicalDatabaseList(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	p, err := s.CreateDB(ctx, model.DBProfile{
+		Name: "multi", Host: "db.invalid", Port: 3306, Username: "app",
+		Databases: []model.DatabaseInfo{
+			{Name: "app", IsDefault: true}, {Name: "audit"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("CreateDB: %v", err)
+	}
+	var raw string
+	if err := s.db.QueryRowContext(ctx, "SELECT database FROM db_connections WHERE id=?", p.ID).Scan(&raw); err != nil {
+		t.Fatalf("read stored databases: %v", err)
+	}
+	if raw != `[{"name":"app","is_default":true},{"name":"audit","is_default":false}]` {
+		t.Fatalf("stored database = %q", raw)
+	}
+}
+
+func TestGetDBReadsLegacyScalarAsDefault(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	ts := nowUTC()
+	result, err := s.db.ExecContext(ctx, `
+		INSERT INTO db_connections
+			(name, host, port, username, database, ssh_connection_id, group_id, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		"legacy", "db.invalid", 3306, "app", "legacy", 0, 0, ts, ts)
+	if err != nil {
+		t.Fatalf("insert legacy DB: %v", err)
+	}
+	id, err := result.LastInsertId()
+	if err != nil {
+		t.Fatalf("legacy DB id: %v", err)
+	}
+
+	got, err := s.GetDB(ctx, id)
+	if err != nil {
+		t.Fatalf("GetDB: %v", err)
+	}
+	want := []model.DatabaseInfo{{Name: "legacy", IsDefault: true}}
+	if !reflect.DeepEqual(got.Databases, want) {
+		t.Errorf("Databases = %+v, want %+v", got.Databases, want)
+	}
+}
+
+func TestGetDBRejectsMalformedDatabaseJSON(t *testing.T) {
+	for i, raw := range []string{`[{"name":"legacy"}`, `{"name":"legacy"}`, "legacy\n"} {
+		t.Run(fmt.Sprintf("malformed-%d", i), func(t *testing.T) {
+			s := newTestStore(t)
+			ctx := context.Background()
+			ts := nowUTC()
+			result, err := s.db.ExecContext(ctx, `
+				INSERT INTO db_connections
+					(name, host, port, username, database, ssh_connection_id, group_id, created_at, updated_at)
+				VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+				fmt.Sprintf("malformed-%d", i), "db.invalid", 3306, "app", raw, 0, 0, ts, ts)
+			if err != nil {
+				t.Fatalf("insert malformed DB: %v", err)
+			}
+			id, err := result.LastInsertId()
+			if err != nil {
+				t.Fatalf("malformed DB id: %v", err)
+			}
+			if _, err := s.GetDB(ctx, id); err == nil {
+				t.Fatalf("GetDB accepted malformed database JSON %q", raw)
+			}
+		})
+	}
+}
+
+func TestCreateDBRejectsInvalidDatabaseList(t *testing.T) {
+	cases := []struct {
+		name      string
+		databases []model.DatabaseInfo
+	}{
+		{"empty", nil},
+		{"no-default", []model.DatabaseInfo{{Name: "app"}}},
+		{"two-defaults", []model.DatabaseInfo{{Name: "app", IsDefault: true}, {Name: "audit", IsDefault: true}}},
+		{"duplicate", []model.DatabaseInfo{{Name: "app", IsDefault: true}, {Name: "app"}}},
+		{"slash", []model.DatabaseInfo{{Name: "app/db", IsDefault: true}}},
+		{"control", []model.DatabaseInfo{{Name: "app\n", IsDefault: true}}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			s := newTestStore(t)
+			_, err := s.CreateDB(context.Background(), model.DBProfile{
+				Name: tc.name, Host: "db.invalid", Port: 3306, Username: "app", Databases: tc.databases,
+			})
+			if !errors.Is(err, ErrValidation) {
+				t.Fatalf("CreateDB error = %v, want ErrValidation", err)
+			}
+		})
 	}
 }

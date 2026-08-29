@@ -40,6 +40,13 @@ type SSHProfile struct {
 	UpdatedAt  time.Time
 }
 
+// DatabaseInfo identifies one database available through a DB connection
+// profile. The connection credentials are shared by every entry in the list.
+type DatabaseInfo struct {
+	Name      string `json:"name"`
+	IsDefault bool   `json:"is_default"`
+}
+
 // DBProfile is the domain value for a MySQL/MariaDB connection profile.
 // SSHConnectionID is 0 when the connection is direct and otherwise references
 // an ssh_connections row. It is deliberately not a foreign key so SSH
@@ -52,7 +59,7 @@ type DBProfile struct {
 	Port            int
 	Username        string
 	Password        []byte
-	Database        string
+	Databases       []DatabaseInfo
 	SSHConnectionID int64
 	GroupID         int64
 	GroupName       string

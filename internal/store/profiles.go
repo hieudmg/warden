@@ -17,6 +17,100 @@ import (
 
 var connectionNameRe = regexp.MustCompile(`^[A-Za-z0-9._-]{1,100}$`)
 
+// encodeDatabases validates and serializes a DB profile's database list. The
+// JSON is stored in the existing database column so old rows can be upgraded
+// without changing row ids or secret AAD.
+func encodeDatabases(databases []model.DatabaseInfo) (string, error) {
+	if err := validateDatabases(databases); err != nil {
+		return "", err
+	}
+	encoded, err := json.Marshal(databases)
+	if err != nil {
+		return "", fmt.Errorf("encode databases: %w", err)
+	}
+	return string(encoded), nil
+}
+
+// decodeDatabases reads the canonical JSON list and the legacy scalar shape.
+// A valid non-JSON database name is treated as one default entry; malformed
+// JSON and invalid names are rejected rather than selecting a database.
+func decodeDatabases(raw string) ([]model.DatabaseInfo, error) {
+	trimmed := strings.TrimSpace(raw)
+	if trimmed == "" {
+		return nil, errors.New("database list must not be empty")
+	}
+
+	if !json.Valid([]byte(trimmed)) {
+		if strings.HasPrefix(trimmed, "[") || strings.HasPrefix(trimmed, "{") {
+			return nil, errors.New("decode databases: malformed JSON")
+		}
+		if err := validateDatabaseName(raw); err != nil {
+			return nil, fmt.Errorf("decode databases: %w", err)
+		}
+		return []model.DatabaseInfo{{Name: raw, IsDefault: true}}, nil
+	}
+
+	var databases []model.DatabaseInfo
+	if err := json.Unmarshal([]byte(trimmed), &databases); err != nil {
+		return nil, fmt.Errorf("decode databases: %w", err)
+	}
+	if err := validateDatabases(databases); err != nil {
+		return nil, err
+	}
+	return databases, nil
+}
+
+// validateDatabases enforces the database-list invariant shared by storage,
+// API, and transport resolution.
+func validateDatabases(databases []model.DatabaseInfo) error {
+	if len(databases) == 0 {
+		return errors.New("database list must contain at least one entry")
+	}
+
+	seen := make(map[string]struct{}, len(databases))
+	defaults := 0
+	for _, database := range databases {
+		if err := validateDatabaseName(database.Name); err != nil {
+			return err
+		}
+		if _, ok := seen[database.Name]; ok {
+			return fmt.Errorf("database name %q is duplicated", database.Name)
+		}
+		seen[database.Name] = struct{}{}
+		if database.IsDefault {
+			defaults++
+		}
+	}
+	if defaults != 1 {
+		return fmt.Errorf("database list must contain exactly one default, got %d", defaults)
+	}
+	return nil
+}
+
+func validateDatabaseName(name string) error {
+	if name == "" || strings.TrimSpace(name) == "" {
+		return errors.New("database name must not be empty")
+	}
+	for _, r := range name {
+		if r == '/' || r == 0 || r < 0x20 || r == 0x7f {
+			return fmt.Errorf("database name %q must not contain '/', control characters, or NUL", name)
+		}
+	}
+	return nil
+}
+
+func defaultDatabase(databases []model.DatabaseInfo) (string, error) {
+	if err := validateDatabases(databases); err != nil {
+		return "", err
+	}
+	for _, database := range databases {
+		if database.IsDefault {
+			return database.Name, nil
+		}
+	}
+	return "", errors.New("database list has no default")
+}
+
 // validateJumpIDs verifies s is a syntactically valid JSON array of integer
 // IDs. It does not check whether referenced ids exist: logical resolution is
 // deferred to transport-query time.
@@ -479,6 +573,10 @@ func (s *Store) CreateDB(ctx context.Context, p model.DBProfile) (model.DBProfil
 	if err := validateDBMetadata(p); err != nil {
 		return model.DBProfile{}, fmt.Errorf("%w: %v", ErrValidation, err)
 	}
+	databases, err := encodeDatabases(p.Databases)
+	if err != nil {
+		return model.DBProfile{}, fmt.Errorf("%w: %v", ErrValidation, err)
+	}
 
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
@@ -495,7 +593,7 @@ func (s *Store) CreateDB(ctx context.Context, p model.DBProfile) (model.DBProfil
 		INSERT INTO db_connections
 			(name, host, port, username, database, ssh_connection_id, group_id, created_at, updated_at)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		p.Name, p.Host, p.Port, p.Username, p.Database, p.SSHConnectionID, p.GroupID, ts, ts)
+		p.Name, p.Host, p.Port, p.Username, databases, p.SSHConnectionID, p.GroupID, ts, ts)
 	if err != nil {
 		if isUniqueViolation(err) {
 			return model.DBProfile{}, ErrDuplicate
@@ -538,9 +636,10 @@ func (s *Store) GetDB(ctx context.Context, id int64) (model.DBProfile, error) {
 
 	var p model.DBProfile
 	var password []byte
+	var storedDatabases string
 	var createdAt, updatedAt string
 	err := row.Scan(&p.ID, &p.Name, &p.Host, &p.Port, &p.Username, &password,
-		&p.Database, &p.SSHConnectionID, &p.GroupID, &p.GroupName, &createdAt, &updatedAt)
+		&storedDatabases, &p.SSHConnectionID, &p.GroupID, &p.GroupName, &createdAt, &updatedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return model.DBProfile{}, ErrNotFound
 	}
@@ -548,6 +647,9 @@ func (s *Store) GetDB(ctx context.Context, id int64) (model.DBProfile, error) {
 		return model.DBProfile{}, fmt.Errorf("scan db_connection: %w", err)
 	}
 
+	if p.Databases, err = decodeDatabases(storedDatabases); err != nil {
+		return model.DBProfile{}, fmt.Errorf("decode databases for %d: %w", id, err)
+	}
 	if p.Password, err = s.decryptSecret(dbAAD(id, "password"), password); err != nil {
 		return model.DBProfile{}, fmt.Errorf("decrypt password for %d: %w", id, err)
 	}
@@ -598,6 +700,10 @@ func (s *Store) UpdateDB(ctx context.Context, p model.DBProfile) error {
 	if err := validateDBMetadata(p); err != nil {
 		return fmt.Errorf("%w: %v", ErrValidation, err)
 	}
+	databases, err := encodeDatabases(p.Databases)
+	if err != nil {
+		return fmt.Errorf("%w: %v", ErrValidation, err)
+	}
 
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
@@ -614,7 +720,7 @@ func (s *Store) UpdateDB(ctx context.Context, p model.DBProfile) error {
 		UPDATE db_connections
 		SET name=?, host=?, port=?, username=?, database=?, ssh_connection_id=?, group_id=?, updated_at=?
 		WHERE id=?`,
-		p.Name, p.Host, p.Port, p.Username, p.Database, p.SSHConnectionID, p.GroupID, ts, p.ID)
+		p.Name, p.Host, p.Port, p.Username, databases, p.SSHConnectionID, p.GroupID, ts, p.ID)
 	if err != nil {
 		if isUniqueViolation(err) {
 			return ErrDuplicate
@@ -724,6 +830,9 @@ func validateDBMetadata(p model.DBProfile) error {
 	}
 	if strings.TrimSpace(p.Username) == "" {
 		return errors.New("db username must not be empty")
+	}
+	if err := validateDatabases(p.Databases); err != nil {
+		return err
 	}
 	if p.SSHConnectionID < 0 {
 		return fmt.Errorf("db ssh_connection_id %d must not be negative", p.SSHConnectionID)
