@@ -174,7 +174,7 @@ func TestGroupDependents(t *testing.T) {
 	}
 	if _, err := s.CreateDB(ctx, model.DBProfile{
 		Name: "app", Host: "db.invalid", Port: 3306, Username: "u",
-		Database: "appdb", GroupID: g.ID,
+		Databases: []model.DatabaseInfo{{Name: "appdb", IsDefault: true}}, GroupID: g.ID,
 	}); err != nil {
 		t.Fatalf("CreateDB: %v", err)
 	}
@@ -206,7 +206,7 @@ func TestGroupDeleteClearsAssignments(t *testing.T) {
 	}
 	db, err := s.CreateDB(ctx, model.DBProfile{
 		Name: "app", Host: "db.invalid", Port: 3306, Username: "u",
-		Database: "appdb", GroupID: g.ID,
+		Databases: []model.DatabaseInfo{{Name: "appdb", IsDefault: true}}, GroupID: g.ID,
 	})
 	if err != nil {
 		t.Fatalf("CreateDB: %v", err)

@@ -665,6 +665,50 @@ func TestTransportSSHNotFound(t *testing.T) {
 	}
 }
 
+func TestTransportDBSelectsNamedDatabase(t *testing.T) {
+	mux, s, _ := newTestAPI(t)
+	dbp, err := s.CreateDB(context.Background(), model.DBProfile{
+		Name: "multi", Host: "db.invalid", Port: 3306, Username: "app",
+		Password: []byte("db-password"), Databases: []model.DatabaseInfo{
+			{Name: "main", IsDefault: true}, {Name: "audit"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("CreateDB: %v", err)
+	}
+
+	rec := doRequest(t, mux, "GET", fmt.Sprintf("/api/v1/transport/db/%d?database=audit", dbp.ID), "")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body=%s", rec.Code, rec.Body.String())
+	}
+	var bundle model.DBBundle
+	if err := json.Unmarshal(rec.Body.Bytes(), &bundle); err != nil {
+		t.Fatalf("decode transport response: %v", err)
+	}
+	if bundle.Database != "audit" {
+		t.Fatalf("database = %q, want audit", bundle.Database)
+	}
+}
+
+func TestTransportDBRejectsUnknownDatabase(t *testing.T) {
+	mux, s, _ := newTestAPI(t)
+	dbp := createDB(t, s, "app", 0)
+
+	rec := doRequest(t, mux, "GET", fmt.Sprintf("/api/v1/transport/db/%d?database=missing", dbp.ID), "")
+	if rec.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("status = %d, want 422, body=%s", rec.Code, rec.Body.String())
+	}
+	var response struct {
+		Code string `json:"code"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &response); err != nil {
+		t.Fatalf("decode error response: %v", err)
+	}
+	if response.Code != "validation_error" {
+		t.Fatalf("error code = %q, want validation_error", response.Code)
+	}
+}
+
 func TestTransportDBOverSSH(t *testing.T) {
 	mux, s, _ := newTestAPI(t)
 	target := createSSH(t, s, "jump", "[]")
@@ -720,7 +764,7 @@ func TestCreateDBAcceptsDatabasesAndReturnsLegacyDefaultAlias(t *testing.T) {
 }
 
 func TestCreateDBAcceptsLegacyDatabaseAndUpgradesStoredValue(t *testing.T) {
-	mux, s, path := newTestAPI(t)
+	mux, _, path := newTestAPI(t)
 	body := `{"name":"legacy","host":"db.invalid","port":3306,"username":"u","database":"main"}`
 	rec := doRequest(t, mux, "POST", "/api/v1/db-connections", body)
 	if rec.Code != http.StatusCreated {

@@ -140,6 +140,23 @@ func runSSH(args []string, configPath string, configPathSet bool, stdout, stderr
 	return 1
 }
 
+func parseDBReference(raw string) (profileName, databaseName string, err error) {
+	if raw == "" {
+		return "", "", errors.New("database connection reference must not be empty")
+	}
+	if strings.Count(raw, "/") > 1 {
+		return "", "", fmt.Errorf("database connection reference %q contains more than one separator", raw)
+	}
+	profileName, databaseName, _ = strings.Cut(raw, "/")
+	if profileName == "" {
+		return "", "", errors.New("database connection profile name must not be empty")
+	}
+	if strings.Contains(raw, "/") && databaseName == "" {
+		return "", "", errors.New("database selector must not be empty")
+	}
+	return profileName, databaseName, nil
+}
+
 func runDB(args []string, configPath string, configPathSet bool, stdout, stderr io.Writer, lookupEnv func(string) (string, bool)) int {
 	if len(args) == 1 && isFlagHelp(args[0]) {
 		printDBUsage(stdout)
@@ -147,6 +164,11 @@ func runDB(args []string, configPath string, configPathSet bool, stdout, stderr 
 	}
 	if len(args) != 2 {
 		fmt.Fprintln(stderr, "usage: warden db <connection> <sql>")
+		return 2
+	}
+	profileName, databaseName, err := parseDBReference(args[0])
+	if err != nil {
+		fmt.Fprintf(stderr, "db: %v\n", err)
 		return 2
 	}
 
@@ -173,17 +195,17 @@ func runDB(args []string, configPath string, configPathSet bool, stdout, stderr 
 
 	id := int64(-1)
 	for _, c := range conns {
-		if c.Name == args[0] {
+		if c.Name == profileName {
 			id = c.ID
 			break
 		}
 	}
 	if id < 0 {
-		fmt.Fprintf(stderr, "db: connection %q not found\n", args[0])
+		fmt.Fprintf(stderr, "db: connection %q not found\n", profileName)
 		return 1
 	}
 
-	bundle, err := cl.GetDBBundle(ctx, id)
+	bundle, err := cl.GetDBBundle(ctx, id, databaseName)
 	if err != nil {
 		fmt.Fprintf(stderr, "db: %v\n", err)
 		return 1

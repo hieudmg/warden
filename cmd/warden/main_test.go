@@ -34,6 +34,91 @@ import (
 	"warden/internal/model"
 )
 
+func TestParseDBReference(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name        string
+		input       string
+		wantProfile string
+		wantDB      string
+		wantErr     bool
+	}{
+		{name: "profile only", input: "prod", wantProfile: "prod"},
+		{name: "named database", input: "prod/audit", wantProfile: "prod", wantDB: "audit"},
+		{name: "empty profile", input: "", wantErr: true},
+		{name: "empty database", input: "prod/", wantErr: true},
+		{name: "multiple separators", input: "prod/audit/extra", wantErr: true},
+	}
+	for _, tc := range tests {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			profile, database, err := parseDBReference(tc.input)
+			if tc.wantErr {
+				if err == nil {
+					t.Fatalf("parseDBReference(%q) error = nil, want error", tc.input)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("parseDBReference(%q): %v", tc.input, err)
+			}
+			if profile != tc.wantProfile || database != tc.wantDB {
+				t.Fatalf("parseDBReference(%q) = (%q, %q), want (%q, %q)", tc.input, profile, database, tc.wantProfile, tc.wantDB)
+			}
+		})
+	}
+}
+
+func TestRunDBSelectsNamedDatabase(t *testing.T) {
+	apiSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/v1/db-connections":
+			io.WriteString(w, `[{"id":10,"name":"reporting","host":"db.example","port":3306,"username":"reader","database":"main","databases":[{"name":"main","is_default":true},{"name":"audit","is_default":false}]}]`)
+		case "/api/v1/transport/db/10":
+			if got := r.URL.Query().Get("database"); got != "audit" {
+				t.Errorf("database query = %q, want audit", got)
+			}
+			io.WriteString(w, `{"host":"db.example","port":3306,"username":"reader","password":"c2VjcmV0","database":"audit"}`)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer apiSrv.Close()
+
+	lookupEnv := func(key string) (string, bool) {
+		switch key {
+		case "HOME":
+			return t.TempDir(), true
+		case "WARDEN_CLIENT_API_BASE_URL":
+			return apiSrv.URL, true
+		case "WARDEN_CLIENT_TIMEOUT":
+			return "10s", true
+		}
+		return "", false
+	}
+
+	var gotBundle model.DBBundle
+	oldRunDirectDB := runDirectDB
+	defer func() { runDirectDB = oldRunDirectDB }()
+	runDirectDB = func(_ context.Context, bundle model.DBBundle, _ string, _ io.Writer) error {
+		gotBundle = bundle
+		return nil
+	}
+
+	var stdout, stderr bytes.Buffer
+	if exitCode := run([]string{"db", "reporting/audit", "SELECT 1"}, &stdout, &stderr, lookupEnv); exitCode != 0 {
+		t.Fatalf("run() exitCode = %d, stderr=%q", exitCode, stderr.String())
+	}
+	if gotBundle.Database != "audit" {
+		t.Fatalf("database = %q, want audit", gotBundle.Database)
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("stderr = %q, want empty", stderr.String())
+	}
+}
+
 func TestRunHelpCommandsSkipArgAndConfigValidation(t *testing.T) {
 	t.Parallel()
 

@@ -13,6 +13,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 	"time"
@@ -97,10 +98,16 @@ func (c *Client) GetDB(ctx context.Context, id int64) (model.DBConnection, error
 	return out, err
 }
 
-// GetDBBundle returns the resolved DB transport bundle for id.
-func (c *Client) GetDBBundle(ctx context.Context, id int64) (model.DBBundle, error) {
+// GetDBBundle returns the resolved DB transport bundle for id. An optional
+// database selector chooses a named database; when omitted, the server uses
+// the profile's default.
+func (c *Client) GetDBBundle(ctx context.Context, id int64, databaseName ...string) (model.DBBundle, error) {
+	path := "/api/v1/transport/db/" + strconv.FormatInt(id, 10)
+	if len(databaseName) > 0 && databaseName[0] != "" {
+		path += "?" + url.Values{"database": {databaseName[0]}}.Encode()
+	}
 	var out model.DBBundle
-	err := c.getJSON(ctx, "/api/v1/transport/db/"+strconv.FormatInt(id, 10), &out)
+	err := c.getJSON(ctx, path, &out)
 	return out, err
 }
 

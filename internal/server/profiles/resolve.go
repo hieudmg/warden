@@ -125,9 +125,22 @@ func (r *Resolver) resolveJumps(ctx context.Context, ownerID int64, jumpJSON str
 
 // ResolveDBBundle returns the DB profile credentials plus, when the profile
 // references an SSH connection, the complete resolved SSH bundle used to
-// tunnel to the database.
-func (r *Resolver) ResolveDBBundle(ctx context.Context, id int64) (model.DBBundle, error) {
+// tunnel to the selected database. An omitted selector uses the profile's
+// default database.
+func (r *Resolver) ResolveDBBundle(ctx context.Context, id int64, databaseName ...string) (model.DBBundle, error) {
+	if len(databaseName) > 1 {
+		return model.DBBundle{}, fmt.Errorf("%w: at most one database selector is allowed", store.ErrValidation)
+	}
+	selector := ""
+	if len(databaseName) == 1 {
+		selector = databaseName[0]
+	}
+
 	db, err := r.store.GetDB(ctx, id)
+	if err != nil {
+		return model.DBBundle{}, err
+	}
+	selected, err := selectDatabase(db.Databases, selector)
 	if err != nil {
 		return model.DBBundle{}, err
 	}
@@ -136,7 +149,7 @@ func (r *Resolver) ResolveDBBundle(ctx context.Context, id int64) (model.DBBundl
 		Port:     db.Port,
 		Username: db.Username,
 		Password: db.Password,
-		Database: db.Database,
+		Database: selected,
 	}
 	if db.SSHConnectionID != 0 {
 		sshBundle, err := r.ResolveSSHBundle(ctx, db.SSHConnectionID)
@@ -146,6 +159,23 @@ func (r *Resolver) ResolveDBBundle(ctx context.Context, id int64) (model.DBBundl
 		bundle.SSH = &sshBundle
 	}
 	return bundle, nil
+}
+
+func selectDatabase(databases []model.DatabaseInfo, selector string) (string, error) {
+	if selector != "" {
+		for _, database := range databases {
+			if database.Name == selector {
+				return database.Name, nil
+			}
+		}
+		return "", fmt.Errorf("%w: database %q not found", store.ErrValidation, selector)
+	}
+	for _, database := range databases {
+		if database.IsDefault {
+			return database.Name, nil
+		}
+	}
+	return "", fmt.Errorf("%w: database profile has no default database", store.ErrValidation)
 }
 
 // sshNode builds a transport node from a profile. When the profile selects

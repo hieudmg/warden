@@ -216,6 +216,37 @@ func TestResolveSSHBundleRejectsChainExceedingMaxJumpDepth(t *testing.T) {
 	}
 }
 
+func TestResolveDBBundleSelectsNamedDatabase(t *testing.T) {
+	_, s, _ := newTestAPI(t)
+	r := profiles.NewResolver(s)
+	ctx := context.Background()
+
+	dbp, err := s.CreateDB(ctx, model.DBProfile{
+		Name: "multi", Host: "db.invalid", Port: 3306, Username: "app",
+		Password: []byte("secret"), Databases: []model.DatabaseInfo{
+			{Name: "main", IsDefault: true}, {Name: "audit"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("CreateDB: %v", err)
+	}
+
+	bundle, err := r.ResolveDBBundle(ctx, dbp.ID, "audit")
+	if err != nil {
+		t.Fatalf("ResolveDBBundle: %v", err)
+	}
+	if bundle.Database != "audit" {
+		t.Fatalf("database = %q, want audit", bundle.Database)
+	}
+	if string(bundle.Password) != "secret" {
+		t.Fatalf("password = %q, want decrypted secret", bundle.Password)
+	}
+
+	if _, err := r.ResolveDBBundle(ctx, dbp.ID, "missing"); err == nil {
+		t.Fatal("ResolveDBBundle accepted unknown database selector")
+	}
+}
+
 func TestResolveDBBundleDirect(t *testing.T) {
 	_, s, _ := newTestAPI(t)
 	r := profiles.NewResolver(s)
@@ -231,6 +262,29 @@ func TestResolveDBBundleDirect(t *testing.T) {
 	}
 	if string(bundle.Password) != "dbpw-direct" {
 		t.Errorf("db password = %q, want decrypted dbpw-direct", bundle.Password)
+	}
+}
+
+func TestResolveDBBundleDefaultsToNamedDefault(t *testing.T) {
+	_, s, _ := newTestAPI(t)
+	r := profiles.NewResolver(s)
+	ctx := context.Background()
+
+	dbp, err := s.CreateDB(ctx, model.DBProfile{
+		Name: "defaulted", Host: "db.invalid", Port: 3306, Username: "app",
+		Databases: []model.DatabaseInfo{
+			{Name: "main", IsDefault: true}, {Name: "audit"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("CreateDB: %v", err)
+	}
+	bundle, err := r.ResolveDBBundle(ctx, dbp.ID)
+	if err != nil {
+		t.Fatalf("ResolveDBBundle: %v", err)
+	}
+	if bundle.Database != "main" {
+		t.Fatalf("database = %q, want main", bundle.Database)
 	}
 }
 

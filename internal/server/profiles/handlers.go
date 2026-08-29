@@ -384,7 +384,8 @@ func (h *Handler) transportDB(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	bundle, err := h.resolver.ResolveDBBundle(r.Context(), id)
+	databaseName := r.URL.Query().Get("database")
+	bundle, err := h.resolver.ResolveDBBundle(r.Context(), id, databaseName)
 	if err != nil {
 		h.record(r, "transport.db.get", "db_connection", strconv.FormatInt(id, 10), "failure", err, nil)
 		writeTransportError(w, err)
@@ -475,6 +476,8 @@ func writeTransportError(w http.ResponseWriter, err error) {
 		server.WriteError(w, http.StatusNotFound, server.ErrNotFound, "connection not found")
 	case errors.As(err, &graphErr):
 		server.WriteError(w, http.StatusUnprocessableEntity, server.ErrGraphInvalid, graphErr.Error())
+	case errors.Is(err, store.ErrValidation):
+		server.WriteError(w, http.StatusUnprocessableEntity, server.ErrValidation, err.Error())
 	default:
 		server.WriteError(w, http.StatusInternalServerError, server.ErrDecryption, "failed to resolve connection secrets")
 	}

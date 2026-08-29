@@ -207,6 +207,22 @@ func TestGetDBBundleDecodes(t *testing.T) {
 	}
 }
 
+func TestGetDBBundleEncodesDatabaseSelector(t *testing.T) {
+	t.Parallel()
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if got := r.URL.Query().Get("database"); got != "audit" {
+			t.Errorf("database query = %q, want audit", got)
+		}
+		io.WriteString(w, dbBundleJSON)
+	}))
+	defer srv.Close()
+
+	if _, err := New(srv.URL, nil).GetDBBundle(context.Background(), 3, "audit"); err != nil {
+		t.Fatalf("GetDBBundle: %v", err)
+	}
+}
+
 func TestDependentsDecode(t *testing.T) {
 	t.Parallel()
 
