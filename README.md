@@ -160,9 +160,13 @@ Restore both with the original owner (`warden`) and permissions (`0600` key).
 # Run a command over SSH (target + optional jump chain, resolved server-side).
 warden ssh <connection> "<command>"
 
-# Run one SQL statement against a MySQL/MariaDB profile, locally or through
-# an SSH tunnel; tabular output; no SQL or credentials in logs.
+# Run one SQL statement against the default database of a MySQL/MariaDB
+# profile, locally or through an SSH tunnel; tabular output; no SQL or
+# credentials in logs.
 warden db <connection> "<sql>"
+
+# Select a named database from a profile that exposes multiple databases.
+warden db <connection>/<database> "<sql>"
 
 # Record an agent change report. Immutable, append-only.
 warden report create <project> --title <title> --summary <summary> --agent-model <name>
