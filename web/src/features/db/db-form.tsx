@@ -1,5 +1,8 @@
-import { useRef, useState, type FormEvent } from "react"
+import { useCallback, useMemo, useRef, useState, type FormEvent } from "react"
+import { X } from "lucide-react"
+import type { ColumnDef } from "@tanstack/react-table"
 import type { DBConnection, DBConnectionRequest, DatabaseInfo, Group, SSHConnection } from "@/api/types"
+import { DataTable } from "@/components/data-table"
 import { Button } from "@/components/ui/button"
 import { DialogFooter } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
@@ -166,36 +169,37 @@ export function DBForm({ connection, sshProfiles, groups, pending, error, onSubm
   const [databaseError, setDatabaseError] = useState<string | null>(null)
   const set = <K extends keyof DBFormState>(key: K, value: DBFormState[K]) =>
     setForm(current => ({ ...current, [key]: value }))
-  const updateDatabases = (update: (databases: DatabaseFormEntry[]) => DatabaseFormEntry[]) => {
+  const updateDatabases = useCallback((update: (databases: DatabaseFormEntry[]) => DatabaseFormEntry[]) => {
     setForm(current => ({ ...current, databases: update(current.databases) }))
     setDatabaseError(null)
-  }
-  const setDatabaseName = (index: number, name: string) => {
+  }, [])
+  const setDatabaseName = useCallback((index: number, name: string) => {
     updateDatabases(databases => databases.map((database, databaseIndex) =>
       databaseIndex === index ? { ...database, name } : database,
     ))
-  }
-  const setDefaultDatabase = (index: number) => {
+  }, [updateDatabases])
+  const setDefaultDatabase = useCallback((index: number) => {
     updateDatabases(databases => databases.map((database, databaseIndex) => ({
       ...database,
       isDefault: databaseIndex === index,
     })))
-  }
-  const addDatabase = () => {
+  }, [updateDatabases])
+  const addDatabase = useCallback(() => {
     updateDatabases(databases => [...databases, { name: "", isDefault: false }])
     setDatabaseRowIDs(ids => [...ids, nextDatabaseID.current++])
-  }
-  const removeDatabase = (index: number) => {
-    if (form.databases.length <= 1) return
-    updateDatabases(databases => {
-      const remaining = databases.filter((_, databaseIndex) => databaseIndex !== index)
+  }, [updateDatabases])
+  const removeDatabase = useCallback((index: number) => {
+    setForm(current => {
+      if (current.databases.length <= 1) return current
+      const remaining = current.databases.filter((_, databaseIndex) => databaseIndex !== index)
       if (!remaining.some(database => database.isDefault)) {
         remaining[0] = { ...remaining[0], isDefault: true }
       }
-      return remaining
+      return { ...current, databases: remaining }
     })
+    setDatabaseError(null)
     setDatabaseRowIDs(ids => ids.filter((_, databaseIndex) => databaseIndex !== index))
-  }
+  }, [])
 
   const handleSubmit = (event: FormEvent) => {
     event.preventDefault()
@@ -209,6 +213,54 @@ export function DBForm({ connection, sshProfiles, groups, pending, error, onSubm
 
   const options = sshOptions(sshProfiles, Number(form.sshConnectionID))
   const groupSelectOptions = groupOptions(groups, Number(form.groupID))
+  const databaseRows = useMemo(() => form.databases.map((database, index) => ({
+    ...database,
+    id: databaseRowIDs[index] ?? index,
+    index,
+  })), [form.databases, databaseRowIDs])
+  const databaseColumns: ColumnDef<typeof databaseRows[number], unknown>[] = useMemo(() => [
+    {
+      accessorKey: "name",
+      header: "Name",
+      cell: ({ row }) => (
+        <Input
+          value={row.original.name}
+          onChange={event => setDatabaseName(row.original.index, event.target.value)}
+          aria-label="Database name"
+          aria-required="true"
+        />
+      ),
+    },
+    {
+      id: "default",
+      header: "Default",
+      cell: ({ row }) => (
+        <input
+          type="radio"
+          name="db-default-database"
+          aria-label="Default database"
+          checked={row.original.isDefault}
+          onChange={() => setDefaultDatabase(row.original.index)}
+        />
+      ),
+    },
+    {
+      id: "actions",
+      header: "Actions",
+      cell: ({ row }) => (
+        <Button
+          type="button"
+          variant="destructive"
+          size="icon-sm"
+          aria-label="Remove database"
+          onClick={() => removeDatabase(row.original.index)}
+          disabled={pending || databaseRows.length === 1}
+        >
+          <X aria-hidden="true" />
+        </Button>
+      ),
+    },
+  ], [databaseRows.length, pending, removeDatabase, setDatabaseName, setDefaultDatabase])
 
   return (
     <form onSubmit={handleSubmit} autoComplete="off" className="grid gap-3">
@@ -282,41 +334,7 @@ export function DBForm({ connection, sshProfiles, groups, pending, error, onSubm
             Add database
           </Button>
         </div>
-        <div className="grid gap-2">
-          {form.databases.map((database, index) => (
-            <div key={databaseRowIDs[index] ?? index} className="flex items-end gap-2">
-              <div className="grid min-w-0 flex-1 gap-1.5">
-                <Label htmlFor={`db-database-${index}`}>Database {index + 1}</Label>
-                <Input
-                  id={`db-database-${index}`}
-                  value={database.name}
-                  onChange={event => setDatabaseName(index, event.target.value)}
-                  aria-required="true"
-                />
-              </div>
-              <label className="flex h-8 items-center gap-1.5 pb-1 text-sm">
-                <input
-                  type="radio"
-                  name="db-default-database"
-                  aria-label={`Default database ${index + 1}`}
-                  checked={database.isDefault}
-                  onChange={() => setDefaultDatabase(index)}
-                />
-                Default
-              </label>
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                aria-label={`Remove database ${index + 1}`}
-                onClick={() => removeDatabase(index)}
-                disabled={pending || form.databases.length === 1}
-              >
-                Remove
-              </Button>
-            </div>
-          ))}
-        </div>
+        <DataTable data={databaseRows} columns={databaseColumns} getRowId={row => String(row.id)} />
       </div>
       <div className="grid gap-1.5">
         <Label htmlFor="db-ssh">SSH connection</Label>

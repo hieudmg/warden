@@ -212,7 +212,7 @@ describe("DBTab", () => {
     await user.type(within(dialog).getByLabelText("Name"), "db-1")
     await user.type(within(dialog).getByLabelText("Host"), "127.0.0.1")
     await user.type(within(dialog).getByLabelText("Username"), "app")
-    await user.type(within(dialog).getByLabelText("Database 1"), "warden")
+    await user.type(within(dialog).getByLabelText("Database name"), "warden")
     await user.click(within(dialog).getByRole("button", { name: "Save" }))
 
     await waitFor(() => expect(mockedAPI.createDB).toHaveBeenCalledTimes(1))
@@ -271,7 +271,7 @@ describe("DBTab", () => {
     await user.type(within(dialog).getByLabelText("Name"), "dup")
     await user.type(within(dialog).getByLabelText("Host"), "127.0.0.9")
     await user.type(within(dialog).getByLabelText("Username"), "app")
-    await user.type(within(dialog).getByLabelText("Database 1"), "warden")
+    await user.type(within(dialog).getByLabelText("Database name"), "warden")
     await user.click(within(dialog).getByRole("button", { name: "Save" }))
 
     const alert = await within(dialog).findByRole("alert")
@@ -291,7 +291,7 @@ describe("DBTab", () => {
     await user.type(within(dialog).getByLabelText("Name"), "slow")
     await user.type(within(dialog).getByLabelText("Host"), "127.0.0.1")
     await user.type(within(dialog).getByLabelText("Username"), "app")
-    await user.type(within(dialog).getByLabelText("Database 1"), "warden")
+    await user.type(within(dialog).getByLabelText("Database name"), "warden")
     await user.click(within(dialog).getByRole("button", { name: "Save" }))
 
     expect(mockedAPI.createDB).toHaveBeenCalledTimes(1)
