@@ -238,7 +238,7 @@ export function DBForm({ connection, sshProfiles, groups, pending, error, onSubm
         <input
           type="radio"
           name="db-default-database"
-          aria-label="Default database"
+          aria-label={`Default database: ${row.original.name.trim() || "unnamed database"}`}
           checked={row.original.isDefault}
           onChange={() => setDefaultDatabase(row.original.index)}
         />
@@ -252,7 +252,7 @@ export function DBForm({ connection, sshProfiles, groups, pending, error, onSubm
           type="button"
           variant="destructive"
           size="icon-sm"
-          aria-label="Remove database"
+          aria-label={`Remove database: ${row.original.name.trim() || "unnamed database"}`}
           onClick={() => removeDatabase(row.original.index)}
           disabled={pending || databaseRows.length === 1}
         >

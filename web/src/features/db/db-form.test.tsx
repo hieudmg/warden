@@ -222,17 +222,19 @@ describe("DBForm", () => {
 
     await user.type(screen.getAllByRole("textbox", { name: "Database name" })[0], "main")
     await user.type(screen.getAllByRole("textbox", { name: "Database name" })[1], "audit")
-    const defaultInputs = screen.getAllByRole("radio", { name: "Default database" })
-    await user.click(defaultInputs[1])
-    expect(defaultInputs[0]).not.toBeChecked()
-    expect(defaultInputs[1]).toBeChecked()
+    expect(screen.getByRole("radio", { name: "Default database: main" })).toBeChecked()
+    expect(screen.getByRole("radio", { name: "Default database: audit" })).not.toBeChecked()
+    await user.click(screen.getByRole("radio", { name: "Default database: audit" }))
+    expect(screen.getByRole("radio", { name: "Default database: main" })).not.toBeChecked()
+    expect(screen.getByRole("radio", { name: "Default database: audit" })).toBeChecked()
 
-    const removeButton = screen.getAllByRole("button", { name: "Remove database" })[0]
+    const removeButton = screen.getAllByRole("button", { name: /Remove database:/ })[0]
     expect(removeButton).toHaveAttribute("data-variant", "destructive")
     expect(removeButton.querySelector("svg")).not.toBeNull()
     await user.click(removeButton)
     expect(screen.getAllByRole("textbox", { name: "Database name" })).toHaveLength(1)
     expect(screen.getByRole("textbox", { name: "Database name" })).toHaveValue("audit")
+    expect(screen.getByRole("button", { name: "Remove database: audit" })).toBeDisabled()
 
     await user.click(screen.getByRole("button", { name: "Save" }))
     expect(onSubmit).toHaveBeenCalledWith(expect.objectContaining({
