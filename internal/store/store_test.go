@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"warden/internal/crypto"
 	"warden/migrations"
 )
 
@@ -274,6 +275,14 @@ func TestOpenMigratesLegacyDatabaseScalar(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	codec := crypto.Codec{Key: key}
+	encryptedPassword, err := codec.Encrypt([]byte("legacy-password"), dbAAD(legacyID, "password"))
+	if err != nil {
+		t.Fatalf("encrypt legacy password: %v", err)
+	}
+	if _, err := db.Exec("UPDATE db_connections SET password=? WHERE id=?", encryptedPassword, legacyID); err != nil {
+		t.Fatalf("seed legacy password: %v", err)
+	}
 	if err := db.Close(); err != nil {
 		t.Fatal(err)
 	}
@@ -295,6 +304,13 @@ func TestOpenMigratesLegacyDatabaseScalar(t *testing.T) {
 	}
 	if raw != want {
 		t.Fatalf("migrated database = %q, want %q", raw, want)
+	}
+	var migratedPassword []byte
+	if err := s.db.QueryRow("SELECT password FROM db_connections WHERE id=?", legacyID).Scan(&migratedPassword); err != nil {
+		t.Fatalf("read migrated password: %v", err)
+	}
+	if !bytes.Equal(migratedPassword, encryptedPassword) {
+		t.Fatalf("migrated password blob changed: got %x, want %x", migratedPassword, encryptedPassword)
 	}
 
 	profile, err := s.GetDB(context.Background(), legacyID)

@@ -864,11 +864,21 @@ func TestDBCRUD(t *testing.T) {
 		t.Errorf("list response leaks password: %s", rec.Body.String())
 	}
 
-	// Update.
-	body = `{"name":"app","host":"db2.invalid","port":3307,"username":"app","database":"appdb","ssh_connection_id":0}`
+	// Update with a canonical database list.
+	body = `{"name":"app","host":"db2.invalid","port":3307,"username":"app","database":"analytics","databases":[{"name":"appdb","is_default":false},{"name":"analytics","is_default":true}],"ssh_connection_id":0}`
 	rec = doRequest(t, mux, "PUT", fmt.Sprintf("/api/v1/db-connections/%d", created.ID), body)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("update status = %d, body=%s", rec.Code, rec.Body.String())
+	}
+	var updatedResponse model.DBConnection
+	if err := json.Unmarshal(rec.Body.Bytes(), &updatedResponse); err != nil {
+		t.Fatalf("decode update response: %v", err)
+	}
+	wantDatabases := []model.DatabaseInfo{
+		{Name: "appdb", IsDefault: false}, {Name: "analytics", IsDefault: true},
+	}
+	if updatedResponse.Database != "analytics" || !reflect.DeepEqual(updatedResponse.Databases, wantDatabases) {
+		t.Errorf("update response databases = %+v/%+v, want analytics/%+v", updatedResponse.Database, updatedResponse.Databases, wantDatabases)
 	}
 	got, err := s.GetDB(context.Background(), created.ID)
 	if err != nil {
@@ -876,6 +886,9 @@ func TestDBCRUD(t *testing.T) {
 	}
 	if got.Host != "db2.invalid" || got.Port != 3307 {
 		t.Errorf("updated db mismatch: %+v", got)
+	}
+	if !reflect.DeepEqual(got.Databases, wantDatabases) {
+		t.Errorf("stored databases = %+v, want %+v", got.Databases, wantDatabases)
 	}
 	if string(got.Password) != "dbpw" {
 		t.Errorf("password = %q, want preserved dbpw", got.Password)

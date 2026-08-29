@@ -627,6 +627,9 @@ func TestDBCreateGetUpdateListDelete(t *testing.T) {
 	updated := got
 	updated.Host = "db2.invalid"
 	updated.Password = []byte("changed")
+	updated.Databases = []model.DatabaseInfo{
+		{Name: "appdb", IsDefault: false}, {Name: "analytics", IsDefault: true},
+	}
 	updated.SSHConnectionID = 7
 	if err := s.UpdateDB(ctx, updated); err != nil {
 		t.Fatalf("UpdateDB: %v", err)
@@ -635,7 +638,10 @@ func TestDBCreateGetUpdateListDelete(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetDB after update: %v", err)
 	}
-	if got2.Host != "db2.invalid" || string(got2.Password) != "changed" || got2.SSHConnectionID != 7 {
+	wantDatabases := []model.DatabaseInfo{
+		{Name: "appdb", IsDefault: false}, {Name: "analytics", IsDefault: true},
+	}
+	if got2.Host != "db2.invalid" || string(got2.Password) != "changed" || got2.SSHConnectionID != 7 || !reflect.DeepEqual(got2.Databases, wantDatabases) {
 		t.Errorf("updated DB mismatch: %+v", got2)
 	}
 
