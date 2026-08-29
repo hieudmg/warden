@@ -219,6 +219,10 @@ describe("DBForm", () => {
     expect(screen.getAllByRole("textbox", { name: "Database name" })).toHaveLength(1)
     await user.click(screen.getByRole("button", { name: "Add database" }))
     expect(screen.getAllByRole("textbox", { name: "Database name" })).toHaveLength(2)
+    const blankDefaultLabels = screen
+      .getAllByRole("radio", { name: /Default database:/ })
+      .map(radio => radio.getAttribute("aria-label"))
+    expect(new Set(blankDefaultLabels).size).toBe(2)
 
     await user.type(screen.getAllByRole("textbox", { name: "Database name" })[0], "main")
     await user.type(screen.getAllByRole("textbox", { name: "Database name" })[1], "audit")
