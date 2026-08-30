@@ -1,4 +1,4 @@
-import { useCallback, useRef, useState } from "react"
+import { useCallback, useEffect, useRef, useState } from "react"
 import { api } from "@/api/client"
 import {
   Toast,
@@ -23,6 +23,25 @@ export interface NotificationItem {
 }
 
 export type Notify = (message: string, kind: "success" | "error") => void
+
+type Route = "ssh" | "db" | "groups" | "key-pairs" | "projects"
+
+const routePaths: Record<Route, string> = {
+  ssh: "/ssh",
+  db: "/databases",
+  groups: "/groups",
+  "key-pairs": "/key-pairs",
+  projects: "/projects",
+}
+
+function routeForPath(pathname: string): Route {
+  return (Object.entries(routePaths).find(([, path]) => path === pathname)?.[0] as Route | undefined) ?? "ssh"
+}
+
+function normalizePath(route: Route): void {
+  const path = routePaths[route]
+  if (window.location.pathname !== path) window.history.replaceState({}, "", path)
+}
 
 /** Global notification region: success uses a polite live region, errors use alert role. */
 export function Notifications({
@@ -55,6 +74,11 @@ export function Notifications({
 }
 
 export function App() {
+  const [route, setRoute] = useState<Route>(() => {
+    const initialRoute = routeForPath(window.location.pathname)
+    normalizePath(initialRoute)
+    return initialRoute
+  })
   const ssh = useListResource(api.listSSH)
   const db = useListResource(api.listDB)
   const groups = useListResource(api.listGroups)
@@ -73,6 +97,24 @@ export function App() {
     ])
   }, [])
 
+  useEffect(() => {
+    const handlePopState = () => {
+      const nextRoute = routeForPath(window.location.pathname)
+      normalizePath(nextRoute)
+      setRoute(nextRoute)
+    }
+    window.addEventListener("popstate", handlePopState)
+    return () => window.removeEventListener("popstate", handlePopState)
+  }, [])
+
+  const selectRoute = (value: string) => {
+    const nextRoute = value as Route
+    const nextPath = routePaths[nextRoute]
+    if (!nextPath) return
+    if (window.location.pathname !== nextPath) window.history.pushState({}, "", nextPath)
+    setRoute(nextRoute)
+  }
+
   return (
     <div className="min-h-screen bg-background text-foreground">
       <header className="border-b px-6 py-4">
@@ -82,7 +124,7 @@ export function App() {
         </p>
       </header>
       <Notifications items={notifications} onDismiss={dismissNotification} />
-      <Tabs defaultValue="ssh">
+      <Tabs value={route} onValueChange={selectRoute}>
         <TabsList className="mx-4 mt-4">
           <TabsTrigger value="ssh">SSH</TabsTrigger>
           <TabsTrigger value="db">Databases</TabsTrigger>

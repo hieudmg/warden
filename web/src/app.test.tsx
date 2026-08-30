@@ -1,4 +1,4 @@
-import { act, render, screen, within } from "@testing-library/react"
+import { act, render, screen, waitFor, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { useState } from "react"
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest"
@@ -103,6 +103,7 @@ function keyPair(id: number): KeyPairSummary {
 }
 
 beforeEach(() => {
+  window.history.replaceState({}, "", "/")
   mockedAPI.listSSH.mockReset().mockResolvedValue([sshConnection(1)])
   mockedAPI.listDB.mockReset().mockResolvedValue([dbConnection(1)])
   mockedAPI.listGroups.mockReset().mockResolvedValue([group(1, "prod")])
@@ -121,6 +122,55 @@ beforeEach(() => {
 })
 
 describe("App", () => {
+  test("normalizes root path to SSH route", async () => {
+    render(<App />)
+
+    expect(window.location.pathname).toBe("/ssh")
+    expect(screen.getByRole("tab", { name: "SSH" })).toHaveAttribute("aria-selected", "true")
+  })
+
+  test("updates URL when selecting a top-level section", async () => {
+    const user = userEvent.setup()
+    render(<App />)
+
+    await user.click(screen.getByRole("tab", { name: "Databases" }))
+
+    expect(window.location.pathname).toBe("/databases")
+    expect(screen.getByRole("tab", { name: "Databases" })).toHaveAttribute("aria-selected", "true")
+  })
+
+  test("renders route selected by browser history", async () => {
+    window.history.replaceState({}, "", "/groups")
+    render(<App />)
+
+    expect(screen.getByRole("tab", { name: "Groups" })).toHaveAttribute("aria-selected", "true")
+    expect(await screen.findByText("prod")).toBeInTheDocument()
+  })
+
+  test("responds to browser back and forward navigation", async () => {
+    const user = userEvent.setup()
+    render(<App />)
+
+    await user.click(screen.getByRole("tab", { name: "Databases" }))
+    expect(window.location.pathname).toBe("/databases")
+
+    window.history.back()
+    await waitFor(() => expect(window.location.pathname).toBe("/ssh"))
+    expect(screen.getByRole("tab", { name: "SSH" })).toHaveAttribute("aria-selected", "true")
+
+    window.history.forward()
+    await waitFor(() => expect(window.location.pathname).toBe("/databases"))
+    expect(screen.getByRole("tab", { name: "Databases" })).toHaveAttribute("aria-selected", "true")
+  })
+
+  test("falls back to SSH for unknown paths", async () => {
+    window.history.replaceState({}, "", "/unknown")
+    render(<App />)
+
+    expect(window.location.pathname).toBe("/ssh")
+    expect(screen.getByRole("tab", { name: "SSH" })).toHaveAttribute("aria-selected", "true")
+  })
+
   test("renders the light Warden shell with SSH selected initially", async () => {
     render(<App />)
 
@@ -165,14 +215,17 @@ describe("App", () => {
     expect(sshTab).toHaveAttribute("aria-selected", "false")
 
     await user.click(groupsTab)
+    expect(window.location.pathname).toBe("/groups")
     expect(groupsTab).toHaveAttribute("aria-selected", "true")
     expect(dbTab).toHaveAttribute("aria-selected", "false")
 
     await user.click(keyPairsTab)
+    expect(window.location.pathname).toBe("/key-pairs")
     expect(keyPairsTab).toHaveAttribute("aria-selected", "true")
     expect(groupsTab).toHaveAttribute("aria-selected", "false")
 
     await user.click(projectsTab)
+    expect(window.location.pathname).toBe("/projects")
     expect(projectsTab).toHaveAttribute("aria-selected", "true")
     expect(keyPairsTab).toHaveAttribute("aria-selected", "false")
   })

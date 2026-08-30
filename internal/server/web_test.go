@@ -77,6 +77,24 @@ func TestServeUIServesIndexAtExplicitPath(t *testing.T) {
 	}
 }
 
+func TestServeUIServesIndexAtTopLevelRoutes(t *testing.T) {
+	for _, path := range []string{"/ssh", "/databases", "/groups", "/key-pairs", "/projects"} {
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, path, nil)
+		serveUIHandler().ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusOK {
+			t.Errorf("GET %s status = %d, want 200", path, rec.Code)
+		}
+		if cc := rec.Header().Get("Cache-Control"); cc != "no-store" {
+			t.Errorf("GET %s Cache-Control = %q, want no-store", path, cc)
+		}
+		if !strings.Contains(rec.Body.String(), "<html") {
+			t.Errorf("GET %s did not return the UI shell", path)
+		}
+	}
+}
+
 func TestServeUIServesHashedAssetsWithTypeETagAndLongCache(t *testing.T) {
 	for _, tc := range []struct {
 		path   string
