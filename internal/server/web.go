@@ -1,8 +1,9 @@
 // Web UI serving: one listener serves both the embedded management UI and
 // the JSON API. Requests under /api/v1/ are delegated to the API handler;
-// everything else is served from the assets fs. The UI is
-// management-only, so no route here exposes terminals, credentials, or
-// remote execution.
+// everything else is served from the assets fs. Top-level UI routes serve the
+// entrypoint so browser refreshes work with client-side routing. The UI is
+// management-only, so no route here exposes terminals, credentials, or remote
+// execution.
 package server
 
 import (
@@ -19,12 +20,12 @@ import (
 
 // ServeUI wraps the API handler with the embedded management UI. Requests
 // whose path starts with /api/ are delegated unchanged to api. The root
-// path and /index.html are served with Cache-Control: no-store because the
-// UI is stateful and must always reflect current server state. Every other
-// existing asset is hashed at build time, so it is served with a long
-// immutable cache lifetime. Asset names come from a whitelist of existing
-// embedded files; traversal attempts fail path validation before any file
-// access. Unknown non-API paths return 404.
+// path, /index.html, and top-level UI routes are served with Cache-Control:
+// no-store because the UI is stateful and must always reflect current server
+// state. Every other existing asset is hashed at build time, so it is served
+// with a long immutable cache lifetime. Asset names come from a whitelist of
+// existing embedded files; traversal attempts fail path validation before any
+// file access. Unknown non-API paths return 404.
 func ServeUI(api http.Handler, assets fs.FS) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if strings.HasPrefix(r.URL.Path, "/api/") {
@@ -38,7 +39,7 @@ func ServeUI(api http.Handler, assets fs.FS) http.Handler {
 
 		var name string
 		switch r.URL.Path {
-		case "/", "/index.html":
+		case "/", "/index.html", "/ssh", "/databases", "/groups", "/key-pairs", "/projects":
 			// The management UI entrypoint must never be cached: a
 			// stale index could hide newer server capabilities or
 			// retain stale page state.
