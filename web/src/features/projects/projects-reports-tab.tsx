@@ -51,7 +51,7 @@ function utcDateKey(iso: string): string {
 function formatDateHeading(iso: string): string {
   const date = new Date(iso)
   const pad = (n: number) => String(n).padStart(2, "0")
-  return `${WEEKDAYS[date.getUTCDay()]}, ${pad(date.getUTCDate())}/${pad(date.getUTCMonth() + 1)}/${date.getUTCFullYear()}`
+  return `${pad(date.getUTCDate())}/${pad(date.getUTCMonth() + 1)}/${date.getUTCFullYear()} | ${WEEKDAYS[date.getUTCDay()]}`
 }
 
 /** First pane: projects with a New Project action. Names are stable unique
@@ -116,7 +116,7 @@ function ReportList({
     }
   }
   return (
-    <div className="space-y-3">
+    <div className="space-y-6">
       {groups.map(group => (
         <div key={group.date} className="space-y-1">
           <h3 className="text-sm font-semibold text-muted-foreground">
