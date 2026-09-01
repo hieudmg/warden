@@ -127,9 +127,9 @@ describe("ProjectsReportsTab", () => {
     const reportsSection = await screen.findByRole("region", { name: "Reports" })
     const dateHeadings = within(reportsSection).getAllByRole("heading", { level: 3 })
     expect(dateHeadings.map(heading => heading.textContent)).toEqual([
-      "Tuesday, 25/08/2026",
-      "Monday, 24/08/2026",
-      "Sunday, 23/08/2026",
+      "25/08/2026 | Tuesday",
+      "24/08/2026 | Monday",
+      "23/08/2026 | Sunday",
     ])
     const reportItems = within(reportsSection).getAllByRole("listitem")
     expect(reportItems.map(item => item.textContent)).toEqual(["Newest", "Middle", "Oldest"])
@@ -150,7 +150,8 @@ describe("ProjectsReportsTab", () => {
 
     const reportsSection = await screen.findByRole("region", { name: "Reports" })
     const dateHeadings = within(reportsSection).getAllByRole("heading", { level: 3 })
-    expect(dateHeadings.map(heading => heading.textContent)).toEqual(["Monday, 24/08/2026"])
+    expect(dateHeadings.map(heading => heading.textContent)).toEqual(["24/08/2026 | Monday"])
+    expect(dateHeadings[0].parentElement?.parentElement).toHaveClass("space-y-6")
     const reportItems = within(reportsSection).getAllByRole("listitem")
     expect(reportItems.map(item => item.textContent)).toEqual(["Later", "Earlier"])
   })
