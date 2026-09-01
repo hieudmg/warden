@@ -1,0 +1,116 @@
+name: Release
+
+on:
+  # A merged pull request updates main and emits this same push event.
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-main
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out main
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22.12.0
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Read release version
+        id: version
+        shell: bash
+        run: |
+          version="$(node -p "require('./web/package.json').version")"
+          if [[ ! "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "web/package.json version is not valid semver: $version" >&2
+            exit 1
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "tag=v$version" >> "$GITHUB_OUTPUT"
+
+      - name: Build release artifacts
+        run: bash scripts/build-release.sh
+
+      - name: Create or update GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ steps.version.outputs.tag }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          notes="$(mktemp)"
+          tag_response="$(mktemp)"
+          release_response="$(mktemp)"
+          trap 'rm -f "$notes" "$tag_response" "$release_response"' EXIT
+          cat > "$notes" <<EOF
+          ## Changes
+          Automated release for version ${RELEASE_TAG#v}.
+
+          ## Artifacts
+          - Linux server and client
+          - Windows client
+          - SHA-256 checksums
+          EOF
+
+          assets=(
+            dist/warden-server-linux-amd64
+            dist/warden-linux-amd64
+            dist/warden.exe
+            dist/SHA256SUMS
+          )
+
+          tag_ref="repos/${GITHUB_REPOSITORY}/git/refs/tags/${RELEASE_TAG}"
+          if gh api --include "$tag_ref" >"$tag_response" 2>&1; then
+            gh api \
+              --method PATCH \
+              "$tag_ref" \
+              -f "sha=${GITHUB_SHA}" \
+              -F force=true
+          elif grep -Eq '^HTTP/[0-9.]+[[:space:]]+404([[:space:]]|$)' "$tag_response"; then
+            gh api \
+              --method POST \
+              "repos/${GITHUB_REPOSITORY}/git/refs" \
+              -f "ref=refs/tags/${RELEASE_TAG}" \
+              -f "sha=${GITHUB_SHA}"
+          else
+            cat "$tag_response" >&2
+            exit 1
+          fi
+
+          release_api="repos/${GITHUB_REPOSITORY}/releases/tags/${RELEASE_TAG}"
+          if gh api --include "$release_api" >"$release_response" 2>&1; then
+            gh release edit "$RELEASE_TAG" \
+              --target "$GITHUB_SHA" \
+              --title "$RELEASE_TAG" \
+              --notes-file "$notes" \
+              --latest
+            gh release upload "$RELEASE_TAG" "${assets[@]}" --clobber
+          elif grep -Eq '^HTTP/[0-9.]+[[:space:]]+404([[:space:]]|$)' "$release_response"; then
+            gh release create "$RELEASE_TAG" "${assets[@]}" \
+              --target "$GITHUB_SHA" \
+              --title "$RELEASE_TAG" \
+              --notes-file "$notes" \
+              --latest
+          else
+            cat "$release_response" >&2
+            exit 1
+          fi
