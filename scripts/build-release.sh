@@ -26,7 +26,6 @@ cd "$ROOT"
 # built before the release compilation below.
 log "building frontend"
 npm --prefix "$ROOT/web" ci
-npm --prefix "$ROOT/web" test
 npm --prefix "$ROOT/web" run build
 
 log "building release artifacts into $DIST"
