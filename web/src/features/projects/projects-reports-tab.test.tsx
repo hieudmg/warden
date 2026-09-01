@@ -82,8 +82,11 @@ describe("ProjectsReportsTab", () => {
     expect(layout).toHaveClass("lg:grid-cols-[minmax(0,0.8fr)_minmax(0,1fr)_minmax(0,1.7fr)]")
   })
 
-  test("selecting a project loads its reports and selecting a report shows its content", async () => {
-    const wardenReport = report(10, "warden", "Warden v0.2")
+  test("selecting a project loads its reports and renders selected report Markdown", async () => {
+    const wardenReport = {
+      ...report(10, "warden", "Warden v0.2"),
+      summary: "# Highlights\n\n**Markdown** report\n\n- First item\n\n<span data-testid=\"unsafe-html\">Unsafe HTML</span>",
+    }
     mockedAPI.listReports.mockResolvedValue([wardenReport])
     const user = userEvent.setup()
 
@@ -104,10 +107,12 @@ describe("ProjectsReportsTab", () => {
     expect(screen.getByText("gpt-4o")).toBeInTheDocument()
     expect(screen.getByText("2026-08-24 10:30 UTC")).toBeInTheDocument()
 
-    const summary = screen.getByText(/line one for Warden v0\.2/)
-    expect(summary.textContent).toContain("line two for Warden v0.2")
-    expect(summary).toHaveClass("whitespace-pre-wrap")
-    expect(summary).toHaveClass("[overflow-wrap:anywhere]")
+    const markdownHeading = screen.getByRole("heading", { name: "Highlights", level: 1 })
+    expect(markdownHeading).toBeInTheDocument()
+    expect(markdownHeading.parentElement).toHaveClass("whitespace-pre-wrap")
+    expect(screen.getByText("Markdown", { selector: "strong" })).toBeInTheDocument()
+    expect(screen.getByText("First item")).toBeInTheDocument()
+    expect(screen.queryByTestId("unsafe-html")).not.toBeInTheDocument()
   })
 
   test("sorts reports by created_at descending and groups them under full weekday date headings", async () => {
