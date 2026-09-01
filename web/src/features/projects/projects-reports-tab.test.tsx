@@ -1,4 +1,4 @@
-import { act, render, screen, waitFor } from "@testing-library/react"
+import { act, render, screen, waitFor, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { beforeEach, describe, expect, test, vi } from "vitest"
 import { api } from "@/api/client"
@@ -21,14 +21,19 @@ function project(id: number, name: string): Project {
   return { id, name }
 }
 
-function report(id: number, projectName: string, title: string): Report {
+function report(
+  id: number,
+  projectName: string,
+  title: string,
+  createdAt = "2026-08-24T10:30:00Z",
+): Report {
   return {
     id,
     project: projectName,
     title,
     summary: `line one for ${title}\nline two for ${title}`,
     agent_model: "gpt-4o",
-    created_at: "2026-08-24T10:30:00Z",
+    created_at: createdAt,
   }
 }
 
@@ -103,6 +108,51 @@ describe("ProjectsReportsTab", () => {
     expect(summary.textContent).toContain("line two for Warden v0.2")
     expect(summary).toHaveClass("whitespace-pre-wrap")
     expect(summary).toHaveClass("[overflow-wrap:anywhere]")
+  })
+
+  test("sorts reports by created_at descending and groups them under full weekday date headings", async () => {
+    mockedAPI.listReports.mockResolvedValue([
+      report(1, "warden", "Oldest", "2026-08-23T18:00:00Z"),
+      report(2, "warden", "Newest", "2026-08-25T09:00:00Z"),
+      report(3, "warden", "Middle", "2026-08-24T10:30:00Z"),
+    ])
+    const user = userEvent.setup()
+
+    render(
+      <ProjectsReportsTab resource={projectsResource([project(1, "warden")])} notify={notify} />,
+    )
+
+    await user.click(screen.getByRole("button", { name: "warden" }))
+
+    const reportsSection = await screen.findByRole("region", { name: "Reports" })
+    const dateHeadings = within(reportsSection).getAllByRole("heading", { level: 3 })
+    expect(dateHeadings.map(heading => heading.textContent)).toEqual([
+      "Tuesday, 25/08/2026",
+      "Monday, 24/08/2026",
+      "Sunday, 23/08/2026",
+    ])
+    const reportItems = within(reportsSection).getAllByRole("listitem")
+    expect(reportItems.map(item => item.textContent)).toEqual(["Newest", "Middle", "Oldest"])
+  })
+
+  test("keeps same-day reports under one heading in descending order", async () => {
+    mockedAPI.listReports.mockResolvedValue([
+      report(1, "warden", "Earlier", "2026-08-24T08:00:00Z"),
+      report(2, "warden", "Later", "2026-08-24T10:30:00Z"),
+    ])
+    const user = userEvent.setup()
+
+    render(
+      <ProjectsReportsTab resource={projectsResource([project(1, "warden")])} notify={notify} />,
+    )
+
+    await user.click(screen.getByRole("button", { name: "warden" }))
+
+    const reportsSection = await screen.findByRole("region", { name: "Reports" })
+    const dateHeadings = within(reportsSection).getAllByRole("heading", { level: 3 })
+    expect(dateHeadings.map(heading => heading.textContent)).toEqual(["Monday, 24/08/2026"])
+    const reportItems = within(reportsSection).getAllByRole("listitem")
+    expect(reportItems.map(item => item.textContent)).toEqual(["Later", "Earlier"])
   })
 
   test("explains empty project, report, and selection states", async () => {
