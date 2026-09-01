@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react"
+import ReactMarkdown from "react-markdown"
 import { api } from "@/api/client"
 import type { Project, ProjectRequest, Report, ReportRequest } from "@/api/types"
 import { Button } from "@/components/ui/button"
@@ -146,8 +147,8 @@ function ReportList({
   )
 }
 
-/** Third pane: complete immutable report content with line-break-preserving
- * summary that wraps within the pane. */
+/** Third pane: complete immutable report content with Markdown summary that
+ * wraps within the pane. Raw HTML remains disabled for untrusted reports. */
 function ReportContent({ report }: { report: Report | null }) {
   if (!report) {
     return <p className="text-sm text-muted-foreground">Select a report to view its content.</p>
@@ -165,7 +166,11 @@ function ReportContent({ report }: { report: Report | null }) {
           <dd>{formatTimestamp(report.created_at)}</dd>
         </div>
       </dl>
-      <p className="whitespace-pre-wrap [overflow-wrap:anywhere]">{report.summary}</p>
+      <div
+        className="space-y-2 whitespace-pre-wrap [overflow-wrap:anywhere] [&_h1]:text-lg [&_h1]:font-semibold [&_h2]:text-base [&_h2]:font-semibold [&_h3]:font-semibold [&_ol]:list-decimal [&_ol]:pl-5 [&_ul]:list-disc [&_ul]:pl-5"
+      >
+        <ReactMarkdown skipHtml>{report.summary}</ReactMarkdown>
+      </div>
     </article>
   )
 }
