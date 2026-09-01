@@ -30,6 +30,30 @@ function formatTimestamp(iso: string): string {
   return `${date.getUTCFullYear()}-${pad(date.getUTCMonth() + 1)}-${pad(date.getUTCDate())} ${pad(date.getUTCHours())}:${pad(date.getUTCMinutes())} UTC`
 }
 
+const WEEKDAYS = [
+  "Sunday",
+  "Monday",
+  "Tuesday",
+  "Wednesday",
+  "Thursday",
+  "Friday",
+  "Saturday",
+] as const
+
+/** UTC calendar date key (YYYY-MM-DD) used to group reports by day. */
+function utcDateKey(iso: string): string {
+  const date = new Date(iso)
+  const pad = (n: number) => String(n).padStart(2, "0")
+  return `${date.getUTCFullYear()}-${pad(date.getUTCMonth() + 1)}-${pad(date.getUTCDate())}`
+}
+
+/** Full weekday name and DD/MM/YYYY heading for a report's UTC date. */
+function formatDateHeading(iso: string): string {
+  const date = new Date(iso)
+  const pad = (n: number) => String(n).padStart(2, "0")
+  return `${WEEKDAYS[date.getUTCDay()]}, ${pad(date.getUTCDate())}/${pad(date.getUTCMonth() + 1)}/${date.getUTCFullYear()}`
+}
+
 /** First pane: projects with a New Project action. Names are stable unique
  * identifiers, so selection is matched by name. */
 function ProjectList({
@@ -66,7 +90,8 @@ function ProjectList({
   )
 }
 
-/** Second pane: immutable report list for the selected project. */
+/** Second pane: immutable report list for the selected project, sorted by
+ * created_at descending and grouped under full-weekday UTC date headings. */
 function ReportList({
   reports,
   selected,
@@ -79,25 +104,45 @@ function ReportList({
   if (reports.length === 0) {
     return <p className="text-sm text-muted-foreground">No reports yet for this project.</p>
   }
+  const sorted = [...reports].sort((a, b) => Date.parse(b.created_at) - Date.parse(a.created_at))
+  const groups: { date: string; reports: Report[] }[] = []
+  for (const report of sorted) {
+    const date = utcDateKey(report.created_at)
+    const last = groups[groups.length - 1]
+    if (last !== undefined && last.date === date) {
+      last.reports.push(report)
+    } else {
+      groups.push({ date, reports: [report] })
+    }
+  }
   return (
-    <ul className="space-y-1">
-      {reports.map(report => {
-        const isSelected = selected?.id === report.id
-        return (
-          <li key={report.id}>
-            <Button
-              type="button"
-              variant={isSelected ? "default" : "outline"}
-              className="w-full justify-start"
-              aria-pressed={isSelected}
-              onClick={() => onSelect(report)}
-            >
-              {report.title}
-            </Button>
-          </li>
-        )
-      })}
-    </ul>
+    <div className="space-y-3">
+      {groups.map(group => (
+        <div key={group.date} className="space-y-1">
+          <h3 className="text-sm font-semibold text-muted-foreground">
+            {formatDateHeading(group.reports[0].created_at)}
+          </h3>
+          <ul className="space-y-1">
+            {group.reports.map(report => {
+              const isSelected = selected?.id === report.id
+              return (
+                <li key={report.id}>
+                  <Button
+                    type="button"
+                    variant={isSelected ? "default" : "outline"}
+                    className="w-full justify-start"
+                    aria-pressed={isSelected}
+                    onClick={() => onSelect(report)}
+                  >
+                    {report.title}
+                  </Button>
+                </li>
+              )
+            })}
+          </ul>
+        </div>
+      ))}
+    </div>
   )
 }
 
