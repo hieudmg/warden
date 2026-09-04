@@ -444,7 +444,7 @@ func writeConfigSearchResults(w io.Writer, query string, sshConns []model.SSHCon
 
 	var matchedDB []model.DBConnection
 	for _, conn := range dbConns {
-		if matchesConfigSearch(query, conn.Name, conn.Host) {
+		if matchesDBConfigSearch(query, conn) {
 			matchedDB = append(matchedDB, conn)
 		}
 	}
@@ -483,6 +483,18 @@ func writeConfigSearchResults(w io.Writer, query string, sshConns []model.SSHCon
 
 func matchesConfigSearch(query, name, host string) bool {
 	return strings.Contains(strings.ToLower(name), query) || strings.Contains(strings.ToLower(host), query)
+}
+
+func matchesDBConfigSearch(query string, conn model.DBConnection) bool {
+	if matchesConfigSearch(query, conn.Name, conn.Host) {
+		return true
+	}
+	for _, database := range conn.Databases {
+		if strings.Contains(strings.ToLower(database.Name), query) {
+			return true
+		}
+	}
+	return false
 }
 
 func treeEntry(index, total int, value string) string {

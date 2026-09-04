@@ -171,7 +171,8 @@ warden db <connection>/<database> "<sql>"
 # Record an agent change report. Immutable, append-only.
 warden report create <project> --title <title> --summary <summary> --agent-model <name>
 
-# Search redacted SSH and database connection profiles by name or host.
+# Search redacted SSH and database connection profiles by name or host;
+# database profiles also match configured database names.
 warden config search "production"
 
 # Interactive shell (PTY). Omit the name for the built-in picker.
