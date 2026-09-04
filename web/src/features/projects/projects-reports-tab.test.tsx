@@ -91,7 +91,7 @@ describe("ProjectsReportsTab", () => {
   test("selecting a project loads its reports and renders selected report Markdown", async () => {
     const wardenReport = {
       ...report(10, "warden", "Warden v0.2"),
-      summary: "# Highlights\n\n**Markdown** report\n\n- First item\n\n<span data-testid=\"unsafe-html\">Unsafe HTML</span>",
+      summary: "# Highlights\n\n**Markdown** report\n\n- First item\n\n```text\na-very-long-code-line-that-must-wrap-within-the-report-pane\n```\n\n<span data-testid=\"unsafe-html\">Unsafe HTML</span>",
     }
     mockedAPI.listReports.mockResolvedValue([wardenReport])
     const user = userEvent.setup()
@@ -123,6 +123,13 @@ describe("ProjectsReportsTab", () => {
     )
     expect(screen.getByText("Markdown", { selector: "strong" })).toBeInTheDocument()
     expect(screen.getByText("First item")).toBeInTheDocument()
+    expect(
+      screen.getByText("a-very-long-code-line-that-must-wrap-within-the-report-pane").closest("pre"),
+    ).toBeInTheDocument()
+    expect(markdownHeading.parentElement).toHaveClass(
+      "[&_pre]:whitespace-pre-wrap",
+      "[&_pre]:[overflow-wrap:anywhere]",
+    )
     expect(screen.queryByTestId("unsafe-html")).not.toBeInTheDocument()
   })
 
