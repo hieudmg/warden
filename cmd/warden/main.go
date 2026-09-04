@@ -442,10 +442,17 @@ func writeConfigSearchResults(w io.Writer, query string, sshConns []model.SSHCon
 		}
 	}
 
-	var matchedDB []model.DBConnection
+	type matchedDatabase struct {
+		connection model.DBConnection
+		name       string
+	}
+	var matchedDB []matchedDatabase
 	for _, conn := range dbConns {
-		if matchesDBConfigSearch(query, conn) {
-			matchedDB = append(matchedDB, conn)
+		profileMatch := matchesConfigSearch(query, conn.Name, conn.Host)
+		for _, database := range conn.Databases {
+			if profileMatch || strings.Contains(strings.ToLower(database.Name), query) {
+				matchedDB = append(matchedDB, matchedDatabase{connection: conn, name: database.Name})
+			}
 		}
 	}
 	if len(matchedSSH) == 0 && len(matchedDB) == 0 {
@@ -466,8 +473,10 @@ func writeConfigSearchResults(w io.Writer, query string, sshConns []model.SSHCon
 			lines = append(lines, "")
 		}
 		lines = append(lines, "DB")
-		for i, conn := range matchedDB {
-			entry := sanitizeConfigSearchField(conn.Name) + " — " + sanitizeConfigSearchField(conn.Host)
+		for i, match := range matchedDB {
+			conn := match.connection
+			database := sanitizeConfigSearchField(match.name)
+			entry := sanitizeConfigSearchField(conn.Name) + "/" + database + " — " + sanitizeConfigSearchField(conn.Host) + "/" + database
 			if conn.SSHConnectionID != 0 {
 				sshName, ok := sshNames[conn.SSHConnectionID]
 				if !ok {
@@ -483,18 +492,6 @@ func writeConfigSearchResults(w io.Writer, query string, sshConns []model.SSHCon
 
 func matchesConfigSearch(query, name, host string) bool {
 	return strings.Contains(strings.ToLower(name), query) || strings.Contains(strings.ToLower(host), query)
-}
-
-func matchesDBConfigSearch(query string, conn model.DBConnection) bool {
-	if matchesConfigSearch(query, conn.Name, conn.Host) {
-		return true
-	}
-	for _, database := range conn.Databases {
-		if strings.Contains(strings.ToLower(database.Name), query) {
-			return true
-		}
-	}
-	return false
 }
 
 func treeEntry(index, total int, value string) string {

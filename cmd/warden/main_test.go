@@ -481,9 +481,9 @@ func TestRunConfigSearch(t *testing.T) {
 			]`)
 		case "/api/v1/db-connections":
 			io.WriteString(w, `[
-				{"id":20,"name":"reporting","host":"prod-db.internal","port":3306,"username":"private-db-user","database":"analytics","ssh_connection_id":10},
-				{"id":21,"name":"prod-name","host":"mysql.internal","port":3306,"username":"private-mysql-user","database":"app"},
-				{"id":22,"name":"dev-db","host":"dev-db.internal","port":3306,"username":"private-dev-db-user","database":"dev"}
+				{"id":20,"name":"reporting","host":"prod-db.internal","port":3306,"username":"private-db-user","database":"analytics","databases":[{"name":"analytics","is_default":true}],"ssh_connection_id":10},
+				{"id":21,"name":"prod-name","host":"mysql.internal","port":3306,"username":"private-mysql-user","database":"app","databases":[{"name":"app","is_default":true}]},
+				{"id":22,"name":"dev-db","host":"dev-db.internal","port":3306,"username":"private-dev-db-user","database":"dev","databases":[{"name":"dev","is_default":true}]}
 			]`)
 		default:
 			http.NotFound(w, r)
@@ -508,7 +508,7 @@ func TestRunConfigSearch(t *testing.T) {
 	if exitCode != 0 {
 		t.Fatalf("run() exitCode = %d, want 0, stderr=%q", exitCode, stderr.String())
 	}
-	const want = "SSH\n├── prod-web — edge.internal\n└── bastion — prod-gateway.internal\n\nDB\n├── reporting — prod-db.internal — SSH: prod-web\n└── prod-name — mysql.internal\n"
+	const want = "SSH\n├── prod-web — edge.internal\n└── bastion — prod-gateway.internal\n\nDB\n├── reporting/analytics — prod-db.internal/analytics — SSH: prod-web\n└── prod-name/app — mysql.internal/app\n"
 	if stdout.String() != want {
 		t.Errorf("stdout = %q, want %q", stdout.String(), want)
 	}
@@ -529,14 +529,21 @@ func TestWriteConfigSearchResultsMatchesConfiguredDatabaseNames(t *testing.T) {
 		},
 	}}
 
-	for _, query := range []string{"orders", "AUDIT"} {
-		t.Run(query, func(t *testing.T) {
+	tests := []struct {
+		query string
+		want  string
+	}{
+		{query: "orders", want: "DB\n└── warehouse/orders — db.internal/orders\n"},
+		{query: "AUDIT", want: "DB\n└── warehouse/audit — db.internal/audit\n"},
+		{query: "warehouse", want: "DB\n├── warehouse/orders — db.internal/orders\n└── warehouse/audit — db.internal/audit\n"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.query, func(t *testing.T) {
 			var stdout bytes.Buffer
-			writeConfigSearchResults(&stdout, query, nil, dbConns)
+			writeConfigSearchResults(&stdout, tc.query, nil, dbConns)
 
-			const want = "DB\n└── warehouse — db.internal\n"
-			if stdout.String() != want {
-				t.Errorf("stdout = %q, want %q", stdout.String(), want)
+			if stdout.String() != tc.want {
+				t.Errorf("stdout = %q, want %q", stdout.String(), tc.want)
 			}
 		})
 	}
