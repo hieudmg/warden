@@ -520,6 +520,51 @@ func TestRunConfigSearch(t *testing.T) {
 	}
 }
 
+func TestWriteConfigSearchResultsMatchesConfiguredDatabaseNames(t *testing.T) {
+	dbConns := []model.DBConnection{{
+		Name: "warehouse", Host: "db.internal",
+		Databases: []model.DatabaseInfo{
+			{Name: "orders", IsDefault: true},
+			{Name: "audit", IsDefault: false},
+		},
+	}}
+
+	for _, query := range []string{"orders", "AUDIT"} {
+		t.Run(query, func(t *testing.T) {
+			var stdout bytes.Buffer
+			writeConfigSearchResults(&stdout, query, nil, dbConns)
+
+			const want = "DB\n└── warehouse — db.internal\n"
+			if stdout.String() != want {
+				t.Errorf("stdout = %q, want %q", stdout.String(), want)
+			}
+		})
+	}
+}
+
+func TestWriteConfigSearchResultsIgnoresLegacyDatabaseField(t *testing.T) {
+	var stdout bytes.Buffer
+	writeConfigSearchResults(&stdout, "legacy", nil, []model.DBConnection{{
+		Name: "warehouse", Host: "db.internal", Database: "legacy",
+		Databases: []model.DatabaseInfo{{Name: "orders", IsDefault: true}},
+	}})
+
+	if stdout.String() != "No matching connections.\n" {
+		t.Errorf("stdout = %q, want no-match message", stdout.String())
+	}
+}
+
+func TestWriteConfigSearchResultsIgnoresLegacyDatabaseFieldWithoutCanonicalList(t *testing.T) {
+	var stdout bytes.Buffer
+	writeConfigSearchResults(&stdout, "legacy", nil, []model.DBConnection{{
+		Name: "warehouse", Host: "db.internal", Database: "legacy",
+	}})
+
+	if stdout.String() != "No matching connections.\n" {
+		t.Errorf("stdout = %q, want no-match message", stdout.String())
+	}
+}
+
 func TestWriteConfigSearchResultsEscapesControlCharacters(t *testing.T) {
 	var stdout bytes.Buffer
 	writeConfigSearchResults(&stdout, "bad", []model.SSHConnection{{
