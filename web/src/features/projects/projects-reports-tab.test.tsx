@@ -79,7 +79,13 @@ describe("ProjectsReportsTab", () => {
 
     const layout = screen.getByTestId("projects-layout")
     expect(layout).toHaveClass("grid-cols-1")
+    expect(layout).toHaveClass("lg:h-full")
+    expect(layout).toHaveClass("lg:min-h-0")
     expect(layout).toHaveClass("lg:grid-cols-[minmax(0,0.8fr)_minmax(0,1fr)_minmax(0,1.7fr)]")
+
+    for (const name of ["Projects", "Reports", "Report content"]) {
+      expect(screen.getByRole("region", { name })).toHaveClass("lg:min-h-0", "lg:overflow-y-auto")
+    }
   })
 
   test("selecting a project loads its reports and renders selected report Markdown", async () => {
@@ -109,7 +115,12 @@ describe("ProjectsReportsTab", () => {
 
     const markdownHeading = screen.getByRole("heading", { name: "Highlights", level: 1 })
     expect(markdownHeading).toBeInTheDocument()
-    expect(markdownHeading.parentElement).toHaveClass("whitespace-pre-wrap")
+    expect(markdownHeading.parentElement).toHaveClass(
+      "space-y-1",
+      "whitespace-pre-wrap",
+      "leading-snug",
+      "[&_h1]:leading-tight",
+    )
     expect(screen.getByText("Markdown", { selector: "strong" })).toBeInTheDocument()
     expect(screen.getByText("First item")).toBeInTheDocument()
     expect(screen.queryByTestId("unsafe-html")).not.toBeInTheDocument()
