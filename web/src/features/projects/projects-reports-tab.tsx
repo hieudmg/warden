@@ -167,7 +167,7 @@ function ReportContent({ report }: { report: Report | null }) {
         </div>
       </dl>
       <div
-        className="space-y-2 whitespace-pre-wrap [overflow-wrap:anywhere] [&_h1]:text-lg [&_h1]:font-semibold [&_h2]:text-base [&_h2]:font-semibold [&_h3]:font-semibold [&_ol]:list-decimal [&_ol]:pl-5 [&_ul]:list-disc [&_ul]:pl-5"
+        className="space-y-1 whitespace-pre-wrap leading-snug [overflow-wrap:anywhere] [&_h1]:text-lg [&_h1]:font-semibold [&_h1]:leading-tight [&_h2]:text-base [&_h2]:font-semibold [&_h2]:leading-tight [&_h3]:font-semibold [&_h3]:leading-tight [&_ol]:list-decimal [&_ol]:pl-5 [&_ul]:list-disc [&_ul]:pl-5"
       >
         <ReactMarkdown skipHtml>{report.summary}</ReactMarkdown>
       </div>
@@ -274,12 +274,12 @@ export function ProjectsReportsTab({ resource, notify }: ProjectsReportsTabProps
   }
 
   return (
-    <div className="p-4">
+    <div className="p-4 lg:h-full lg:min-h-0">
       <div
-        className="grid grid-cols-1 gap-4 lg:grid-cols-[minmax(0,0.8fr)_minmax(0,1fr)_minmax(0,1.7fr)]"
+        className="grid grid-cols-1 gap-4 lg:h-full lg:min-h-0 lg:grid-cols-[minmax(0,0.8fr)_minmax(0,1fr)_minmax(0,1.7fr)]"
         data-testid="projects-layout"
       >
-        <section className="min-w-0" aria-labelledby="projects-heading">
+        <section className="min-w-0 lg:min-h-0 lg:overflow-y-auto" aria-labelledby="projects-heading">
           <div className="mb-3 flex items-center justify-between">
             <h2 id="projects-heading" className="text-lg font-semibold">
               Projects
@@ -308,7 +308,7 @@ export function ProjectsReportsTab({ resource, notify }: ProjectsReportsTabProps
           )}
         </section>
 
-        <section className="min-w-0" aria-labelledby="reports-heading">
+        <section className="min-w-0 lg:min-h-0 lg:overflow-y-auto" aria-labelledby="reports-heading">
           <div className="mb-3 flex items-center justify-between">
             <h2 id="reports-heading" className="text-lg font-semibold">
               Reports
@@ -339,7 +339,7 @@ export function ProjectsReportsTab({ resource, notify }: ProjectsReportsTabProps
           )}
         </section>
 
-        <section className="min-w-0" aria-labelledby="report-content-heading">
+        <section className="min-w-0 lg:min-h-0 lg:overflow-y-auto" aria-labelledby="report-content-heading">
           <h2 id="report-content-heading" className="mb-3 text-lg font-semibold">
             Report content
           </h2>
