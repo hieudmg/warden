@@ -166,9 +166,7 @@ function ReportContent({ report }: { report: Report | null }) {
           <dd>{formatTimestamp(report.created_at)}</dd>
         </div>
       </dl>
-      <div
-        className="space-y-0.5 leading-snug [overflow-wrap:anywhere] [&_h1]:text-lg [&_h1]:font-semibold [&_h1]:leading-tight [&_h2]:text-base [&_h2]:font-semibold [&_h2]:leading-tight [&_h3]:font-semibold [&_h3]:leading-tight [&_ol]:list-decimal [&_ol]:pl-5 [&_ul]:list-disc [&_ul]:pl-5 [&_p]:whitespace-pre-wrap [&_li]:whitespace-pre-wrap [&_pre]:whitespace-pre-wrap [&_pre]:[overflow-wrap:anywhere]"
-      >
+      <div className="markdown-body">
         <ReactMarkdown skipHtml>{report.summary}</ReactMarkdown>
       </div>
     </article>

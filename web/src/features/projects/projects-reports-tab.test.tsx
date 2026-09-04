@@ -115,14 +115,17 @@ describe("ProjectsReportsTab", () => {
 
     const markdownHeading = screen.getByRole("heading", { name: "Highlights", level: 1 })
     expect(markdownHeading).toBeInTheDocument()
-    expect(markdownHeading.parentElement).toHaveClass(
+    expect(markdownHeading.parentElement).toHaveClass("markdown-body")
+    expect(markdownHeading.parentElement).not.toHaveClass(
       "space-y-0.5",
       "leading-snug",
+      "whitespace-pre-wrap",
       "[&_h1]:leading-tight",
       "[&_p]:whitespace-pre-wrap",
       "[&_li]:whitespace-pre-wrap",
+      "[&_pre]:whitespace-pre-wrap",
+      "[&_pre]:[overflow-wrap:anywhere]",
     )
-    expect(markdownHeading.parentElement).not.toHaveClass("whitespace-pre-wrap")
     expect(screen.getByText("Markdown", { selector: "strong" })).toBeInTheDocument()
     expect(
       screen.getByText(
@@ -134,10 +137,6 @@ describe("ProjectsReportsTab", () => {
     expect(
       screen.getByText("a-very-long-code-line-that-must-wrap-within-the-report-pane").closest("pre"),
     ).toBeInTheDocument()
-    expect(markdownHeading.parentElement).toHaveClass(
-      "[&_pre]:whitespace-pre-wrap",
-      "[&_pre]:[overflow-wrap:anywhere]",
-    )
     expect(screen.queryByTestId("unsafe-html")).not.toBeInTheDocument()
   })
 
