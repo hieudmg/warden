@@ -116,7 +116,7 @@ export function App() {
   }
 
   return (
-    <div className="min-h-screen bg-background text-foreground">
+    <div className="flex min-h-screen flex-col bg-background text-foreground">
       <header className="border-b px-6 py-4">
         <h1 className="text-xl font-semibold">Warden Hub</h1>
         <p className="text-sm text-muted-foreground">
@@ -124,8 +124,8 @@ export function App() {
         </p>
       </header>
       <Notifications items={notifications} onDismiss={dismissNotification} />
-      <Tabs value={route} onValueChange={selectRoute}>
-        <TabsList className="mx-4 mt-4">
+      <Tabs value={route} onValueChange={selectRoute} className="min-h-0 flex-1">
+        <TabsList className="mx-4 mt-4 shrink-0">
           <TabsTrigger value="ssh">SSH</TabsTrigger>
           <TabsTrigger value="db">Databases</TabsTrigger>
           <TabsTrigger value="groups">Groups</TabsTrigger>

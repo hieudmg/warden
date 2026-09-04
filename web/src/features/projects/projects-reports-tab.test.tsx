@@ -79,13 +79,19 @@ describe("ProjectsReportsTab", () => {
 
     const layout = screen.getByTestId("projects-layout")
     expect(layout).toHaveClass("grid-cols-1")
+    expect(layout).toHaveClass("lg:h-full")
+    expect(layout).toHaveClass("lg:min-h-0")
     expect(layout).toHaveClass("lg:grid-cols-[minmax(0,0.8fr)_minmax(0,1fr)_minmax(0,1.7fr)]")
+
+    for (const name of ["Projects", "Reports", "Report content"]) {
+      expect(screen.getByRole("region", { name })).toHaveClass("lg:min-h-0", "lg:overflow-y-auto")
+    }
   })
 
   test("selecting a project loads its reports and renders selected report Markdown", async () => {
     const wardenReport = {
       ...report(10, "warden", "Warden v0.2"),
-      summary: "# Highlights\n\n**Markdown** report\n\n- First item\n\n<span data-testid=\"unsafe-html\">Unsafe HTML</span>",
+      summary: "# Highlights\n\n**Markdown** report\ncompact second line\n\n- First item\n\n```text\na-very-long-code-line-that-must-wrap-within-the-report-pane\n```\n\n<span data-testid=\"unsafe-html\">Unsafe HTML</span>",
     }
     mockedAPI.listReports.mockResolvedValue([wardenReport])
     const user = userEvent.setup()
@@ -109,9 +115,29 @@ describe("ProjectsReportsTab", () => {
 
     const markdownHeading = screen.getByRole("heading", { name: "Highlights", level: 1 })
     expect(markdownHeading).toBeInTheDocument()
-    expect(markdownHeading.parentElement).toHaveClass("whitespace-pre-wrap")
+    expect(markdownHeading.parentElement).toHaveClass(
+      "space-y-0.5",
+      "leading-snug",
+      "[&_h1]:leading-tight",
+      "[&_p]:whitespace-pre-wrap",
+      "[&_li]:whitespace-pre-wrap",
+    )
+    expect(markdownHeading.parentElement).not.toHaveClass("whitespace-pre-wrap")
     expect(screen.getByText("Markdown", { selector: "strong" })).toBeInTheDocument()
+    expect(
+      screen.getByText(
+        (_, element) =>
+          element?.tagName === "P" && element.textContent === "Markdown report\ncompact second line",
+      ),
+    ).toBeInTheDocument()
     expect(screen.getByText("First item")).toBeInTheDocument()
+    expect(
+      screen.getByText("a-very-long-code-line-that-must-wrap-within-the-report-pane").closest("pre"),
+    ).toBeInTheDocument()
+    expect(markdownHeading.parentElement).toHaveClass(
+      "[&_pre]:whitespace-pre-wrap",
+      "[&_pre]:[overflow-wrap:anywhere]",
+    )
     expect(screen.queryByTestId("unsafe-html")).not.toBeInTheDocument()
   })
 
