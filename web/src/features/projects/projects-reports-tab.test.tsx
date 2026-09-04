@@ -91,7 +91,7 @@ describe("ProjectsReportsTab", () => {
   test("selecting a project loads its reports and renders selected report Markdown", async () => {
     const wardenReport = {
       ...report(10, "warden", "Warden v0.2"),
-      summary: "# Highlights\n\n**Markdown** report\n\n- First item\n\n```text\na-very-long-code-line-that-must-wrap-within-the-report-pane\n```\n\n<span data-testid=\"unsafe-html\">Unsafe HTML</span>",
+      summary: "# Highlights\n\n**Markdown** report\ncompact second line\n\n- First item\n\n```text\na-very-long-code-line-that-must-wrap-within-the-report-pane\n```\n\n<span data-testid=\"unsafe-html\">Unsafe HTML</span>",
     }
     mockedAPI.listReports.mockResolvedValue([wardenReport])
     const user = userEvent.setup()
@@ -116,12 +116,20 @@ describe("ProjectsReportsTab", () => {
     const markdownHeading = screen.getByRole("heading", { name: "Highlights", level: 1 })
     expect(markdownHeading).toBeInTheDocument()
     expect(markdownHeading.parentElement).toHaveClass(
-      "space-y-1",
-      "whitespace-pre-wrap",
+      "space-y-0.5",
       "leading-snug",
       "[&_h1]:leading-tight",
+      "[&_p]:whitespace-pre-wrap",
+      "[&_li]:whitespace-pre-wrap",
     )
+    expect(markdownHeading.parentElement).not.toHaveClass("whitespace-pre-wrap")
     expect(screen.getByText("Markdown", { selector: "strong" })).toBeInTheDocument()
+    expect(
+      screen.getByText(
+        (_, element) =>
+          element?.tagName === "P" && element.textContent === "Markdown report\ncompact second line",
+      ),
+    ).toBeInTheDocument()
     expect(screen.getByText("First item")).toBeInTheDocument()
     expect(
       screen.getByText("a-very-long-code-line-that-must-wrap-within-the-report-pane").closest("pre"),
