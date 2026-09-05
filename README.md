@@ -63,7 +63,8 @@ curl -fsSL https://raw.githubusercontent.com/hieudmg/warden/main/scripts/install
 Windows client (user scope; no administrator rights):
 
 ```powershell
-irm https://raw.githubusercontent.com/hieudmg/warden/main/scripts/install-client.ps1 \
+Invoke-WebRequest `
+  -Uri https://raw.githubusercontent.com/hieudmg/warden/main/scripts/install-client.ps1 `
   -OutFile "$env:TEMP\warden-install-client.ps1"
 powershell -ExecutionPolicy Bypass -File "$env:TEMP\warden-install-client.ps1"
 ```
