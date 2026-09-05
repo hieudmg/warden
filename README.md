@@ -46,6 +46,39 @@ export WARDEN_CLIENT_API_BASE_URL=http://127.0.0.1:8080
 ./warden report create my-project --title "deployed" --summary "v2 shipped" --agent-model gpt-5.4
 ```
 
+## Installers
+
+Installers download and verify assets from the latest GitHub release. They
+prompt for configuration and can be rerun to update an existing installation.
+Existing client configuration, server database, and server master key are
+preserved during updates.
+
+Linux client (user scope; no sudo):
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/hieudmg/warden/main/scripts/install-client.sh \
+  | bash
+```
+
+Windows client (user scope; no administrator rights):
+
+```powershell
+irm https://raw.githubusercontent.com/hieudmg/warden/main/scripts/install-client.ps1 \
+  -OutFile "$env:TEMP\warden-install-client.ps1"
+powershell -ExecutionPolicy Bypass -File "$env:TEMP\warden-install-client.ps1"
+```
+
+Linux server (run as the target service user; no sudo during installation):
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/hieudmg/warden/main/scripts/install-server.sh \
+  | bash
+```
+
+The server installer stores `server.json`, `warden.db`, `master.key`, and the
+systemd unit in `~/.warden` by default. It prints setup and restart commands
+for both user and system systemd scopes after every install or update.
+
 ## Master key
 
 - 32 random bytes in a standalone file (default `/etc/warden/master.key`),

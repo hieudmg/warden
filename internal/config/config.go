@@ -336,6 +336,9 @@ func validateListenAddr(value string) error {
 	if strings.TrimSpace(host) == "" {
 		return fmt.Errorf("invalid listen address %q: host must not be empty", value)
 	}
+	if !isAllowedListenHost(host) {
+		return fmt.Errorf("invalid listen address %q: host must be localhost, loopback, or a Tailscale address", value)
+	}
 
 	parsedPort, err := strconv.Atoi(port)
 	if err != nil || parsedPort < 1 || parsedPort > 65535 {
@@ -343,6 +346,24 @@ func validateListenAddr(value string) error {
 	}
 
 	return nil
+}
+
+func isAllowedListenHost(host string) bool {
+	if strings.EqualFold(host, "localhost") {
+		return true
+	}
+
+	ip := net.ParseIP(host)
+	if ip == nil {
+		return false
+	}
+	if ip.IsLoopback() {
+		return true
+	}
+
+	_, tailscaleCGNAT, _ := net.ParseCIDR("100.64.0.0/10")
+	_, tailscaleIPv6, _ := net.ParseCIDR("fd7a:115c:a1e0::/48")
+	return tailscaleCGNAT.Contains(ip) || tailscaleIPv6.Contains(ip)
 }
 
 func validateAPIBaseURL(value string) (string, error) {
