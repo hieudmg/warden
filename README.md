@@ -173,7 +173,9 @@ warden report create <project> --title <title> --summary <summary> --agent-model
 
 # Search redacted SSH and database connection profiles by name or host;
 # database profiles also match configured names and return usable
-# <connection>/<database> targets with host/database metadata.
+# <connection>/<database> targets with host/database metadata. Search is
+# word-based, typo-tolerant, and ranks results independently in each section;
+# partial matches remain visible below stronger matches.
 warden config search "production"
 
 # Interactive shell (PTY). Omit the name for the built-in picker.
