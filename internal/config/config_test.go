@@ -84,6 +84,39 @@ func TestLoadServerRejectsInvalidListenAddr(t *testing.T) {
 	}
 }
 
+func TestValidateListenAddrAllowsLoopbackAndTailscaleHosts(t *testing.T) {
+	t.Parallel()
+
+	for _, address := range []string{
+		"localhost:8080",
+		"127.0.0.1:8080",
+		"[::1]:8080",
+		"100.64.0.1:8080",
+		"[fd7a:115c:a1e0::1]:8080",
+	} {
+		if err := validateListenAddr(address); err != nil {
+			t.Errorf("validateListenAddr(%q) error = %v", address, err)
+		}
+	}
+}
+
+func TestValidateListenAddrRejectsPublicAndWildcardHosts(t *testing.T) {
+	t.Parallel()
+
+	for _, address := range []string{
+		"0.0.0.0:8080",
+		"192.168.1.20:8080",
+		"203.0.113.20:8080",
+		"[::]:8080",
+		"[0:0:0:0:0:0::]:8080",
+		"warden.example:8080",
+	} {
+		if err := validateListenAddr(address); err == nil {
+			t.Errorf("validateListenAddr(%q) error = nil, want unsafe-host error", address)
+		}
+	}
+}
+
 func TestLoadClientRejectsInvalidAPIBaseURL(t *testing.T) {
 	t.Parallel()
 

@@ -1,7 +1,7 @@
 BIN_DIR ?= bin
 
 .PHONY: build build-server build-client build-client-windows test test-race vet \
-	frontend-install frontend-test frontend-build
+	frontend-install frontend-test frontend-build installer-test
 
 build: build-server build-client
 
@@ -28,7 +28,10 @@ build-client-windows:
 	@mkdir -p $(BIN_DIR)
 	GOOS=windows GOARCH=amd64 go build -o $(BIN_DIR)/warden.exe ./cmd/warden
 
-test: frontend-test frontend-build
+installer-test:
+	bash scripts/test-installers.sh
+
+test: frontend-test frontend-build installer-test
 	go test ./...
 
 test-race: frontend-test frontend-build
