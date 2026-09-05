@@ -9,9 +9,12 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 	"unicode"
+
+	"github.com/lithammer/fuzzysearch/fuzzy"
 
 	"warden/internal/client/agent"
 	"warden/internal/client/api"
@@ -431,49 +434,72 @@ func runConfig(args []string, configPath string, configPathSet bool, stdout, std
 	return 0
 }
 
+type configSearchScore struct {
+	matched        int
+	normalizedTypo float64
+	exact          int
+	prefix         int
+	originalIndex  int
+}
+
 func writeConfigSearchResults(w io.Writer, query string, sshConns []model.SSHConnection, dbConns []model.DBConnection) {
-	query = strings.ToLower(strings.TrimSpace(query))
 	sshNames := make(map[int64]string, len(sshConns))
-	var matchedSSH []model.SSHConnection
-	for _, conn := range sshConns {
+	type matchedSSH struct {
+		connection model.SSHConnection
+		score      configSearchScore
+	}
+	var sshMatches []matchedSSH
+	for index, conn := range sshConns {
 		sshNames[conn.ID] = conn.Name
-		if matchesConfigSearch(query, conn.Name, conn.Host) {
-			matchedSSH = append(matchedSSH, conn)
+		if score, ok := scoreConfigSearch(query, conn.Name, conn.Host); ok {
+			score.originalIndex = index
+			sshMatches = append(sshMatches, matchedSSH{connection: conn, score: score})
 		}
 	}
+	sort.SliceStable(sshMatches, func(i, j int) bool {
+		return lessConfigSearchScore(sshMatches[i].score, sshMatches[j].score)
+	})
 
 	type matchedDatabase struct {
 		connection model.DBConnection
 		name       string
+		score      configSearchScore
 	}
-	var matchedDB []matchedDatabase
+	var dbMatches []matchedDatabase
+	index := 0
 	for _, conn := range dbConns {
-		profileMatch := matchesConfigSearch(query, conn.Name, conn.Host)
 		for _, database := range conn.Databases {
-			if profileMatch || strings.Contains(strings.ToLower(database.Name), query) {
-				matchedDB = append(matchedDB, matchedDatabase{connection: conn, name: database.Name})
+			if score, ok := scoreConfigSearch(query, conn.Name, conn.Host, database.Name); ok {
+				score.originalIndex = index
+				dbMatches = append(dbMatches, matchedDatabase{connection: conn, name: database.Name, score: score})
 			}
+			index++
 		}
 	}
-	if len(matchedSSH) == 0 && len(matchedDB) == 0 {
+	sort.SliceStable(dbMatches, func(i, j int) bool {
+		return lessConfigSearchScore(dbMatches[i].score, dbMatches[j].score)
+	})
+
+	if len(sshMatches) == 0 && len(dbMatches) == 0 {
 		fmt.Fprintln(w, "No matching connections.")
 		return
 	}
 
 	var lines []string
-	if len(matchedSSH) > 0 {
+	if len(sshMatches) > 0 {
 		lines = append(lines, "SSH")
-		for i, conn := range matchedSSH {
+		for i, match := range sshMatches {
+			conn := match.connection
 			entry := sanitizeConfigSearchField(conn.Name) + " — " + sanitizeConfigSearchField(conn.Host)
-			lines = append(lines, treeEntry(i, len(matchedSSH), entry))
+			lines = append(lines, treeEntry(i, len(sshMatches), entry))
 		}
 	}
-	if len(matchedDB) > 0 {
+	if len(dbMatches) > 0 {
 		if len(lines) > 0 {
 			lines = append(lines, "")
 		}
 		lines = append(lines, "DB")
-		for i, match := range matchedDB {
+		for i, match := range dbMatches {
 			conn := match.connection
 			database := sanitizeConfigSearchField(match.name)
 			entry := sanitizeConfigSearchField(conn.Name) + "/" + database + " — " + sanitizeConfigSearchField(conn.Host) + "/" + database
@@ -484,14 +510,135 @@ func writeConfigSearchResults(w io.Writer, query string, sshConns []model.SSHCon
 				}
 				entry += " — SSH: " + sanitizeConfigSearchField(sshName)
 			}
-			lines = append(lines, treeEntry(i, len(matchedDB), entry))
+			lines = append(lines, treeEntry(i, len(dbMatches), entry))
 		}
 	}
 	fmt.Fprintln(w, strings.Join(lines, "\n"))
 }
 
-func matchesConfigSearch(query, name, host string) bool {
-	return strings.Contains(strings.ToLower(name), query) || strings.Contains(strings.ToLower(host), query)
+func scoreConfigSearch(query string, fields ...string) (configSearchScore, bool) {
+	queryWords := configSearchWords(query)
+	if len(queryWords) == 0 {
+		return configSearchScore{}, strings.TrimSpace(query) == ""
+	}
+
+	targetWords := make([]string, 0)
+	for _, field := range fields {
+		targetWords = append(targetWords, configSearchWords(field)...)
+	}
+
+	var score configSearchScore
+	for _, queryWord := range queryWords {
+		best, ok := bestConfigSearchWord(queryWord, targetWords)
+		if !ok {
+			continue
+		}
+		score.matched++
+		score.normalizedTypo += best.normalizedTypo
+		score.exact += best.exact
+		score.prefix += best.prefix
+	}
+	return score, score.matched > 0
+}
+
+type configSearchWordScore struct {
+	normalizedTypo float64
+	exact          int
+	prefix         int
+}
+
+func bestConfigSearchWord(queryWord string, targetWords []string) (configSearchWordScore, bool) {
+	var best configSearchWordScore
+	found := false
+	for _, targetWord := range targetWords {
+		candidate, ok := scoreConfigSearchWord(queryWord, targetWord)
+		if !ok {
+			continue
+		}
+		if !found || lessConfigSearchWordScore(candidate, best) {
+			best, found = candidate, true
+		}
+	}
+	return best, found
+}
+
+func scoreConfigSearchWord(queryWord, targetWord string) (configSearchWordScore, bool) {
+	queryWord = strings.ToLower(queryWord)
+	targetWord = strings.ToLower(targetWord)
+	if queryWord == "" || targetWord == "" {
+		return configSearchWordScore{}, false
+	}
+
+	candidate := targetWord
+	prefix := false
+	if len([]rune(targetWord)) > len([]rune(queryWord)) {
+		prefixRunes := []rune(targetWord)[:len([]rune(queryWord))]
+		prefixDistance := fuzzy.LevenshteinDistance(queryWord, string(prefixRunes))
+		if prefixDistance < fuzzy.LevenshteinDistance(queryWord, targetWord) {
+			candidate = string(prefixRunes)
+			prefix = true
+		}
+	}
+
+	distance := fuzzy.LevenshteinDistance(queryWord, candidate)
+	if distance > configSearchMaxDistance(len([]rune(queryWord))) {
+		return configSearchWordScore{}, false
+	}
+	maxLength := len([]rune(queryWord))
+	if candidateLength := len([]rune(candidate)); candidateLength > maxLength {
+		maxLength = candidateLength
+	}
+	score := configSearchWordScore{normalizedTypo: float64(distance) / float64(maxLength)}
+	if distance == 0 && !prefix {
+		score.exact = 1
+	}
+	if prefix {
+		score.prefix = 1
+	}
+	return score, true
+}
+
+func lessConfigSearchWordScore(a, b configSearchWordScore) bool {
+	if a.normalizedTypo != b.normalizedTypo {
+		return a.normalizedTypo < b.normalizedTypo
+	}
+	if a.exact != b.exact {
+		return a.exact > b.exact
+	}
+	return a.prefix > b.prefix
+}
+
+func lessConfigSearchScore(a, b configSearchScore) bool {
+	if a.matched != b.matched {
+		return a.matched > b.matched
+	}
+	if a.normalizedTypo != b.normalizedTypo {
+		return a.normalizedTypo < b.normalizedTypo
+	}
+	if a.exact != b.exact {
+		return a.exact > b.exact
+	}
+	if a.prefix != b.prefix {
+		return a.prefix > b.prefix
+	}
+	return a.originalIndex < b.originalIndex
+}
+
+func configSearchWords(value string) []string {
+	return strings.FieldsFunc(strings.ToLower(strings.TrimSpace(value)), func(r rune) bool {
+		return !unicode.IsLetter(r) && !unicode.IsDigit(r)
+	})
+}
+
+func configSearchMaxDistance(queryLength int) int {
+	if queryLength <= 1 {
+		return 0
+	}
+	maxDistance := queryLength / 3
+	if maxDistance < 1 {
+		return 1
+	}
+	return maxDistance
 }
 
 func treeEntry(index, total int, value string) string {

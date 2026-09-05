@@ -520,6 +520,72 @@ func TestRunConfigSearch(t *testing.T) {
 	}
 }
 
+func TestWriteConfigSearchResultsRanksWordMatchesAndTypoDistance(t *testing.T) {
+	var stdout bytes.Buffer
+	writeConfigSearchResults(&stdout, "prd web", []model.SSHConnection{
+		{Name: "prod-web", Host: "edge.internal"},
+		{Name: "staging-web", Host: "stage.internal"},
+		{Name: "prod-api", Host: "api.internal"},
+	}, nil)
+
+	const want = "SSH\n├── prod-web — edge.internal\n├── staging-web — stage.internal\n└── prod-api — api.internal\n"
+	if stdout.String() != want {
+		t.Errorf("stdout = %q, want %q", stdout.String(), want)
+	}
+}
+
+func TestWriteConfigSearchResultsRanksDatabaseWordsWithinDBSection(t *testing.T) {
+	var stdout bytes.Buffer
+	writeConfigSearchResults(&stdout, "analytcs", nil, []model.DBConnection{
+		{
+			Name: "warehouse", Host: "db.internal",
+			Databases: []model.DatabaseInfo{{Name: "analytics", IsDefault: true}},
+		},
+		{
+			Name: "reporting", Host: "db.internal",
+			Databases: []model.DatabaseInfo{{Name: "analysis", IsDefault: true}},
+		},
+	})
+
+	const want = "DB\n├── warehouse/analytics — db.internal/analytics\n└── reporting/analysis — db.internal/analysis\n"
+	if stdout.String() != want {
+		t.Errorf("stdout = %q, want %q", stdout.String(), want)
+	}
+}
+
+func TestWriteConfigSearchResultsExcludesWordsBeyondTypoTolerance(t *testing.T) {
+	var stdout bytes.Buffer
+	writeConfigSearchResults(&stdout, "production", []model.SSHConnection{
+		{Name: "prod", Host: "edge.internal"},
+	}, nil)
+
+	if stdout.String() != "No matching connections.\n" {
+		t.Errorf("stdout = %q, want no-match message", stdout.String())
+	}
+}
+
+func TestWriteConfigSearchResultsDoesNotFuzzyMatchUnrelatedSingleCharacter(t *testing.T) {
+	var stdout bytes.Buffer
+	writeConfigSearchResults(&stdout, "x", []model.SSHConnection{
+		{Name: "prod", Host: "edge.internal"},
+	}, nil)
+
+	if stdout.String() != "No matching connections.\n" {
+		t.Errorf("stdout = %q, want no-match message", stdout.String())
+	}
+}
+
+func TestWriteConfigSearchResultsIgnoresPunctuationOnlyQuery(t *testing.T) {
+	var stdout bytes.Buffer
+	writeConfigSearchResults(&stdout, "!!!", []model.SSHConnection{
+		{Name: "prod", Host: "edge.internal"},
+	}, nil)
+
+	if stdout.String() != "No matching connections.\n" {
+		t.Errorf("stdout = %q, want no-match message", stdout.String())
+	}
+}
+
 func TestWriteConfigSearchResultsMatchesConfiguredDatabaseNames(t *testing.T) {
 	dbConns := []model.DBConnection{{
 		Name: "warehouse", Host: "db.internal",
