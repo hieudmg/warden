@@ -171,8 +171,8 @@ describe("SSHTab", () => {
     ])
     expect(rows[1]).toHaveClass("bg-red-100")
     expect(rows[2]).toHaveClass("bg-red-100")
-    expect(rows[3]).toHaveClass("bg-orange-100")
-    expect(rows[4]).toHaveClass("bg-amber-100")
+    expect(rows[3]).toHaveClass("bg-cyan-100")
+    expect(rows[4]).toHaveClass("bg-orange-100")
     expect(rows[5]).toHaveClass("bg-gray-100")
   })
 
