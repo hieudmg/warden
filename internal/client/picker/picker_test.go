@@ -41,6 +41,18 @@ func TestStateFiltersNameHostAndGroupCaseInsensitively(t *testing.T) {
 	}
 }
 
+func TestStateDoesNotSearchNotes(t *testing.T) {
+	state := NewState([]model.SSHConnection{{
+		ID: 1, Name: "prod", Host: "edge.internal", Note: "production web",
+	}})
+	for _, r := range "production" {
+		state = state.Apply(DecodedKey{Kind: KeyRune, Rune: r})
+	}
+	if got := state.Filtered(); len(got) != 0 {
+		t.Fatalf("Filtered() = %#v, want no note match", got)
+	}
+}
+
 func TestStateSortsByGroupThenConnectionName(t *testing.T) {
 	state := NewState([]model.SSHConnection{
 		{ID: 1, Name: "zulu", Host: "host-a", GroupName: "Group B"},
@@ -264,10 +276,10 @@ func TestFormatConnectionRedactsSecretsAndShowsAllFields(t *testing.T) {
 		HasPassword: true, KeyPairID: 11, KeyPairName: "deploy-key",
 		ProxyHost: "proxy.example.test", ProxyPort: 8080, ProxyUsername: "proxy-user",
 		HasProxyPassword: true, JumpConnectionIDs: "[1,2]", DefaultDir: "/srv/app",
-		GroupID: 3, GroupName: "prod",
+		GroupID: 3, GroupName: "prod", Note: "production bastion",
 	}
 	output := fieldsText(FormatConnection(c))
-	for _, want := range []string{"ID", "prod", "Host", "db.example.test", "Password", "[configured]", "Key pair", "deploy-key", "Proxy password", "Jump connection IDs", "Default directory", "Group: prod"} {
+	for _, want := range []string{"ID", "prod", "Host", "db.example.test", "Password", "[configured]", "Key pair", "deploy-key", "Proxy password", "Jump connection IDs", "Default directory", "Group: prod", "Note: production bastion"} {
 		if !strings.Contains(output, want) {
 			t.Fatalf("preview missing %q: %q", want, output)
 		}

@@ -46,6 +46,7 @@ function ssh(id: number, name: string, overrides: Partial<SSHConnection> = {}): 
     jump_connection_ids: "[]",
     default_dir: "",
     group_id: 0,
+    note: "",
     created_at: "2026-08-24T00:00:00Z",
     updated_at: "2026-08-24T00:00:00Z",
     ...overrides,
@@ -118,6 +119,7 @@ describe("SSHTab", () => {
       proxy_username: "proxy-user",
       jump_connection_ids: "[2,99]",
       default_dir: "/srv",
+      note: "production bastion",
     })
     render(<SSHTab resource={resource({ data: [connection, ...profiles] })} groups={[]} keyPairs={[]} notify={notify} />)
 
@@ -130,6 +132,7 @@ describe("SSHTab", () => {
     expect(screen.getByText("proxy.example:1080")).toBeInTheDocument()
     expect(screen.getByText("jump-a, Missing SSH #99")).toBeInTheDocument()
     expect(screen.getByText("/srv")).toBeInTheDocument()
+    expect(screen.getByText("production bastion")).toBeInTheDocument()
   })
 
   test("SSH row displays selected key-pair name and marks dangling references", () => {
@@ -217,6 +220,7 @@ describe("SSHTab", () => {
       jump_connection_ids: "[]",
       default_dir: "",
       group_id: 0,
+      note: "",
     })
     expect(reload).toHaveBeenCalledTimes(1)
     expect(notify).toHaveBeenCalledWith('Created SSH connection "bastion".', "success")

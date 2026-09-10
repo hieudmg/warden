@@ -24,6 +24,7 @@ function db(id: number, name: string, overrides: Partial<DBConnection> = {}): DB
     port: 3306,
     username: "app",
     has_password: true,
+    note: "",
     database: "warden",
     databases: [{ name: "warden", is_default: true }],
     ssh_connection_id: 0,
@@ -71,6 +72,7 @@ describe("emptyDBForm", () => {
     expect(form.username).toBe("")
     expect(form.databases).toEqual([{ name: "", isDefault: true }])
     expect(form.groupID).toBe("0")
+    expect(form.note).toBe("")
   })
 })
 
@@ -104,6 +106,7 @@ describe("dbFormFromConnection", () => {
     expect(form.username).toBe("app")
     expect(form.databases).toEqual([{ name: "warden", isDefault: true }])
     expect(form.sshConnectionID).toBe("91")
+    expect(form.note).toBe("")
   })
 
   test("maps the saved group id to a string value", () => {
@@ -148,6 +151,7 @@ describe("toDBRequest", () => {
       port: 3306,
       username: "app",
       password: null,
+      note: "",
       database: "warden",
       databases: [{ name: "warden", is_default: true }],
       ssh_connection_id: 0,
@@ -178,6 +182,10 @@ describe("toDBRequest", () => {
   test("maps the group value to a numeric group_id", () => {
     expect(toDBRequest({ ...emptyDBForm(), groupID: "7" }).group_id).toBe(7)
     expect(toDBRequest({ ...emptyDBForm(), groupID: "0" }).group_id).toBe(0)
+  })
+
+  test("serializes the note", () => {
+    expect(toDBRequest({ ...emptyDBForm(), note: "read-only reporting" }).note).toBe("read-only reporting")
   })
 
   test("converts numeric inputs to numbers", () => {
@@ -402,6 +410,18 @@ describe("DBForm", () => {
     )
     const alert = screen.getByRole("alert")
     expect(alert).toHaveTextContent("a connection with that name already exists")
+  })
+
+  test("renders and edits the note textarea", async () => {
+    const user = userEvent.setup()
+    const { onSubmit } = renderForm({ connection: db(1, "db-1", { note: "old note" }) })
+
+    const note = screen.getByLabelText("Note")
+    expect(note).toHaveValue("old note")
+    await user.clear(note)
+    await user.type(note, "new note")
+    await user.click(screen.getByRole("button", { name: "Save" }))
+    expect(onSubmit).toHaveBeenCalledWith(expect.objectContaining({ note: "new note" }))
   })
 
   test("uses plain text inputs for credentials and disables browser autoComplete", () => {

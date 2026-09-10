@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button"
 import { DialogFooter } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
+import { Textarea } from "@/components/ui/textarea"
 import { SSHProfileCombobox, type SSHProfileOption } from "@/components/ssh-profile-combobox"
 import { jumpOptionLabel } from "../ssh/jump-route"
 
@@ -21,6 +22,7 @@ export interface DatabaseFormEntry {
 
 export interface DBFormState {
   name: string
+  note: string
   host: string
   port: string
   username: string
@@ -33,6 +35,7 @@ export interface DBFormState {
 export function emptyDBForm(): DBFormState {
   return {
     name: "",
+    note: "",
     host: "",
     port: "3306",
     username: "",
@@ -56,6 +59,7 @@ function formDatabases(connection: DBConnection): DatabaseFormEntry[] {
 export function dbFormFromConnection(connection: DBConnection): DBFormState {
   return {
     name: connection.name,
+    note: connection.note ?? "",
     host: connection.host,
     port: String(connection.port),
     username: connection.username,
@@ -97,6 +101,7 @@ export function toDBRequest(form: DBFormState): DBConnectionRequest {
   const defaultEntry = form.databases.find(database => database.isDefault)
   return {
     name: form.name,
+    note: form.note,
     host: form.host,
     port: Number(form.port),
     username: form.username,
@@ -325,6 +330,16 @@ export function DBForm({ connection, sshProfiles, groups, pending, error, onSubm
           placeholder="Leave blank to keep the stored value"
           value={form.password}
           onChange={event => set("password", event.target.value)}
+        />
+      </div>
+      <div className="grid gap-1.5">
+        <Label htmlFor="db-note">Note</Label>
+        <Textarea
+          id="db-note"
+          value={form.note}
+          onChange={event => set("note", event.target.value)}
+          maxLength={4096}
+          rows={3}
         />
       </div>
       <div className="grid gap-2">

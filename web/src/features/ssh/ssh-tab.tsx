@@ -170,6 +170,7 @@ export function SSHTab({ resource, groups, keyPairs, notify }: SSHTabProps) {
             <TableRow>
               <TableHead>Group</TableHead>
               <TableHead>Name</TableHead>
+              <TableHead>Note</TableHead>
               <TableHead>Host</TableHead>
               <TableHead>Username</TableHead>
               <TableHead>Auth</TableHead>
@@ -190,6 +191,9 @@ export function SSHTab({ resource, groups, keyPairs, notify }: SSHTabProps) {
                   )}
                 </TableCell>
                 <TableCell className="font-medium">{connection.name}</TableCell>
+                <TableCell className="max-w-xs whitespace-pre-wrap">
+                  {connection.note || "—"}
+                </TableCell>
                 <TableCell>
                   {connection.host}:{connection.port}
                 </TableCell>

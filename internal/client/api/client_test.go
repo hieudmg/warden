@@ -20,6 +20,7 @@ const sshConnJSON = `{
 	"port": 2222,
 	"username": "ops",
 	"has_password": true,
+	"note": "production bastion",
 	"key_pair_id": 0,
 	"proxy_host": "",
 	"proxy_port": 0,
@@ -37,6 +38,7 @@ const dbConnJSON = `{
 	"port": 3306,
 	"username": "reader",
 	"has_password": true,
+	"note": "reporting only",
 	"database": "warehouse",
 	"databases": [{"name":"warehouse","is_default":true},{"name":"archive","is_default":false}],
 	"ssh_connection_id": 0,
@@ -95,7 +97,7 @@ func TestListSSHPathAndDecode(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListSSH: %v", err)
 	}
-	if len(conns) != 1 || conns[0].ID != 7 || conns[0].Name != "prod" || conns[0].HasPassword != true || conns[0].KeyPairID != 0 {
+	if len(conns) != 1 || conns[0].ID != 7 || conns[0].Name != "prod" || conns[0].HasPassword != true || conns[0].KeyPairID != 0 || conns[0].Note != "production bastion" {
 		t.Fatalf("ListSSH = %+v, want one decoded prod connection", conns)
 	}
 }
@@ -143,7 +145,7 @@ func TestListDBAndGetDB(t *testing.T) {
 		t.Fatalf("ListDB = %+v, err = %v", dbs, err)
 	}
 	db, err := cl.GetDB(context.Background(), 3)
-	if err != nil || db.Database != "warehouse" || len(db.Databases) != 2 || db.Databases[1].Name != "archive" {
+	if err != nil || db.Database != "warehouse" || len(db.Databases) != 2 || db.Databases[1].Name != "archive" || db.Note != "reporting only" {
 		t.Fatalf("GetDB = %+v, err = %v", db, err)
 	}
 	want := []string{"GET /api/v1/db-connections", "GET /api/v1/db-connections/3"}

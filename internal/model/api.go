@@ -14,6 +14,7 @@ import (
 type SSHConnection struct {
 	ID                int64     `json:"id"`
 	Name              string    `json:"name"`
+	Note              string    `json:"note"`
 	Host              string    `json:"host"`
 	Port              int       `json:"port"`
 	Username          string    `json:"username"`
@@ -36,6 +37,7 @@ type SSHConnection struct {
 type DBConnection struct {
 	ID              int64          `json:"id"`
 	Name            string         `json:"name"`
+	Note            string         `json:"note"`
 	Host            string         `json:"host"`
 	Port            int            `json:"port"`
 	Username        string         `json:"username"`
@@ -57,6 +59,7 @@ type DBConnection struct {
 // selects a stored key pair.
 type SSHConnectionRequest struct {
 	Name              string  `json:"name"`
+	Note              string  `json:"note"`
 	Host              string  `json:"host"`
 	Port              int     `json:"port"`
 	Username          string  `json:"username"`
@@ -74,6 +77,7 @@ type SSHConnectionRequest struct {
 // DBConnectionRequest is the write payload for a DB profile.
 type DBConnectionRequest struct {
 	Name            string         `json:"name"`
+	Note            string         `json:"note"`
 	Host            string         `json:"host"`
 	Port            int            `json:"port"`
 	Username        string         `json:"username"`

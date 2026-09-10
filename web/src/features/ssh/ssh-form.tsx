@@ -7,6 +7,7 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
 import { Separator } from "@/components/ui/separator"
+import { Textarea } from "@/components/ui/textarea"
 import { SSHProfileCombobox, type SSHProfileOption } from "@/components/ssh-profile-combobox"
 import { parseJumpRoute, serializeJumpRoute } from "./jump-route"
 import { JumpRouteField } from "./jump-route-field"
@@ -18,6 +19,7 @@ import { JumpRouteField } from "./jump-route-field"
  * modes clears the inactive mode's selection client-side. */
 export interface SSHFormState {
   name: string
+  note: string
   host: string
   port: string
   username: string
@@ -36,6 +38,7 @@ export interface SSHFormState {
 export function emptySSHForm(): SSHFormState {
   return {
     name: "",
+    note: "",
     host: "",
     port: "22",
     username: "",
@@ -55,6 +58,7 @@ export function emptySSHForm(): SSHFormState {
 export function sshFormFromConnection(connection: SSHConnection): SSHFormState {
   return {
     name: connection.name,
+    note: connection.note ?? "",
     host: connection.host,
     port: String(connection.port),
     username: connection.username,
@@ -78,6 +82,7 @@ const nullableSecret = (value: string): string | null => (value === "" ? null : 
 export function toSSHRequest(form: SSHFormState): SSHConnectionRequest {
   return {
     name: form.name,
+    note: form.note,
     host: form.host,
     port: Number(form.port),
     username: form.username,
@@ -351,6 +356,16 @@ export function SSHForm({ connection, profiles, groups, keyPairs, pending, error
           placeholder="/srv"
           value={form.defaultDir}
           onChange={event => set("defaultDir", event.target.value)}
+        />
+      </div>
+      <div className="grid gap-1.5">
+        <Label htmlFor="ssh-note">Note</Label>
+        <Textarea
+          id="ssh-note"
+          value={form.note}
+          onChange={event => set("note", event.target.value)}
+          maxLength={4096}
+          rows={3}
         />
       </div>
       {error && (

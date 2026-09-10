@@ -46,6 +46,7 @@ function connection(overrides: Partial<SSHConnection> = {}): SSHConnection {
     jump_connection_ids: "[2,7,2,0,-4,99]",
     default_dir: "/srv",
     group_id: 0,
+    note: "",
     created_at: "2026-08-24T00:00:00Z",
     updated_at: "2026-08-24T00:00:00Z",
     ...overrides,
@@ -63,6 +64,7 @@ describe("emptySSHForm", () => {
     expect(form.keyPairID).toBe("0")
     expect(form.proxyPassword).toBe("")
     expect(form.groupID).toBe("0")
+    expect(form.note).toBe("")
   })
 })
 
@@ -77,6 +79,7 @@ describe("sshFormFromConnection", () => {
     expect(form.proxyPort).toBe("1080")
     expect(form.proxyUsername).toBe("proxy-user")
     expect(form.defaultDir).toBe("/srv")
+    expect(form.note).toBe("")
     expect(form.jumpIDs).toEqual([2, 7, 2, 0, -4, 99])
   })
 
@@ -123,6 +126,7 @@ describe("toSSHRequest", () => {
       jumpIDs: [2, 7, 2, 0, -4, 99],
       defaultDir: "/srv",
       groupID: "0",
+      note: "",
     }
     expect(toSSHRequest(form)).toEqual({
       name: "bastion",
@@ -138,6 +142,7 @@ describe("toSSHRequest", () => {
       jump_connection_ids: "[2,7,2,0,-4,99]",
       default_dir: "/srv",
       group_id: 0,
+      note: "",
     })
   })
 
@@ -189,6 +194,10 @@ describe("toSSHRequest", () => {
     const passwordRequest = toSSHRequest(passwordForm)
     expect(passwordRequest.password).toBe("  spaced  ")
     expect(passwordRequest.key_pair_id).toBe(0)
+  })
+
+  test("serializes the note", () => {
+    expect(toSSHRequest({ ...emptySSHForm(), note: "production bastion" }).note).toBe("production bastion")
   })
 
   test("maps the group select value to a numeric group_id", () => {
@@ -416,6 +425,11 @@ describe("SSHForm", () => {
 
     expect(screen.getByRole("alert")).toHaveTextContent("Select a stored key pair.")
     expect(onSubmit).not.toHaveBeenCalled()
+  })
+
+  test("renders the saved note in the textarea", () => {
+    renderForm({ connection: connection({ note: "production bastion" }) })
+    expect(screen.getByLabelText("Note")).toHaveValue("production bastion")
   })
 
   test("renders form errors with role alert", () => {

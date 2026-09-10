@@ -491,6 +491,9 @@ func writeConfigSearchResults(w io.Writer, query string, sshConns []model.SSHCon
 		for i, match := range sshMatches {
 			conn := match.connection
 			entry := sanitizeConfigSearchField(conn.Name) + " — " + sanitizeConfigSearchField(conn.Host)
+			if conn.Note != "" {
+				entry += " — Note: " + sanitizeConfigSearchField(conn.Note)
+			}
 			lines = append(lines, treeEntry(i, len(sshMatches), entry))
 		}
 	}
@@ -509,6 +512,9 @@ func writeConfigSearchResults(w io.Writer, query string, sshConns []model.SSHCon
 					sshName = fmt.Sprintf("unavailable (id: %d)", conn.SSHConnectionID)
 				}
 				entry += " — SSH: " + sanitizeConfigSearchField(sshName)
+			}
+			if conn.Note != "" {
+				entry += " — Note: " + sanitizeConfigSearchField(conn.Note)
 			}
 			lines = append(lines, treeEntry(i, len(dbMatches), entry))
 		}

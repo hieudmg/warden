@@ -38,6 +38,7 @@ function db(id: number, name: string, overrides: Partial<DBConnection> = {}): DB
     port: 3306,
     username: "app",
     has_password: false,
+    note: "",
     database: "warden",
     databases: [{ name: "warden", is_default: true }],
     ssh_connection_id: 0,
@@ -123,6 +124,7 @@ describe("DBTab", () => {
   test("renders every database and marks the default", () => {
     const connection = db(1, "db-1", {
       database: "main",
+      note: "read-only reporting",
       databases: [
         { name: "main", is_default: true },
         { name: "audit", is_default: false },
@@ -134,6 +136,7 @@ describe("DBTab", () => {
     expect(within(row).getByText("main")).toBeInTheDocument()
     expect(within(row).getByText("audit")).toBeInTheDocument()
     expect(within(row).getByText("Default")).toBeInTheDocument()
+    expect(within(row).getByText("read-only reporting")).toBeInTheDocument()
   })
 
   test("renders row columns with Direct, named, and missing SSH values", () => {
@@ -222,6 +225,7 @@ describe("DBTab", () => {
       port: 3306,
       username: "app",
       password: null,
+      note: "",
       database: "warden",
       databases: [{ name: "warden", is_default: true }],
       ssh_connection_id: 0,

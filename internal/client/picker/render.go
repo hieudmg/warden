@@ -33,6 +33,7 @@ func FormatConnection(c model.SSHConnection) []Field {
 	return []Field{
 		{Label: "ID", Value: strconv.FormatInt(c.ID, 10)},
 		{Label: "Name", Value: orNotSet(c.Name)},
+		{Label: "Note", Value: orNotSet(c.Note)},
 		{Label: "Group", Value: groupValue(c)},
 		{Label: "Host", Value: orNotSet(c.Host)},
 		{Label: "Port", Value: orNotSetInt(c.Port)},

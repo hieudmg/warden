@@ -475,13 +475,13 @@ func TestRunConfigSearch(t *testing.T) {
 		switch r.URL.Path {
 		case "/api/v1/ssh-connections":
 			io.WriteString(w, `[
-				{"id":10,"name":"prod-web","host":"edge.internal","port":22,"username":"private-ssh-user"},
+				{"id":10,"name":"prod-web","host":"edge.internal","port":22,"username":"private-ssh-user","note":"production web"},
 				{"id":11,"name":"bastion","host":"prod-gateway.internal","port":22,"username":"private-bastion-user"},
 				{"id":12,"name":"dev-web","host":"dev.internal","port":22,"username":"private-dev-user"}
 			]`)
 		case "/api/v1/db-connections":
 			io.WriteString(w, `[
-				{"id":20,"name":"reporting","host":"prod-db.internal","port":3306,"username":"private-db-user","database":"analytics","databases":[{"name":"analytics","is_default":true}],"ssh_connection_id":10},
+				{"id":20,"name":"reporting","host":"prod-db.internal","port":3306,"username":"private-db-user","database":"analytics","databases":[{"name":"analytics","is_default":true}],"ssh_connection_id":10,"note":"read-only reporting"},
 				{"id":21,"name":"prod-name","host":"mysql.internal","port":3306,"username":"private-mysql-user","database":"app","databases":[{"name":"app","is_default":true}]},
 				{"id":22,"name":"dev-db","host":"dev-db.internal","port":3306,"username":"private-dev-db-user","database":"dev","databases":[{"name":"dev","is_default":true}]}
 			]`)
@@ -508,7 +508,7 @@ func TestRunConfigSearch(t *testing.T) {
 	if exitCode != 0 {
 		t.Fatalf("run() exitCode = %d, want 0, stderr=%q", exitCode, stderr.String())
 	}
-	const want = "SSH\n├── prod-web — edge.internal\n└── bastion — prod-gateway.internal\n\nDB\n├── reporting/analytics — prod-db.internal/analytics — SSH: prod-web\n└── prod-name/app — mysql.internal/app\n"
+	const want = "SSH\n├── prod-web — edge.internal — Note: production web\n└── bastion — prod-gateway.internal\n\nDB\n├── reporting/analytics — prod-db.internal/analytics — SSH: prod-web — Note: read-only reporting\n└── prod-name/app — mysql.internal/app\n"
 	if stdout.String() != want {
 		t.Errorf("stdout = %q, want %q", stdout.String(), want)
 	}
@@ -550,6 +550,17 @@ func TestWriteConfigSearchResultsRanksDatabaseWordsWithinDBSection(t *testing.T)
 	const want = "DB\n├── warehouse/analytics — db.internal/analytics\n└── reporting/analysis — db.internal/analysis\n"
 	if stdout.String() != want {
 		t.Errorf("stdout = %q, want %q", stdout.String(), want)
+	}
+}
+
+func TestWriteConfigSearchResultsDoesNotSearchNotes(t *testing.T) {
+	var stdout bytes.Buffer
+	writeConfigSearchResults(&stdout, "production", []model.SSHConnection{{
+		Name: "prod", Host: "edge.internal", Note: "production web",
+	}}, nil)
+
+	if stdout.String() != "No matching connections.\n" {
+		t.Errorf("stdout = %q, want no-match message", stdout.String())
 	}
 }
 
