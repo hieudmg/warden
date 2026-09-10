@@ -85,14 +85,16 @@ for invalid_endpoint in 'https://warden.example:8080?invalid=true' 'http://' 'ht
     exit 1
   fi
 done
-if run_server_install '0.0.0.0' '18080' '' >/dev/null 2>&1; then
-  echo 'server installer accepted a wildcard listen host' >&2
+if ! run_server_install '0.0.0.0' '18080' '' >"$WORK/ipv4-wildcard.out" 2>"$WORK/ipv4-wildcard.err"; then
+  echo 'server installer rejected an IPv4 wildcard listen host' >&2
   exit 1
 fi
-if run_server_install '0:0:0:0:0:0::' '18080' '' >/dev/null 2>&1; then
-  echo 'server installer accepted an IPv6 wildcard listen host' >&2
+grep -q 'WARNING: listen host must be loopback or a Tailscale address; public and wildcard binds are unsafe' "$WORK/ipv4-wildcard.err"
+if ! run_server_install '0:0:0:0:0:0::' '18080' '' >"$WORK/ipv6-wildcard.out" 2>"$WORK/ipv6-wildcard.err"; then
+  echo 'server installer rejected an IPv6 wildcard listen host' >&2
   exit 1
 fi
+grep -q 'WARNING: listen host must be loopback or a Tailscale address; public and wildcard binds are unsafe' "$WORK/ipv6-wildcard.err"
 cp "$RELEASE/SHA256SUMS" "$WORK/SHA256SUMS.good"
 sed -i 's/^[0-9a-f]\{64\}  warden-linux-amd64/0000000000000000000000000000000000000000000000000000000000000000  warden-linux-amd64/' "$RELEASE/SHA256SUMS"
 if run_client_install '' >/dev/null 2>&1; then
