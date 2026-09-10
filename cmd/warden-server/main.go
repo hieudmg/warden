@@ -93,6 +93,7 @@ func runServe(args []string, stdout, stderr io.Writer, lookupEnv func(string) (s
 	// overrides it with a directory containing index.html at its root.
 	handler := server.ServeUI(mux, uiAssets(cfg.StaticFS))
 
+	warnUnsafeListenAddr(stderr, cfg.ListenAddr)
 	srv := server.New(cfg.ListenAddr, handler)
 	errCh := make(chan error, 1)
 	go func() { errCh <- srv.ListenAndServe() }()
@@ -117,6 +118,16 @@ func runServe(args []string, stdout, stderr io.Writer, lookupEnv func(string) (s
 		}
 		fmt.Fprintf(stdout, "received %s, shutting down\n", sig)
 		return 0
+	}
+}
+
+const unsafeListenWarning = "listen host must be loopback or a Tailscale address; public and wildcard binds are unsafe"
+
+// warnUnsafeListenAddr reports the accepted exposure risk without preventing
+// the server from binding. Public and wildcard binds are the user's concern.
+func warnUnsafeListenAddr(w io.Writer, listenAddr string) {
+	if config.IsUnsafeListenAddr(listenAddr) {
+		fmt.Fprintf(w, "WARNING: %s\n", unsafeListenWarning)
 	}
 }
 

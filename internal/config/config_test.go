@@ -100,7 +100,7 @@ func TestValidateListenAddrAllowsLoopbackAndTailscaleHosts(t *testing.T) {
 	}
 }
 
-func TestValidateListenAddrRejectsPublicAndWildcardHosts(t *testing.T) {
+func TestValidateListenAddrAllowsPublicAndWildcardHosts(t *testing.T) {
 	t.Parallel()
 
 	for _, address := range []string{
@@ -111,8 +111,8 @@ func TestValidateListenAddrRejectsPublicAndWildcardHosts(t *testing.T) {
 		"[0:0:0:0:0:0::]:8080",
 		"warden.example:8080",
 	} {
-		if err := validateListenAddr(address); err == nil {
-			t.Errorf("validateListenAddr(%q) error = nil, want unsafe-host error", address)
+		if err := validateListenAddr(address); err != nil {
+			t.Errorf("validateListenAddr(%q) error = %v, want accepted unsafe host", address, err)
 		}
 	}
 }
