@@ -108,6 +108,7 @@ func (h *Handler) createSSH(w http.ResponseWriter, r *http.Request) {
 	}
 	p := model.SSHProfile{
 		Name:              req.Name,
+		Note:              req.Note,
 		Host:              req.Host,
 		Port:              req.Port,
 		Username:          req.Username,
@@ -176,6 +177,7 @@ func (h *Handler) updateSSH(w http.ResponseWriter, r *http.Request) {
 	p := model.SSHProfile{
 		ID:                id,
 		Name:              req.Name,
+		Note:              req.Note,
 		Host:              req.Host,
 		Port:              req.Port,
 		Username:          req.Username,
@@ -496,6 +498,7 @@ func redactSSH(p model.SSHProfile) model.SSHConnection {
 	return model.SSHConnection{
 		ID:                p.ID,
 		Name:              p.Name,
+		Note:              p.Note,
 		Host:              p.Host,
 		Port:              p.Port,
 		Username:          p.Username,
@@ -545,6 +548,7 @@ func dbProfileFromRequest(id int64, req model.DBConnectionRequest) (model.DBProf
 	p := model.DBProfile{
 		ID:              id,
 		Name:            req.Name,
+		Note:            req.Note,
 		Host:            req.Host,
 		Port:            req.Port,
 		Username:        req.Username,
@@ -570,6 +574,7 @@ func redactDB(p model.DBProfile) model.DBConnection {
 	return model.DBConnection{
 		ID:              p.ID,
 		Name:            p.Name,
+		Note:            p.Note,
 		Host:            p.Host,
 		Port:            p.Port,
 		Username:        p.Username,

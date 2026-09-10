@@ -188,6 +188,7 @@ export function DBTab({ resource, sshProfiles, groups, notify }: DBTabProps) {
             <TableRow>
               <TableHead>Group</TableHead>
               <TableHead>Name</TableHead>
+              <TableHead>Note</TableHead>
               <TableHead>Host</TableHead>
               <TableHead>Username</TableHead>
               <TableHead>Auth</TableHead>
@@ -207,6 +208,9 @@ export function DBTab({ resource, sshProfiles, groups, notify }: DBTabProps) {
                   )}
                 </TableCell>
                 <TableCell className="font-medium">{connection.name}</TableCell>
+                <TableCell className="max-w-xs whitespace-pre-wrap">
+                  {connection.note || "—"}
+                </TableCell>
                 <TableCell>
                   {connection.host}:{connection.port}
                 </TableCell>

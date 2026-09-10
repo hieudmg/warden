@@ -77,6 +77,94 @@ func TestSSHCreateGetRoundTrip(t *testing.T) {
 	}
 }
 
+func TestSSHNoteRoundTripAndClear(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+
+	input := SSHProfileForTest("note-ssh", "[]")
+	input.Note = "production bastion"
+	created, err := s.CreateSSH(ctx, input)
+	if err != nil {
+		t.Fatalf("CreateSSH: %v", err)
+	}
+	got, err := s.GetSSH(ctx, created.ID)
+	if err != nil {
+		t.Fatalf("GetSSH: %v", err)
+	}
+	if got.Note != input.Note {
+		t.Fatalf("note = %q, want %q", got.Note, input.Note)
+	}
+	var noteCount int
+	if err := s.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM connection_notes WHERE connection_type='ssh' AND connection_id=?", created.ID).Scan(&noteCount); err != nil {
+		t.Fatalf("count ssh note rows: %v", err)
+	}
+	if noteCount != 1 {
+		t.Fatalf("ssh note rows = %d, want 1", noteCount)
+	}
+
+	created.Note = ""
+	if err := s.UpdateSSH(ctx, created); err != nil {
+		t.Fatalf("UpdateSSH clear note: %v", err)
+	}
+	got, err = s.GetSSH(ctx, created.ID)
+	if err != nil {
+		t.Fatalf("GetSSH after clear: %v", err)
+	}
+	if got.Note != "" {
+		t.Fatalf("cleared note = %q, want empty", got.Note)
+	}
+	if err := s.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM connection_notes WHERE connection_type='ssh' AND connection_id=?", created.ID).Scan(&noteCount); err != nil {
+		t.Fatalf("count cleared ssh note rows: %v", err)
+	}
+	if noteCount != 0 {
+		t.Fatalf("cleared ssh note rows = %d, want 0", noteCount)
+	}
+}
+
+func TestDBNoteRoundTripAndClear(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+
+	input := DBProfileForTest("note-db", 0)
+	input.Note = "read-only reporting database"
+	created, err := s.CreateDB(ctx, input)
+	if err != nil {
+		t.Fatalf("CreateDB: %v", err)
+	}
+	got, err := s.GetDB(ctx, created.ID)
+	if err != nil {
+		t.Fatalf("GetDB: %v", err)
+	}
+	if got.Note != input.Note {
+		t.Fatalf("note = %q, want %q", got.Note, input.Note)
+	}
+	var noteCount int
+	if err := s.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM connection_notes WHERE connection_type='db' AND connection_id=?", created.ID).Scan(&noteCount); err != nil {
+		t.Fatalf("count db note rows: %v", err)
+	}
+	if noteCount != 1 {
+		t.Fatalf("db note rows = %d, want 1", noteCount)
+	}
+
+	created.Note = ""
+	if err := s.UpdateDB(ctx, created); err != nil {
+		t.Fatalf("UpdateDB clear note: %v", err)
+	}
+	got, err = s.GetDB(ctx, created.ID)
+	if err != nil {
+		t.Fatalf("GetDB after clear: %v", err)
+	}
+	if got.Note != "" {
+		t.Fatalf("cleared note = %q, want empty", got.Note)
+	}
+	if err := s.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM connection_notes WHERE connection_type='db' AND connection_id=?", created.ID).Scan(&noteCount); err != nil {
+		t.Fatalf("count cleared db note rows: %v", err)
+	}
+	if noteCount != 0 {
+		t.Fatalf("cleared db note rows = %d, want 0", noteCount)
+	}
+}
+
 func TestSSHStoredSecretsAreEncrypted(t *testing.T) {
 	s := newTestStore(t)
 	ctx := context.Background()

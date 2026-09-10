@@ -87,7 +87,7 @@ func TestGetSSHRedactsSecrets(t *testing.T) {
 
 func TestCreateSSH(t *testing.T) {
 	mux, _, _ := newTestAPI(t)
-	body := `{"name":"new","host":"h.invalid","port":22,"username":"u","password":"pw-value","jump_connection_ids":"[]"}`
+	body := `{"name":"new","host":"h.invalid","port":22,"username":"u","password":"pw-value","jump_connection_ids":"[]","note":"production bastion"}`
 	rec := doRequest(t, mux, "POST", "/api/v1/ssh-connections", body)
 	if rec.Code != http.StatusCreated {
 		t.Fatalf("status = %d, body=%s", rec.Code, rec.Body.String())
@@ -97,6 +97,9 @@ func TestCreateSSH(t *testing.T) {
 	}
 	if !strings.Contains(rec.Body.String(), `"has_password":true`) {
 		t.Errorf("create response missing has_password: %s", rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), `"note":"production bastion"`) {
+		t.Errorf("create response missing note: %s", rec.Body.String())
 	}
 }
 
@@ -872,7 +875,7 @@ func TestDBCRUD(t *testing.T) {
 	mux, s, _ := newTestAPI(t)
 
 	// Create.
-	body := `{"name":"app","host":"db.invalid","port":3306,"username":"app","password":"dbpw","database":"appdb","ssh_connection_id":0}`
+	body := `{"name":"app","host":"db.invalid","port":3306,"username":"app","password":"dbpw","database":"appdb","ssh_connection_id":0,"note":"reporting only"}`
 	rec := doRequest(t, mux, "POST", "/api/v1/db-connections", body)
 	if rec.Code != http.StatusCreated {
 		t.Fatalf("create status = %d, body=%s", rec.Code, rec.Body.String())
@@ -884,7 +887,7 @@ func TestDBCRUD(t *testing.T) {
 	if err := json.Unmarshal(rec.Body.Bytes(), &created); err != nil {
 		t.Fatalf("decode create response: %v", err)
 	}
-	if created.ID == 0 || !created.HasPassword {
+	if created.ID == 0 || !created.HasPassword || created.Note != "reporting only" {
 		t.Errorf("create response incomplete: %+v", created)
 	}
 
@@ -907,7 +910,7 @@ func TestDBCRUD(t *testing.T) {
 	}
 
 	// Update with a canonical database list.
-	body = `{"name":"app","host":"db2.invalid","port":3307,"username":"app","database":"analytics","databases":[{"name":"appdb","is_default":false},{"name":"analytics","is_default":true}],"ssh_connection_id":0}`
+	body = `{"name":"app","host":"db2.invalid","port":3307,"username":"app","database":"analytics","databases":[{"name":"appdb","is_default":false},{"name":"analytics","is_default":true}],"ssh_connection_id":0,"note":"updated note"}`
 	rec = doRequest(t, mux, "PUT", fmt.Sprintf("/api/v1/db-connections/%d", created.ID), body)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("update status = %d, body=%s", rec.Code, rec.Body.String())
@@ -931,6 +934,9 @@ func TestDBCRUD(t *testing.T) {
 	}
 	if !reflect.DeepEqual(got.Databases, wantDatabases) {
 		t.Errorf("stored databases = %+v, want %+v", got.Databases, wantDatabases)
+	}
+	if got.Note != "updated note" {
+		t.Errorf("stored note = %q, want updated note", got.Note)
 	}
 	if string(got.Password) != "dbpw" {
 		t.Errorf("password = %q, want preserved dbpw", got.Password)

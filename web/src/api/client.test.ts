@@ -53,6 +53,7 @@ describe("api client", () => {
 
     const payload: SSHConnectionRequest = {
       name: "jump",
+      note: "production bastion",
       host: "10.0.0.1",
       port: 22,
       username: "root",

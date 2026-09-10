@@ -10,6 +10,7 @@ import "time"
 type SSHProfile struct {
 	ID        int64
 	Name      string
+	Note      string
 	Host      string
 	Port      int
 	Username  string
@@ -55,6 +56,7 @@ type DatabaseInfo struct {
 type DBProfile struct {
 	ID              int64
 	Name            string
+	Note            string
 	Host            string
 	Port            int
 	Username        string

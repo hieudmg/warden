@@ -268,6 +268,37 @@ func normalizeSSHAuthentication(p *model.SSHProfile) error {
 	return nil
 }
 
+const maxConnectionNoteBytes = 4096
+
+func validateConnectionNote(note string) error {
+	if len(note) > maxConnectionNoteBytes {
+		return fmt.Errorf("note exceeds %d bytes", maxConnectionNoteBytes)
+	}
+	if strings.ContainsRune(note, '\x00') {
+		return errors.New("note must not contain NUL")
+	}
+	return nil
+}
+
+// setConnectionNote replaces the optional note row for one connection.
+// Empty notes are represented by no row, keeping the table sparse.
+func setConnectionNote(ctx context.Context, tx *sql.Tx, connectionType string, connectionID int64, note string) error {
+	if _, err := tx.ExecContext(ctx,
+		"DELETE FROM connection_notes WHERE connection_type=? AND connection_id=?",
+		connectionType, connectionID); err != nil {
+		return fmt.Errorf("clear %s connection note: %w", connectionType, err)
+	}
+	if note == "" {
+		return nil
+	}
+	if _, err := tx.ExecContext(ctx,
+		"INSERT INTO connection_notes (connection_type, connection_id, note) VALUES (?, ?, ?)",
+		connectionType, connectionID, note); err != nil {
+		return fmt.Errorf("store %s connection note: %w", connectionType, err)
+	}
+	return nil
+}
+
 // CreateSSH inserts a new SSH profile. The row id is allocated before secret
 // fields are encrypted so AAD can bind each ciphertext to its stable
 // `warden/ssh/<id>/<field>` location.
@@ -330,6 +361,9 @@ func (s *Store) CreateSSH(ctx context.Context, p model.SSHProfile) (model.SSHPro
 		password, proxyPassword, id); err != nil {
 		return model.SSHProfile{}, fmt.Errorf("store secrets: %w", err)
 	}
+	if err := setConnectionNote(ctx, tx, "ssh", id, p.Note); err != nil {
+		return model.SSHProfile{}, err
+	}
 
 	if err := tx.Commit(); err != nil {
 		return model.SSHProfile{}, fmt.Errorf("commit: %w", err)
@@ -349,10 +383,11 @@ func (s *Store) GetSSH(ctx context.Context, id int64) (model.SSHProfile, error) 
 		       s.proxy_host, s.proxy_port, s.proxy_username,
 		       s.proxy_password, s.jump_connection_ids, s.default_dir,
 		       s.group_id, COALESCE(g.name, ''), s.key_pair_id, COALESCE(k.name, ''),
-		       s.created_at, s.updated_at
+		       COALESCE(n.note, ''), s.created_at, s.updated_at
 		FROM ssh_connections s
 		LEFT JOIN groups g ON g.id = s.group_id
 		LEFT JOIN key_pairs k ON k.id = s.key_pair_id
+		LEFT JOIN connection_notes n ON n.connection_type='ssh' AND n.connection_id=s.id
 		WHERE s.id = ?`, id)
 
 	var p model.SSHProfile
@@ -361,7 +396,7 @@ func (s *Store) GetSSH(ctx context.Context, id int64) (model.SSHProfile, error) 
 	err := row.Scan(&p.ID, &p.Name, &p.Host, &p.Port, &p.Username,
 		&password, &p.ProxyHost, &p.ProxyPort, &p.ProxyUsername,
 		&proxyPassword, &p.JumpConnectionIDs, &p.DefaultDir,
-		&p.GroupID, &p.GroupName, &p.KeyPairID, &p.KeyPairName, &createdAt, &updatedAt)
+		&p.GroupID, &p.GroupName, &p.KeyPairID, &p.KeyPairName, &p.Note, &createdAt, &updatedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return model.SSHProfile{}, ErrNotFound
 	}
@@ -512,12 +547,23 @@ func (s *Store) UpdateSSH(ctx context.Context, p model.SSHProfile) error {
 			return fmt.Errorf("update %s: %w", u.field, err)
 		}
 	}
+	if err := setConnectionNote(ctx, tx, "ssh", p.ID, p.Note); err != nil {
+		return err
+	}
 
 	return tx.Commit()
 }
 
 func (s *Store) DeleteSSH(ctx context.Context, id int64) error {
-	res, err := s.db.ExecContext(ctx, "DELETE FROM ssh_connections WHERE id=?", id)
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin delete ssh_connection: %w", err)
+	}
+	defer tx.Rollback()
+	if _, err := tx.ExecContext(ctx, "DELETE FROM connection_notes WHERE connection_type='ssh' AND connection_id=?", id); err != nil {
+		return fmt.Errorf("delete ssh connection note: %w", err)
+	}
+	res, err := tx.ExecContext(ctx, "DELETE FROM ssh_connections WHERE id=?", id)
 	if err != nil {
 		return fmt.Errorf("delete ssh_connection: %w", err)
 	}
@@ -525,6 +571,9 @@ func (s *Store) DeleteSSH(ctx context.Context, id int64) error {
 		return fmt.Errorf("rows affected: %w", err)
 	} else if n == 0 {
 		return ErrNotFound
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit delete ssh_connection: %w", err)
 	}
 	return nil
 }
@@ -627,6 +676,9 @@ func (s *Store) CreateDB(ctx context.Context, p model.DBProfile) (model.DBProfil
 		password, id); err != nil {
 		return model.DBProfile{}, fmt.Errorf("store password: %w", err)
 	}
+	if err := setConnectionNote(ctx, tx, "db", id, p.Note); err != nil {
+		return model.DBProfile{}, err
+	}
 
 	if err := tx.Commit(); err != nil {
 		return model.DBProfile{}, fmt.Errorf("commit: %w", err)
@@ -643,9 +695,10 @@ func (s *Store) CreateDB(ctx context.Context, p model.DBProfile) (model.DBProfil
 func (s *Store) GetDB(ctx context.Context, id int64) (model.DBProfile, error) {
 	row := s.db.QueryRowContext(ctx, `
 		SELECT d.id, d.name, d.host, d.port, d.username, d.password, d.database, d.ssh_connection_id,
-		       d.group_id, COALESCE(g.name, ''), d.created_at, d.updated_at
+		       d.group_id, COALESCE(g.name, ''), COALESCE(n.note, ''), d.created_at, d.updated_at
 		FROM db_connections d
 		LEFT JOIN groups g ON g.id = d.group_id
+		LEFT JOIN connection_notes n ON n.connection_type='db' AND n.connection_id=d.id
 		WHERE d.id = ?`, id)
 
 	var p model.DBProfile
@@ -653,7 +706,7 @@ func (s *Store) GetDB(ctx context.Context, id int64) (model.DBProfile, error) {
 	var storedDatabases string
 	var createdAt, updatedAt string
 	err := row.Scan(&p.ID, &p.Name, &p.Host, &p.Port, &p.Username, &password,
-		&storedDatabases, &p.SSHConnectionID, &p.GroupID, &p.GroupName, &createdAt, &updatedAt)
+		&storedDatabases, &p.SSHConnectionID, &p.GroupID, &p.GroupName, &p.Note, &createdAt, &updatedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return model.DBProfile{}, ErrNotFound
 	}
@@ -757,12 +810,23 @@ func (s *Store) UpdateDB(ctx context.Context, p model.DBProfile) error {
 			return fmt.Errorf("update password: %w", err)
 		}
 	}
+	if err := setConnectionNote(ctx, tx, "db", p.ID, p.Note); err != nil {
+		return err
+	}
 
 	return tx.Commit()
 }
 
 func (s *Store) DeleteDB(ctx context.Context, id int64) error {
-	res, err := s.db.ExecContext(ctx, "DELETE FROM db_connections WHERE id=?", id)
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin delete db_connection: %w", err)
+	}
+	defer tx.Rollback()
+	if _, err := tx.ExecContext(ctx, "DELETE FROM connection_notes WHERE connection_type='db' AND connection_id=?", id); err != nil {
+		return fmt.Errorf("delete db connection note: %w", err)
+	}
+	res, err := tx.ExecContext(ctx, "DELETE FROM db_connections WHERE id=?", id)
 	if err != nil {
 		return fmt.Errorf("delete db_connection: %w", err)
 	}
@@ -770,6 +834,9 @@ func (s *Store) DeleteDB(ctx context.Context, id int64) error {
 		return fmt.Errorf("rows affected: %w", err)
 	} else if n == 0 {
 		return ErrNotFound
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit delete db_connection: %w", err)
 	}
 	return nil
 }
@@ -799,6 +866,9 @@ func validateSSHMetadata(p model.SSHProfile) error {
 		return fmt.Errorf("proxy port %d out of range 1-65535", p.ProxyPort)
 	}
 	if err := validateDefaultDir(p.DefaultDir); err != nil {
+		return err
+	}
+	if err := validateConnectionNote(p.Note); err != nil {
 		return err
 	}
 	return nil
@@ -850,6 +920,9 @@ func validateDBMetadata(p model.DBProfile) error {
 	}
 	if p.SSHConnectionID < 0 {
 		return fmt.Errorf("db ssh_connection_id %d must not be negative", p.SSHConnectionID)
+	}
+	if err := validateConnectionNote(p.Note); err != nil {
+		return err
 	}
 	return nil
 }

@@ -5,6 +5,7 @@
 export interface SSHConnection {
   id: number
   name: string
+  note?: string
   host: string
   port: number
   username: string
@@ -31,6 +32,7 @@ export interface DatabaseInfo {
 export interface DBConnection {
   id: number
   name: string
+  note?: string
   host: string
   port: number
   username: string
@@ -124,6 +126,7 @@ export interface DependentsResponse {
 // mutually exclusive: exactly one active auth source.
 export interface SSHConnectionRequest {
   name: string
+  note: string
   host: string
   port: number
   username: string
@@ -140,6 +143,7 @@ export interface SSHConnectionRequest {
 
 export interface DBConnectionRequest {
   name: string
+  note: string
   host: string
   port: number
   username: string
