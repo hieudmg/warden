@@ -27,6 +27,10 @@ fail() {
   exit 1
 }
 
+warn() {
+  printf 'WARNING: %s\n' "$*" >&2
+}
+
 require_command() {
   command -v "$1" >/dev/null 2>&1 || fail "required command not found: $1"
 }
@@ -121,7 +125,7 @@ validate_host() {
       fail 'listen host must be loopback or a Tailscale CGNAT address (100.64.0.0/10)'
     return 0
   fi
-  fail 'listen host must be loopback or a Tailscale address; public and wildcard binds are unsafe'
+  warn 'listen host must be loopback or a Tailscale address; public and wildcard binds are unsafe'
 }
 
 validate_port() {
