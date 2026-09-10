@@ -30,6 +30,29 @@ func emptyLookupEnv(string) (string, bool) {
 	return "", false
 }
 
+func TestWarnUnsafeListenAddrWarnsOnlyForUnsafeHosts(t *testing.T) {
+	t.Parallel()
+
+	const want = "WARNING: listen host must be loopback or a Tailscale address; public and wildcard binds are unsafe\n"
+	for _, test := range []struct {
+		name    string
+		address string
+		want    string
+	}{
+		{name: "wildcard", address: "0.0.0.0:8080", want: want},
+		{name: "loopback", address: "127.0.0.1:8080"},
+		{name: "tailscale", address: "100.64.0.1:8080"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			var stderr bytes.Buffer
+			warnUnsafeListenAddr(&stderr, test.address)
+			if stderr.String() != test.want {
+				t.Errorf("warning = %q, want %q", stderr.String(), test.want)
+			}
+		})
+	}
+}
+
 func TestUIAssetsStaticFSPointsAtRootContainingIndexHTML(t *testing.T) {
 	t.Parallel()
 

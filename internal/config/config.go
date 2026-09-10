@@ -328,6 +328,13 @@ func validateClient(cfg *Client) error {
 	return nil
 }
 
+// IsUnsafeListenAddr reports whether a syntactically valid listen address
+// binds outside localhost, loopback, or Tailscale ranges.
+func IsUnsafeListenAddr(value string) bool {
+	host, _, err := net.SplitHostPort(value)
+	return err == nil && !isAllowedListenHost(host)
+}
+
 func validateListenAddr(value string) error {
 	host, port, err := net.SplitHostPort(value)
 	if err != nil {
@@ -336,9 +343,9 @@ func validateListenAddr(value string) error {
 	if strings.TrimSpace(host) == "" {
 		return fmt.Errorf("invalid listen address %q: host must not be empty", value)
 	}
-	if !isAllowedListenHost(host) {
-		return fmt.Errorf("invalid listen address %q: host must be localhost, loopback, or a Tailscale address", value)
-	}
+	// Public and wildcard binds, including 0.0.0.0, are intentionally accepted.
+	// They expose the server by user choice; the server command warns about this
+	// risk, which remains the user's responsibility.
 
 	parsedPort, err := strconv.Atoi(port)
 	if err != nil || parsedPort < 1 || parsedPort > 65535 {
