@@ -6,19 +6,29 @@ after the client fetches a resolved bundle from the server.
 ## Commands
 
 ```text
-warden ssh <connection> <command>
-warden db <connection> <sql>
-warden db <connection>/<database> <sql>
-warden config search <query>
+warden [-n|--non-interactive|-i|--interactive] ssh <connection> <command>
+warden [-n|--non-interactive|-i|--interactive] db <connection> <sql>
+warden [-n|--non-interactive|-i|--interactive] db <connection>/<database> <sql>
+warden [-n|--non-interactive|-i|--interactive] config search <query>
 warden report create <project> --title <title> --summary <summary> --agent-model <model>
-warden xssh [--accept-new] [connection]
-warden cp <source> <destination>
+warden [-n|--non-interactive|-i|--interactive] xssh [--accept-new] [connection]
+warden [-n|--non-interactive|-i|--interactive] cp <source> <destination>
 ```
+
+Output mode is detected automatically from stdout: terminal output uses the
+interactive presentation, while redirected or piped output uses the
+non-interactive presentation. Use `-n`/`--non-interactive` or
+`-i`/`--interactive` to override detection. The two modes cannot be combined.
 
 Exit status mirrors the remote command or query. SSH-backed operations reuse a
 local connection agent; cached connections close ten minutes after their last
 operation. Interactive `xssh` and direct database connections bypass the
 cache.
+
+In non-interactive database mode, query results are written as TSV with a
+header row. Values are written one record per line without table borders or
+padding; statements without a result set produce no output. In interactive
+mode, results retain the fixed-width CLI table and `Query OK` status.
 
 ## Configuration search
 

@@ -105,6 +105,10 @@ warden ssh <connection> "uname -a"
 warden db <connection> "SELECT 1"
 warden db <connection>/<database> "SELECT 1"
 
+# Force machine-readable output (auto-detected from stdout by default).
+warden -n db <connection> "SELECT 1"
+warden -i db <connection> "SELECT 1"
+
 # Search connection names, hosts, and database names.
 warden config search "production"
 

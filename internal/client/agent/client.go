@@ -12,6 +12,7 @@ import (
 	"sync"
 	"time"
 
+	clientdb "warden/internal/client/db"
 	clientssh "warden/internal/client/ssh"
 	"warden/internal/model"
 )
@@ -87,14 +88,21 @@ func RunCopyRequest(ctx context.Context, copyRequest CopyRequest) error {
 // streams the formatted result to out. Direct DB bundles should continue to
 // use db.RunQuery in the CLI.
 func RunTunneledDB(ctx context.Context, bundle model.DBBundle, sqlText string, out io.Writer) error {
+	return RunTunneledDBWithOptions(ctx, bundle, sqlText, out, clientdb.QueryOptions{})
+}
+
+// RunTunneledDBWithOptions executes one SQL statement through a pooled SSH
+// graph and applies the requested database result presentation.
+func RunTunneledDBWithOptions(ctx context.Context, bundle model.DBBundle, sqlText string, out io.Writer, options clientdb.QueryOptions) error {
 	payload, err := json.Marshal(bundle)
 	if err != nil {
 		return err
 	}
 	request := Request{
-		Operation: operationDB,
-		SQL:       sqlText,
-		DBBundle:  payload,
+		Operation:        operationDB,
+		SQL:              sqlText,
+		DBBundle:         payload,
+		DBNonInteractive: options.NonInteractive,
 	}
 	return runRequest(ctx, request, clientssh.Streams{Stdout: out}, false)
 }

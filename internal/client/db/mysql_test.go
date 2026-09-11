@@ -63,6 +63,20 @@ func TestRunQueryWithDialContext(t *testing.T) {
 	}
 }
 
+func TestRunQueryNonInteractiveOutput(t *testing.T) {
+	srv := newFakeMySQLServer(t, []string{"id", "name"}, [][]string{{"1", "alice"}, {"2", "bob"}})
+
+	var out bytes.Buffer
+	err := RunQueryWithOptions(context.Background(), directBundle(srv.addr, "dbuser", "dbpass"), "SELECT id, name FROM users", &out, QueryOptions{NonInteractive: true})
+	if err != nil {
+		t.Fatalf("RunQueryWithOptions: %v", err)
+	}
+	want := "id\tname\n1\talice\n2\tbob\n"
+	if out.String() != want {
+		t.Fatalf("output = %q, want %q", out.String(), want)
+	}
+}
+
 func TestRunQueryDirectOutput(t *testing.T) {
 	srv := newFakeMySQLServer(t, []string{"id", "name"}, [][]string{{"1", "alice"}, {"2", "bob"}})
 
