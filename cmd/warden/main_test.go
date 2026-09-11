@@ -30,9 +30,61 @@ import (
 	pkgsftp "github.com/pkg/sftp"
 
 	clientagent "warden/internal/client/agent"
+	clientdb "warden/internal/client/db"
 	clientssh "warden/internal/client/ssh"
 	"warden/internal/model"
 )
+
+func TestResolveOutputMode(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name           string
+		nonInteractive bool
+		interactive    bool
+		stdoutIsTTY    bool
+		wantMode       outputMode
+		wantErr        bool
+	}{
+		{name: "auto tty", stdoutIsTTY: true, wantMode: outputModeInteractive},
+		{name: "auto pipe", stdoutIsTTY: false, wantMode: outputModeNonInteractive},
+		{name: "explicit non-interactive", nonInteractive: true, stdoutIsTTY: true, wantMode: outputModeNonInteractive},
+		{name: "explicit interactive", interactive: true, stdoutIsTTY: false, wantMode: outputModeInteractive},
+		{name: "conflicting flags", nonInteractive: true, interactive: true, wantErr: true},
+	}
+
+	for _, tc := range tests {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			mode, err := resolveOutputMode(tc.nonInteractive, tc.interactive, tc.stdoutIsTTY)
+			if tc.wantErr {
+				if err == nil {
+					t.Fatal("resolveOutputMode error = nil, want error")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("resolveOutputMode: %v", err)
+			}
+			if mode != tc.wantMode {
+				t.Fatalf("resolveOutputMode mode = %v, want %v", mode, tc.wantMode)
+			}
+		})
+	}
+}
+
+func TestRunRejectsConflictingOutputModes(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	exitCode := run([]string{"-n", "-i", "db", "prod", "SELECT 1"}, &stdout, &stderr, func(string) (string, bool) {
+		return "", false
+	})
+	if exitCode != 2 {
+		t.Fatalf("run() exitCode = %d, want 2; stderr=%q", exitCode, stderr.String())
+	}
+	if !strings.Contains(stderr.String(), "cannot combine") {
+		t.Fatalf("stderr = %q, want conflicting-mode error", stderr.String())
+	}
+}
 
 func TestParseDBReference(t *testing.T) {
 	t.Parallel()
@@ -102,7 +154,7 @@ func TestRunDBSelectsNamedDatabase(t *testing.T) {
 	var gotBundle model.DBBundle
 	oldRunDirectDB := runDirectDB
 	defer func() { runDirectDB = oldRunDirectDB }()
-	runDirectDB = func(_ context.Context, bundle model.DBBundle, _ string, _ io.Writer) error {
+	runDirectDB = func(_ context.Context, bundle model.DBBundle, _ string, _ io.Writer, _ clientdb.QueryOptions) error {
 		gotBundle = bundle
 		return nil
 	}
@@ -360,22 +412,24 @@ func TestRunDBRoutesTunnel(t *testing.T) {
 	var gotBundle model.DBBundle
 	var gotSQL string
 	var gotWriter io.Writer
+	var gotOptions clientdb.QueryOptions
 	oldRunDirectDB := runDirectDB
 	oldRunAgentDB := runAgentDB
 	defer func() {
 		runDirectDB = oldRunDirectDB
 		runAgentDB = oldRunAgentDB
 	}()
-	runDirectDB = func(_ context.Context, bundle model.DBBundle, sqlText string, out io.Writer) error {
+	runDirectDB = func(_ context.Context, bundle model.DBBundle, sqlText string, out io.Writer, options clientdb.QueryOptions) error {
 		directCalls++
 		if bundle.SSH != nil {
 			t.Errorf("direct bundle SSH = %#v, want nil", bundle.SSH)
 		}
 		gotSQL = sqlText
 		gotWriter = out
+		gotOptions = options
 		return nil
 	}
-	runAgentDB = func(_ context.Context, bundle model.DBBundle, sqlText string, out io.Writer) error {
+	runAgentDB = func(_ context.Context, bundle model.DBBundle, sqlText string, out io.Writer, options clientdb.QueryOptions) error {
 		tunneledCalls++
 		if bundle.SSH == nil {
 			t.Errorf("tunneled bundle SSH = nil, want resolved SSH bundle")
@@ -383,6 +437,7 @@ func TestRunDBRoutesTunnel(t *testing.T) {
 		gotBundle = bundle
 		gotSQL = sqlText
 		gotWriter = out
+		gotOptions = options
 		return nil
 	}
 
@@ -393,7 +448,10 @@ func TestRunDBRoutesTunnel(t *testing.T) {
 	if directCalls != 1 || tunneledCalls != 0 {
 		t.Fatalf("after direct DB direct=%d tunneled=%d, want 1/0", directCalls, tunneledCalls)
 	}
-	if exitCode := run([]string{"db", "tunneled", "SELECT 2"}, &stdout, &stderr, lookupEnv); exitCode != 0 {
+	if !gotOptions.NonInteractive {
+		t.Fatal("automatic output mode = interactive, want non-interactive for buffered stdout")
+	}
+	if exitCode := run([]string{"-i", "db", "tunneled", "SELECT 2"}, &stdout, &stderr, lookupEnv); exitCode != 0 {
 		t.Fatalf("tunneled DB exitCode = %d, stderr=%q", exitCode, stderr.String())
 	}
 	if directCalls != 1 || tunneledCalls != 1 {
@@ -404,6 +462,9 @@ func TestRunDBRoutesTunnel(t *testing.T) {
 	}
 	if gotSQL != "SELECT 2" || gotWriter != &stdout {
 		t.Fatalf("tunneled query = %q writer=%#v, want exact query and stdout", gotSQL, gotWriter)
+	}
+	if gotOptions.NonInteractive {
+		t.Fatal("explicit interactive output mode = non-interactive, want interactive")
 	}
 	if stderr.Len() != 0 {
 		t.Fatalf("stderr = %q, want empty", stderr.String())
@@ -508,7 +569,7 @@ func TestRunConfigSearch(t *testing.T) {
 	if exitCode != 0 {
 		t.Fatalf("run() exitCode = %d, want 0, stderr=%q", exitCode, stderr.String())
 	}
-	const want = "SSH\n├── prod-web — edge.internal — Note: production web\n└── bastion — prod-gateway.internal\n\nDB\n├── reporting/analytics — prod-db.internal/analytics — SSH: prod-web — Note: read-only reporting\n└── prod-name/app — mysql.internal/app\n"
+	const want = "prod-web — edge.internal — Note: production web\nbastion — prod-gateway.internal\nreporting/analytics — prod-db.internal/analytics — SSH: prod-web — Note: read-only reporting\nprod-name/app — mysql.internal/app\n"
 	if stdout.String() != want {
 		t.Errorf("stdout = %q, want %q", stdout.String(), want)
 	}
@@ -984,7 +1045,7 @@ func TestRunXSSHWithoutNameRequiresInteractiveTerminal(t *testing.T) {
 
 	var stdout, stderr bytes.Buffer
 	exitCode := run([]string{"xssh"}, &stdout, &stderr, lookupEnv)
-	if exitCode != 1 || !strings.Contains(stderr.String(), "interactive mode requires one") {
+	if exitCode != 2 || !strings.Contains(stderr.String(), "non-interactive mode requires a connection") {
 		t.Fatalf("xssh picker error = %d, %q", exitCode, stderr.String())
 	}
 }

@@ -62,13 +62,14 @@ type Frame struct {
 // needed by a particular operation remain empty; operation-specific data may
 // be carried in Payload or in the opaque bundle fields.
 type Request struct {
-	Token     []byte          `json:"token,omitempty"`
-	Operation string          `json:"operation,omitempty"`
-	Command   string          `json:"command,omitempty"`
-	SQL       string          `json:"sql,omitempty"`
-	Payload   json.RawMessage `json:"payload,omitempty"`
-	SSHBundle json.RawMessage `json:"ssh_bundle,omitempty"`
-	DBBundle  json.RawMessage `json:"db_bundle,omitempty"`
+	Token            []byte          `json:"token,omitempty"`
+	Operation        string          `json:"operation,omitempty"`
+	Command          string          `json:"command,omitempty"`
+	SQL              string          `json:"sql,omitempty"`
+	Payload          json.RawMessage `json:"payload,omitempty"`
+	SSHBundle        json.RawMessage `json:"ssh_bundle,omitempty"`
+	DBBundle         json.RawMessage `json:"db_bundle,omitempty"`
+	DBNonInteractive bool            `json:"db_non_interactive,omitempty"`
 }
 
 // Response is the structured terminal response used by the agent. Stream

@@ -19,6 +19,13 @@ import (
 // maxSQLBytes bounds a single SQL statement sent to the database.
 const maxSQLBytes = 1 << 20 // 1 MiB
 
+// QueryOptions controls database result presentation.
+type QueryOptions struct {
+	// NonInteractive emits machine-readable output and suppresses decorative
+	// status text such as "Query OK".
+	NonInteractive bool
+}
+
 // DialContextFunc dials a database connection for the MySQL driver. The
 // network and address arguments match mysql.Config.DialFunc.
 type DialContextFunc func(context.Context, string, string) (net.Conn, error)
@@ -28,6 +35,12 @@ type DialContextFunc func(context.Context, string, string) (net.Conn, error)
 // Profiles with an SSH graph are tunneled through it. The password never
 // appears in returned errors or output.
 func RunQuery(ctx context.Context, bundle model.DBBundle, sqlText string, out io.Writer) error {
+	return RunQueryWithOptions(ctx, bundle, sqlText, out, QueryOptions{})
+}
+
+// RunQueryWithOptions executes one SQL statement and applies the requested
+// result presentation. Profiles with an SSH graph are tunneled through it.
+func RunQueryWithOptions(ctx context.Context, bundle model.DBBundle, sqlText string, out io.Writer, options QueryOptions) error {
 	if err := validateSQL(sqlText); err != nil {
 		return err
 	}
@@ -42,17 +55,23 @@ func RunQuery(ctx context.Context, bundle model.DBBundle, sqlText string, out io
 		defer tunnel.Close()
 		dial = tunnel.DialContext
 	}
-	return runQueryWithDialContext(ctx, bundle, sqlText, out, dial)
+	return RunQueryWithDialContextAndOptions(ctx, bundle, sqlText, out, dial, options)
 }
 
 // RunQueryWithDialContext executes one SQL statement using dial when it is
 // non-nil. A nil dial leaves the MySQL driver on its normal direct TCP path;
 // callers with a borrowed SSH graph provide the graph-backed dial function.
 func RunQueryWithDialContext(ctx context.Context, bundle model.DBBundle, sqlText string, out io.Writer, dial DialContextFunc) error {
+	return RunQueryWithDialContextAndOptions(ctx, bundle, sqlText, out, dial, QueryOptions{})
+}
+
+// RunQueryWithDialContextAndOptions is the dial-injectable form of
+// RunQueryWithOptions used by the local connection agent.
+func RunQueryWithDialContextAndOptions(ctx context.Context, bundle model.DBBundle, sqlText string, out io.Writer, dial DialContextFunc, options QueryOptions) error {
 	if err := validateSQL(sqlText); err != nil {
 		return err
 	}
-	return runQueryWithDialContext(ctx, bundle, sqlText, out, dial)
+	return runQueryWithDialContext(ctx, bundle, sqlText, out, dial, options)
 }
 
 func validateSQL(sqlText string) error {
@@ -65,7 +84,7 @@ func validateSQL(sqlText string) error {
 	return nil
 }
 
-func runQueryWithDialContext(ctx context.Context, bundle model.DBBundle, sqlText string, out io.Writer, dial DialContextFunc) error {
+func runQueryWithDialContext(ctx context.Context, bundle model.DBBundle, sqlText string, out io.Writer, dial DialContextFunc, options QueryOptions) error {
 	cfg := mysql.Config{
 		User:   bundle.Username,
 		Passwd: string(bundle.Password),
@@ -103,7 +122,9 @@ func runQueryWithDialContext(ctx context.Context, bundle model.DBBundle, sqlText
 	if len(cols) == 0 {
 		// The server answered with an OK packet: the statement produced
 		// no result set (e.g. INSERT/UPDATE).
-		fmt.Fprintln(out, "Query OK")
+		if !options.NonInteractive {
+			fmt.Fprintln(out, "Query OK")
+		}
 		return nil
 	}
 
@@ -121,6 +142,9 @@ func runQueryWithDialContext(ctx context.Context, bundle model.DBBundle, sqlText
 	}
 	if err := rows.Err(); err != nil {
 		return sanitize(err, bundle)
+	}
+	if options.NonInteractive {
+		return writeTSV(out, cols, values)
 	}
 	return writeTable(out, cols, values)
 }
@@ -187,6 +211,29 @@ func sanitizeCell(s string) string {
 		}
 		return r
 	}, s)
+}
+
+// writeTSV renders columns and rows as tab-separated records. Cell control
+// characters have already been replaced by formatRow; headers are sanitized
+// here as well so each record remains one physical line.
+func writeTSV(out io.Writer, cols []string, rows [][]string) error {
+	var b strings.Builder
+	writeTSVRow(&b, cols)
+	for _, row := range rows {
+		writeTSVRow(&b, row)
+	}
+	_, err := io.WriteString(out, b.String())
+	return err
+}
+
+func writeTSVRow(b *strings.Builder, cells []string) {
+	for i, cell := range cells {
+		if i > 0 {
+			b.WriteByte('\t')
+		}
+		b.WriteString(sanitizeCell(cell))
+	}
+	b.WriteByte('\n')
 }
 
 // writeTable renders columns and rows as a fixed ASCII table.

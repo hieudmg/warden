@@ -15,6 +15,7 @@ import (
 	"unicode"
 
 	"github.com/lithammer/fuzzysearch/fuzzy"
+	"golang.org/x/term"
 
 	"warden/internal/client/agent"
 	"warden/internal/client/api"
@@ -27,12 +28,19 @@ import (
 	"warden/internal/model"
 )
 
+type outputMode uint8
+
+const (
+	outputModeNonInteractive outputMode = iota
+	outputModeInteractive
+)
+
 var (
 	runAgentSSH   = agent.RunSSH
 	runAgentCopy  = agent.RunCopy
-	runAgentDB    = agent.RunTunneledDB
+	runAgentDB    = agent.RunTunneledDBWithOptions
 	runAgentServe = agent.Serve
-	runDirectDB   = clientdb.RunQuery
+	runDirectDB   = clientdb.RunQueryWithOptions
 )
 
 func main() {
@@ -50,6 +58,11 @@ func run(args []string, stdout, stderr io.Writer, lookupEnv func(string) (string
 	root.Usage = func() {}
 
 	configPath := root.String("config", "", "path to client config JSON")
+	var nonInteractive, interactive bool
+	root.BoolVar(&nonInteractive, "n", false, "non-interactive output")
+	root.BoolVar(&nonInteractive, "non-interactive", false, "non-interactive output")
+	root.BoolVar(&interactive, "i", false, "interactive output")
+	root.BoolVar(&interactive, "interactive", false, "interactive output")
 	if err := root.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			printUsage(stdout)
@@ -65,6 +78,11 @@ func run(args []string, stdout, stderr io.Writer, lookupEnv func(string) (string
 	}
 
 	configPathSet := flagWasSet(root, "config")
+	mode, err := resolveOutputMode(nonInteractive, interactive, writerIsTerminal(stdout))
+	if err != nil {
+		fmt.Fprintf(stderr, "warden: %v\n", err)
+		return 2
+	}
 
 	switch rest[0] {
 	case "agent":
@@ -72,13 +90,13 @@ func run(args []string, stdout, stderr io.Writer, lookupEnv func(string) (string
 	case "ssh":
 		return runSSH(rest[1:], *configPath, configPathSet, stdout, stderr, lookupEnv)
 	case "db":
-		return runDB(rest[1:], *configPath, configPathSet, stdout, stderr, lookupEnv)
+		return runDB(rest[1:], *configPath, configPathSet, stdout, stderr, lookupEnv, mode)
 	case "xssh":
-		return runXSSH(rest[1:], *configPath, configPathSet, stdout, stderr, lookupEnv)
+		return runXSSH(rest[1:], *configPath, configPathSet, stdout, stderr, lookupEnv, mode)
 	case "report":
 		return runReport(rest[1:], *configPath, configPathSet, stdout, stderr, lookupEnv)
 	case "config":
-		return runConfig(rest[1:], *configPath, configPathSet, stdout, stderr, lookupEnv)
+		return runConfig(rest[1:], *configPath, configPathSet, stdout, stderr, lookupEnv, mode)
 	case "cp":
 		return runCP(rest[1:], *configPath, configPathSet, stdout, stderr, lookupEnv)
 	default:
@@ -160,7 +178,7 @@ func parseDBReference(raw string) (profileName, databaseName string, err error) 
 	return profileName, databaseName, nil
 }
 
-func runDB(args []string, configPath string, configPathSet bool, stdout, stderr io.Writer, lookupEnv func(string) (string, bool)) int {
+func runDB(args []string, configPath string, configPathSet bool, stdout, stderr io.Writer, lookupEnv func(string) (string, bool), mode outputMode) int {
 	if len(args) == 1 && isFlagHelp(args[0]) {
 		printDBUsage(stdout)
 		return 0
@@ -215,10 +233,11 @@ func runDB(args []string, configPath string, configPathSet bool, stdout, stderr 
 	}
 
 	var runErr error
+	options := clientdb.QueryOptions{NonInteractive: mode == outputModeNonInteractive}
 	if bundle.SSH != nil {
-		runErr = runAgentDB(ctx, bundle, args[1], stdout)
+		runErr = runAgentDB(ctx, bundle, args[1], stdout, options)
 	} else {
-		runErr = runDirectDB(ctx, bundle, args[1], stdout)
+		runErr = runDirectDB(ctx, bundle, args[1], stdout, options)
 	}
 	if runErr != nil {
 		fmt.Fprintf(stderr, "db: %v\n", runErr)
@@ -227,7 +246,7 @@ func runDB(args []string, configPath string, configPathSet bool, stdout, stderr 
 	return 0
 }
 
-func runXSSH(args []string, configPath string, configPathSet bool, stdout, stderr io.Writer, lookupEnv func(string) (string, bool)) int {
+func runXSSH(args []string, configPath string, configPathSet bool, stdout, stderr io.Writer, lookupEnv func(string) (string, bool), mode outputMode) int {
 	fs := flag.NewFlagSet("xssh", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	fs.Usage = func() {}
@@ -246,6 +265,10 @@ func runXSSH(args []string, configPath string, configPathSet bool, stdout, stder
 	name := ""
 	if fs.NArg() == 1 {
 		name = fs.Arg(0)
+	}
+	if name == "" && mode == outputModeNonInteractive {
+		fmt.Fprintln(stderr, "xssh: non-interactive mode requires a connection")
+		return 2
 	}
 
 	cfg, err := loadClient(configPath, configPathSet, lookupEnv)
@@ -392,7 +415,7 @@ func runReportCreate(args []string, configPath string, configPathSet bool, stdou
 	return 0
 }
 
-func runConfig(args []string, configPath string, configPathSet bool, stdout, stderr io.Writer, lookupEnv func(string) (string, bool)) int {
+func runConfig(args []string, configPath string, configPathSet bool, stdout, stderr io.Writer, lookupEnv func(string) (string, bool), mode outputMode) int {
 	if len(args) == 0 || isHelp(args[0]) {
 		printConfigUsage(stdout)
 		return 0
@@ -430,7 +453,7 @@ func runConfig(args []string, configPath string, configPathSet bool, stdout, std
 		return 1
 	}
 
-	writeConfigSearchResults(stdout, args[1], sshConns, dbConns)
+	writeConfigSearchResultsForMode(stdout, args[1], sshConns, dbConns, mode)
 	return 0
 }
 
@@ -440,6 +463,23 @@ type configSearchScore struct {
 	exact          int
 	prefix         int
 	originalIndex  int
+}
+
+func writeConfigSearchResultsForMode(w io.Writer, query string, sshConns []model.SSHConnection, dbConns []model.DBConnection, mode outputMode) {
+	if mode == outputModeNonInteractive {
+		var decorated strings.Builder
+		writeConfigSearchResults(&decorated, query, sshConns, dbConns)
+		for _, line := range strings.Split(strings.TrimSuffix(decorated.String(), "\n"), "\n") {
+			if line == "" || line == "SSH" || line == "DB" {
+				continue
+			}
+			line = strings.TrimPrefix(line, "├── ")
+			line = strings.TrimPrefix(line, "└── ")
+			fmt.Fprintln(w, line)
+		}
+		return
+	}
+	writeConfigSearchResults(w, query, sshConns, dbConns)
 }
 
 func writeConfigSearchResults(w io.Writer, query string, sshConns []model.SSHConnection, dbConns []model.DBConnection) {
@@ -895,13 +935,16 @@ func loadClient(configPath string, configPathSet bool, lookupEnv func(string) (s
 
 func printUsage(w io.Writer) {
 	fmt.Fprint(w, `Usage:
-  warden [--config path] ssh <connection> <command>
-  warden [--config path] db <connection> <sql>
-  warden [--config path] xssh [connection]
+  warden [-n|--non-interactive|-i|--interactive] [--config path] ssh <connection> <command>
+  warden [-n|--non-interactive|-i|--interactive] [--config path] db <connection> <sql>
+  warden [-n|--non-interactive|-i|--interactive] [--config path] xssh [connection]
   warden [--config path] report create <project> --title <title> --summary <summary> --agent-model <name>
-  warden [--config path] config search <query>
-  warden [--config path] cp <source> <destination>
+  warden [-n|--non-interactive|-i|--interactive] [--config path] config search <query>
+  warden [-n|--non-interactive|-i|--interactive] [--config path] cp <source> <destination>
   warden --help
+
+Output mode defaults to automatic TTY detection. Use -n/--non-interactive
+for machine-readable output or -i/--interactive for terminal output.
 
 Environment overrides:
   WARDEN_CLIENT_CONFIG
@@ -953,6 +996,31 @@ func printConfigSearchUsage(w io.Writer) {
 	fmt.Fprint(w, `Usage:
   warden config search <query>
 `)
+}
+
+func resolveOutputMode(nonInteractive, interactive, stdoutIsTTY bool) (outputMode, error) {
+	if nonInteractive && interactive {
+		return 0, errors.New("cannot combine --non-interactive and --interactive")
+	}
+	if nonInteractive {
+		return outputModeNonInteractive, nil
+	}
+	if interactive {
+		return outputModeInteractive, nil
+	}
+	if stdoutIsTTY {
+		return outputModeInteractive, nil
+	}
+	return outputModeNonInteractive, nil
+}
+
+func writerIsTerminal(w io.Writer) bool {
+	file, ok := w.(*os.File)
+	if !ok {
+		return false
+	}
+	fd := int(file.Fd())
+	return term.IsTerminal(fd)
 }
 
 func isHelp(value string) bool {

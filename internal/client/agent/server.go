@@ -31,7 +31,7 @@ var (
 	runCommandOnClient      = clientssh.RunCommandOnClient
 	openSFTP                = clientsftp.Open
 	copySFTP                = clientsftp.Copy
-	runQueryWithDialContext = clientdb.RunQueryWithDialContext
+	runQueryWithDialContext = clientdb.RunQueryWithDialContextAndOptions
 )
 
 // CopyEndpoint is the serializable form of one cp operand. A nil Bundle marks
@@ -503,7 +503,9 @@ func (s *Server) handleDB(ctx context.Context, conn net.Conn, request Request) {
 	dbAddr := net.JoinHostPort(bundle.Host, strconv.Itoa(bundle.Port))
 	tunnel := clientdb.NewBorrowedTunnelDialer(lease.Target(), dbAddr)
 	dbWriter := (&frameWriter{w: conn}).stream(FrameStdout)
-	err = runQueryWithDialContext(ctx, bundle, request.SQL, dbWriter, tunnel.DialContext)
+	err = runQueryWithDialContext(ctx, bundle, request.SQL, dbWriter, tunnel.DialContext, clientdb.QueryOptions{
+		NonInteractive: request.DBNonInteractive,
+	})
 	if closeErr := tunnel.Close(); err == nil {
 		err = closeErr
 	}
