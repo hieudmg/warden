@@ -251,6 +251,99 @@ func TestUpgradeRejectsUnsupportedTargetBeforeDownload(t *testing.T) {
 	assertDirEntries(t, dir, "warden")
 }
 
+func TestUpgradeAcceptsAny2xxResponse(t *testing.T) {
+	const asset = "warden-linux-amd64"
+	const payload = "new warden binary"
+	dir, exe := newExecutable(t, "warden", "old warden binary")
+	// GitHub's CDN may answer with 201 rather than 200; every 2xx is success.
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/" + asset:
+			w.WriteHeader(http.StatusCreated)
+			_, _ = io.WriteString(w, payload)
+		case "/" + checksumFile:
+			w.WriteHeader(http.StatusCreated)
+			_, _ = io.WriteString(w, sha256Hex(payload)+"  "+asset+"\n")
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(srv.Close)
+
+	var calls []replaceCall
+	result, err := Upgrade(context.Background(), Client, Options{
+		ReleaseBaseURL: srv.URL,
+		HTTPClient:     srv.Client(),
+		GOOS:           "linux",
+		GOARCH:         "amd64",
+		ExecutablePath: exe,
+		Replace:        recordReplace(&calls),
+	})
+	if err != nil {
+		t.Fatalf("Upgrade() error = %v", err)
+	}
+	if want := (Result{Asset: asset, ExecutablePath: exe}); result != want {
+		t.Errorf("Upgrade() result = %+v, want %+v", result, want)
+	}
+	if len(calls) != 1 {
+		t.Fatalf("Replace called %d times, want 1", len(calls))
+	}
+	if string(calls[0].content) != payload {
+		t.Errorf("Replace content = %q, want %q", calls[0].content, payload)
+	}
+	assertDirEntries(t, dir, "warden")
+}
+
+func TestFetchChecksumUsesFirstMatchingEntry(t *testing.T) {
+	const asset = "warden-linux-amd64"
+	const first = "1111111111111111111111111111111111111111111111111111111111111111"
+	const second = "2222222222222222222222222222222222222222222222222222222222222222"
+	srv, _ := releaseServer(t, map[string]string{
+		"/" + checksumFile: first + "  " + asset + "\n" + second + "  " + asset + "\n",
+	})
+
+	got, err := fetchChecksum(context.Background(), srv.Client(), srv.URL+"/"+checksumFile, asset)
+	if err != nil {
+		t.Fatalf("fetchChecksum() error = %v", err)
+	}
+	if got != first {
+		t.Errorf("fetchChecksum() = %q, want first matching entry %q", got, first)
+	}
+}
+
+func TestUpgradeRejectsMissingExecutableBeforeDownload(t *testing.T) {
+	const asset = "warden-linux-amd64"
+	dir := t.TempDir()
+	exe := filepath.Join(dir, "missing-warden")
+	srv, requests := releaseServer(t, map[string]string{
+		"/" + asset:        "new warden binary",
+		"/" + checksumFile: sha256Hex("new warden binary") + "  " + asset + "\n",
+	})
+
+	var calls []replaceCall
+	_, err := Upgrade(context.Background(), Client, Options{
+		ReleaseBaseURL: srv.URL,
+		HTTPClient:     srv.Client(),
+		GOOS:           "linux",
+		GOARCH:         "amd64",
+		ExecutablePath: exe,
+		Replace:        recordReplace(&calls),
+	})
+	if err == nil {
+		t.Fatal("Upgrade() error = nil, want executable stat error")
+	}
+	if !strings.Contains(err.Error(), "inspect executable") {
+		t.Errorf("Upgrade() error = %q, want it to mention inspect executable", err)
+	}
+	if got := requests.list(); len(got) != 0 {
+		t.Errorf("requested paths = %v, want none", got)
+	}
+	if len(calls) != 0 {
+		t.Errorf("Replace called %d times, want 0", len(calls))
+	}
+	assertDirEntries(t, dir)
+}
+
 type replaceCall struct {
 	tempPath       string
 	executablePath string

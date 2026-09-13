@@ -236,7 +236,7 @@ func get(ctx context.Context, client Doer, url string) (*http.Response, error) {
 	if err != nil {
 		return nil, fmt.Errorf("download %s: %w", url, err)
 	}
-	if resp.StatusCode != http.StatusOK {
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		resp.Body.Close()
 		return nil, fmt.Errorf("download %s: unexpected status %s", url, resp.Status)
 	}
