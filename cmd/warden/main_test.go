@@ -1479,16 +1479,22 @@ func TestRunClientUpgradeReportsFailure(t *testing.T) {
 }
 
 func TestRunClientUpgradeHelp(t *testing.T) {
-	var stdout, stderr bytes.Buffer
-	exitCode := run([]string{"upgrade", "--help"}, &stdout, &stderr, emptyLookupEnv)
-	if exitCode != 0 {
-		t.Fatalf("run() exitCode = %d, want 0, stderr=%q", exitCode, stderr.String())
-	}
-	if !strings.Contains(stdout.String(), "warden upgrade") {
-		t.Fatalf("stdout = %q, want upgrade usage", stdout.String())
-	}
-	if stderr.Len() != 0 {
-		t.Fatalf("stderr = %q, want empty", stderr.String())
+	for _, args := range [][]string{
+		{"upgrade", "help"},
+		{"upgrade", "-h"},
+		{"upgrade", "--help"},
+	} {
+		var stdout, stderr bytes.Buffer
+		exitCode := run(args, &stdout, &stderr, emptyLookupEnv)
+		if exitCode != 0 {
+			t.Fatalf("run(%v) exitCode = %d, want 0, stderr=%q", args, exitCode, stderr.String())
+		}
+		if !strings.Contains(stdout.String(), "warden upgrade") {
+			t.Fatalf("run(%v) stdout = %q, want upgrade usage", args, stdout.String())
+		}
+		if stderr.Len() != 0 {
+			t.Fatalf("run(%v) stderr = %q, want empty", args, stderr.String())
+		}
 	}
 }
 

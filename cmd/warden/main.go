@@ -901,7 +901,7 @@ func resolveAgentCPEndpoint(ep cpEndpoint, cl *api.Client, ctx context.Context) 
 // binary. It takes no settings and never reads or writes client config, so an
 // upgrade cannot lose a configured endpoint or credential.
 func runClientUpgrade(args []string, stdout, stderr io.Writer, lookupEnv func(string) (string, bool)) int {
-	if len(args) == 1 && isFlagHelp(args[0]) {
+	if len(args) == 1 && isHelp(args[0]) {
 		printUpgradeUsage(stdout)
 		return 0
 	}
