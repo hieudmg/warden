@@ -26,6 +26,7 @@ import (
 	"warden/internal/client/terminal"
 	"warden/internal/config"
 	"warden/internal/model"
+	"warden/internal/upgrade"
 )
 
 type outputMode uint8
@@ -41,6 +42,7 @@ var (
 	runAgentDB    = agent.RunTunneledDBWithOptions
 	runAgentServe = agent.Serve
 	runDirectDB   = clientdb.RunQueryWithOptions
+	runUpgrade    = upgrade.Upgrade
 )
 
 func main() {
@@ -99,6 +101,8 @@ func run(args []string, stdout, stderr io.Writer, lookupEnv func(string) (string
 		return runConfig(rest[1:], *configPath, configPathSet, stdout, stderr, lookupEnv, mode)
 	case "cp":
 		return runCP(rest[1:], *configPath, configPathSet, stdout, stderr, lookupEnv)
+	case "upgrade":
+		return runClientUpgrade(rest[1:], stdout, stderr, lookupEnv)
 	default:
 		fmt.Fprintf(stderr, "unknown command %q\n\n", rest[0])
 		printUsage(stderr)
@@ -893,6 +897,44 @@ func resolveAgentCPEndpoint(ep cpEndpoint, cl *api.Client, ctx context.Context) 
 	return agent.CopyEndpoint{Path: ep.path, Bundle: &bundle}, nil
 }
 
+// runClientUpgrade replaces this executable with the latest released client
+// binary. It takes no settings and never reads or writes client config, so an
+// upgrade cannot lose a configured endpoint or credential.
+func runClientUpgrade(args []string, stdout, stderr io.Writer, lookupEnv func(string) (string, bool)) int {
+	if len(args) == 1 && isHelp(args[0]) {
+		printUpgradeUsage(stdout)
+		return 0
+	}
+	if len(args) != 0 {
+		fmt.Fprintln(stderr, "usage: warden upgrade")
+		return 2
+	}
+
+	repo, _ := lookupEnv("WARDEN_REPO")
+	releaseBaseURL, _ := lookupEnv("WARDEN_RELEASE_BASE_URL")
+	result, err := runUpgrade(context.Background(), upgrade.Client, upgrade.Options{
+		Repo:           repo,
+		ReleaseBaseURL: releaseBaseURL,
+	})
+	if err != nil {
+		fmt.Fprintf(stderr, "warden upgrade: %v\n", err)
+		return 1
+	}
+	writeUpgradeResult(stdout, "warden upgrade", result)
+	return 0
+}
+
+// writeUpgradeResult reports how the verified download was applied. A
+// scheduled replacement is asynchronous (Windows cannot replace a running
+// executable), so it must not claim the executable already changed.
+func writeUpgradeResult(w io.Writer, prefix string, result upgrade.Result) {
+	if result.Scheduled {
+		fmt.Fprintf(w, "%s: verified %s; replacement of %s is scheduled after this process exits\n", prefix, result.Asset, result.ExecutablePath)
+		return
+	}
+	fmt.Fprintf(w, "%s: replaced %s with %s\n", prefix, result.ExecutablePath, result.Asset)
+}
+
 // runAgent serves the hidden lifecycle command used by the client-side agent
 // startup path. It deliberately does not appear in printUsage.
 func runAgent(args []string, stderr io.Writer) int {
@@ -932,6 +974,17 @@ func printCPUsage(w io.Writer) {
 `)
 }
 
+func printUpgradeUsage(w io.Writer) {
+	fmt.Fprint(w, `Usage:
+  warden upgrade
+
+Downloads the latest released client binary, verifies it against the release
+checksums, and replaces this executable. Client config, cached credentials,
+and other files are left untouched. Set WARDEN_REPO or
+WARDEN_RELEASE_BASE_URL to upgrade from a different release source.
+`)
+}
+
 func loadClient(configPath string, configPathSet bool, lookupEnv func(string) (string, bool)) (config.Client, error) {
 	return config.LoadClient(config.ClientOptions{
 		ConfigPath:    configPath,
@@ -948,6 +1001,7 @@ func printUsage(w io.Writer) {
   warden [--config path] report create <project> --title <title> --summary <summary> --agent-model <name>
   warden [-n|--non-interactive|-i|--interactive] [--config path] config search <query>
   warden [-n|--non-interactive|-i|--interactive] [--config path] cp <source> <destination>
+  warden upgrade
   warden --help
 
 Output mode defaults to automatic TTY detection. Use -n/--non-interactive
@@ -957,6 +1011,8 @@ Environment overrides:
   WARDEN_CLIENT_CONFIG
   WARDEN_CLIENT_API_BASE_URL
   WARDEN_CLIENT_TIMEOUT
+  WARDEN_REPO
+  WARDEN_RELEASE_BASE_URL
 `)
 }
 

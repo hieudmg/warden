@@ -13,6 +13,7 @@ warden [-n|--non-interactive|-i|--interactive] config search <query>
 warden report create <project> --title <title> --summary <summary> --agent-model <model>
 warden [-n|--non-interactive|-i|--interactive] xssh [--accept-new] [connection]
 warden [-n|--non-interactive|-i|--interactive] cp <source> <destination>
+warden upgrade
 ```
 
 Output mode is detected automatically from stdout: terminal output uses the
@@ -71,3 +72,28 @@ hosts do not connect directly. Local-to-local copies are rejected.
 
 Reports are immutable records with project, title, summary, agent model, and
 server timestamp. Summaries are stored as Markdown and rendered by the web UI.
+
+## Upgrade
+
+`warden upgrade` replaces the client executable with the latest released
+client binary:
+
+```bash
+warden upgrade
+```
+
+The command downloads the published asset for the current platform, verifies
+its SHA-256 digest against the release `SHA256SUMS` file, and replaces only the
+executable. It accepts no arguments, prompts for nothing, and never reads or
+writes `client.json` or cached transport credentials. Only the targets
+published in the latest release are supported; any other OS/architecture fails
+before the installed executable is touched.
+
+On Windows a running executable cannot be replaced in place, so the command
+reports that replacement is scheduled and the verified download is applied
+after the process exits. On Linux the executable is replaced atomically before
+the command returns.
+
+Set `WARDEN_REPO` or `WARDEN_RELEASE_BASE_URL` to upgrade from a release source
+other than the default `hieudmg/warden` GitHub releases. The server has its own
+`warden-server upgrade` command; see [Deployment](deployment.md).

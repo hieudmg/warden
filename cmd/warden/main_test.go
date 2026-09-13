@@ -33,6 +33,7 @@ import (
 	clientdb "warden/internal/client/db"
 	clientssh "warden/internal/client/ssh"
 	"warden/internal/model"
+	"warden/internal/upgrade"
 )
 
 func TestResolveOutputMode(t *testing.T) {
@@ -1341,6 +1342,159 @@ func TestRunReportCreateUnknownCommand(t *testing.T) {
 	}
 	if !strings.Contains(stderr.String(), "unknown report command") {
 		t.Fatalf("stderr = %q, want unknown-command message", stderr.String())
+	}
+}
+
+func TestRunClientUpgradeRejectsArguments(t *testing.T) {
+	oldRunUpgrade := runUpgrade
+	defer func() { runUpgrade = oldRunUpgrade }()
+	called := false
+	runUpgrade = func(context.Context, upgrade.Kind, upgrade.Options) (upgrade.Result, error) {
+		called = true
+		return upgrade.Result{}, nil
+	}
+
+	for _, args := range [][]string{
+		{"upgrade", "extra"},
+		{"upgrade", "client"},
+	} {
+		var stdout, stderr bytes.Buffer
+		exitCode := run(args, &stdout, &stderr, emptyLookupEnv)
+		if exitCode != 2 {
+			t.Errorf("run(%v) exitCode = %d, want 2, stderr=%q", args, exitCode, stderr.String())
+		}
+		if !strings.Contains(stderr.String(), "usage: warden upgrade") {
+			t.Errorf("run(%v) stderr = %q, want upgrade usage", args, stderr.String())
+		}
+		if stdout.Len() != 0 {
+			t.Errorf("run(%v) stdout = %q, want empty", args, stdout.String())
+		}
+	}
+	if called {
+		t.Fatal("runUpgrade called for invalid arguments")
+	}
+}
+
+func TestRunClientUpgradeReportsSuccess(t *testing.T) {
+	oldRunUpgrade := runUpgrade
+	defer func() { runUpgrade = oldRunUpgrade }()
+
+	var gotKind upgrade.Kind
+	var gotOptions upgrade.Options
+	runUpgrade = func(_ context.Context, kind upgrade.Kind, opts upgrade.Options) (upgrade.Result, error) {
+		gotKind = kind
+		gotOptions = opts
+		return upgrade.Result{Asset: "warden-linux-amd64", ExecutablePath: "/usr/local/bin/warden"}, nil
+	}
+
+	// The config path is deliberately set to a file that does not exist:
+	// upgrade must not read client config, and no key beyond the release
+	// overrides may be requested.
+	var requestedKeys []string
+	lookupEnv := func(key string) (string, bool) {
+		requestedKeys = append(requestedKeys, key)
+		switch key {
+		case "WARDEN_REPO":
+			return "acme/warden", true
+		case "WARDEN_RELEASE_BASE_URL":
+			return "https://mirror.example/releases/latest/download", true
+		case "WARDEN_CLIENT_CONFIG":
+			return filepath.Join(t.TempDir(), "missing-client.json"), true
+		}
+		return "", false
+	}
+
+	var stdout, stderr bytes.Buffer
+	exitCode := run([]string{"upgrade"}, &stdout, &stderr, lookupEnv)
+	if exitCode != 0 {
+		t.Fatalf("run() exitCode = %d, want 0, stderr=%q", exitCode, stderr.String())
+	}
+	if gotKind != upgrade.Client {
+		t.Fatalf("runUpgrade kind = %v, want upgrade.Client", gotKind)
+	}
+	if gotOptions.Repo != "acme/warden" {
+		t.Errorf("runUpgrade repo = %q, want acme/warden", gotOptions.Repo)
+	}
+	if gotOptions.ReleaseBaseURL != "https://mirror.example/releases/latest/download" {
+		t.Errorf("runUpgrade release base = %q, want env override", gotOptions.ReleaseBaseURL)
+	}
+	out := stdout.String()
+	if !strings.Contains(out, "warden-linux-amd64") || !strings.Contains(out, "/usr/local/bin/warden") {
+		t.Fatalf("stdout = %q, want asset and executable path", out)
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("stderr = %q, want empty", stderr.String())
+	}
+	for _, key := range requestedKeys {
+		if strings.HasPrefix(key, "WARDEN_CLIENT_") {
+			t.Errorf("upgrade requested client config key %q, want none", key)
+		}
+	}
+}
+
+func TestRunClientUpgradeReportsScheduledReplacement(t *testing.T) {
+	oldRunUpgrade := runUpgrade
+	defer func() { runUpgrade = oldRunUpgrade }()
+
+	runUpgrade = func(_ context.Context, _ upgrade.Kind, _ upgrade.Options) (upgrade.Result, error) {
+		return upgrade.Result{Asset: "warden.exe", ExecutablePath: `C:\Tools\warden.exe`, Scheduled: true}, nil
+	}
+
+	var stdout, stderr bytes.Buffer
+	exitCode := run([]string{"upgrade"}, &stdout, &stderr, emptyLookupEnv)
+	if exitCode != 0 {
+		t.Fatalf("run() exitCode = %d, want 0, stderr=%q", exitCode, stderr.String())
+	}
+	out := stdout.String()
+	if !strings.Contains(out, "warden.exe") || !strings.Contains(out, "scheduled") {
+		t.Fatalf("stdout = %q, want scheduled replacement message", out)
+	}
+	if strings.Contains(out, "replaced") {
+		t.Fatalf("stdout = %q, must not claim the running executable was replaced", out)
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("stderr = %q, want empty", stderr.String())
+	}
+}
+
+func TestRunClientUpgradeReportsFailure(t *testing.T) {
+	oldRunUpgrade := runUpgrade
+	defer func() { runUpgrade = oldRunUpgrade }()
+
+	runUpgrade = func(context.Context, upgrade.Kind, upgrade.Options) (upgrade.Result, error) {
+		return upgrade.Result{}, errors.New("checksum mismatch for warden-linux-amd64")
+	}
+
+	var stdout, stderr bytes.Buffer
+	exitCode := run([]string{"upgrade"}, &stdout, &stderr, emptyLookupEnv)
+	if exitCode != 1 {
+		t.Fatalf("run() exitCode = %d, want 1, stderr=%q", exitCode, stderr.String())
+	}
+	if !strings.Contains(stderr.String(), "warden upgrade: checksum mismatch") {
+		t.Fatalf("stderr = %q, want prefixed upgrade error", stderr.String())
+	}
+	if stdout.Len() != 0 {
+		t.Fatalf("stdout = %q, want empty on failure", stdout.String())
+	}
+}
+
+func TestRunClientUpgradeHelp(t *testing.T) {
+	for _, args := range [][]string{
+		{"upgrade", "help"},
+		{"upgrade", "-h"},
+		{"upgrade", "--help"},
+	} {
+		var stdout, stderr bytes.Buffer
+		exitCode := run(args, &stdout, &stderr, emptyLookupEnv)
+		if exitCode != 0 {
+			t.Fatalf("run(%v) exitCode = %d, want 0, stderr=%q", args, exitCode, stderr.String())
+		}
+		if !strings.Contains(stdout.String(), "warden upgrade") {
+			t.Fatalf("run(%v) stdout = %q, want upgrade usage", args, stdout.String())
+		}
+		if stderr.Len() != 0 {
+			t.Fatalf("run(%v) stderr = %q, want empty", args, stderr.String())
+		}
 	}
 }
 

@@ -27,6 +27,30 @@ warden-server.service
 The server installer creates the master key if absent, preserves the existing
 key/database during upgrades, and refreshes the service unit.
 
+## Self-upgrade
+
+`warden-server upgrade` replaces the server executable in place without
+prompts:
+
+```bash
+warden-server upgrade
+```
+
+It downloads the latest released server asset, verifies its SHA-256 digest
+against the release `SHA256SUMS` file, and replaces only the executable. It
+accepts no arguments and never modifies `server.json`, `warden.db`,
+`master.key`, or `warden-server.service`. Only the target published in the
+latest release is supported; any other OS/architecture fails before the
+installed executable is touched.
+
+The command does not restart the service. After it succeeds, run the manual
+restart steps for the scope in use, shown under
+[Generated systemd service](#generated-systemd-service).
+
+Set `WARDEN_REPO` or `WARDEN_RELEASE_BASE_URL` to upgrade from a release source
+other than the default `hieudmg/warden` GitHub releases. The client upgrades
+itself with `warden upgrade`; see the [CLI guide](cli.md).
+
 ## Generated systemd service
 
 The server installer prints both setup paths after every install or update.

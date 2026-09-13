@@ -70,6 +70,24 @@ Server binary, config, database, master key, and generated systemd unit live
 in the selected directory. Installer prints user-scope and system-scope
 systemd setup/restart commands after every install or update.
 
+### Upgrade
+
+Both binaries upgrade themselves in place without prompts:
+
+```bash
+warden upgrade
+warden-server upgrade
+```
+
+Each command downloads the latest released binary for the current platform,
+verifies it against the release `SHA256SUMS`, and replaces only its own
+executable. Client config, cached credentials, server config, the database,
+the master key, and the service unit are left untouched.
+
+`warden-server upgrade` does not restart the service. It prints the manual
+user-scope and system-scope systemd restart commands, which are also listed in
+[Deployment](docs/deployment.md).
+
 ## Configuration
 
 Client only needs server endpoint:
@@ -123,6 +141,10 @@ warden xssh
 
 # Copy files through configured hosts.
 warden cp ./release.tar prod:/srv/releases/
+
+# Upgrade a binary in place from the latest release.
+warden upgrade
+warden-server upgrade
 ```
 
 See [CLI guide](docs/cli.md) for advanced behavior, picker details, database

@@ -43,6 +43,20 @@ Release builds use `CGO_ENABLED=0`, `-trimpath`, stripped symbols, and the
 frontend production build. GitHub release automation reads the version from
 `web/package.json`.
 
+`warden upgrade` and `warden-server upgrade` consume these assets and pick the
+one matching the running binary and platform:
+
+| Binary | Target | Asset |
+| --- | --- | --- |
+| `warden` | linux/amd64 | `warden-linux-amd64` |
+| `warden` | windows/amd64 | `warden.exe` |
+| `warden-server` | linux/amd64 | `warden-server-linux-amd64` |
+
+Other combinations fail before the installed executable is touched. Point the
+commands at a local or alternate release with `WARDEN_REPO` and
+`WARDEN_RELEASE_BASE_URL`; the release layout must include `SHA256SUMS` beside
+the asset.
+
 ## Windows client build
 
 The client does not import the embedded web package and can be built without
