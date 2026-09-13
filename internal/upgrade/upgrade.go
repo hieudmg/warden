@@ -4,7 +4,6 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
-	"errors"
 	"fmt"
 	"io"
 	"io/fs"
@@ -121,7 +120,7 @@ func Upgrade(ctx context.Context, kind Kind, opts Options) (Result, error) {
 	}
 	replace := opts.Replace
 	if replace == nil {
-		return Result{}, errors.New("upgrade: no replacement function configured")
+		replace = replaceExecutable
 	}
 
 	baseURL := releaseBaseURL(repo, opts.ReleaseBaseURL)

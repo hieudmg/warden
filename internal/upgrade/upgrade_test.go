@@ -10,6 +10,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"sort"
 	"strings"
@@ -344,6 +345,163 @@ func TestUpgradeRejectsMissingExecutableBeforeDownload(t *testing.T) {
 	assertDirEntries(t, dir)
 }
 
+func TestReplaceExecutable(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Windows schedules a cmd.exe helper that replaces the executable after this process exits")
+	}
+	dir := t.TempDir()
+	current := filepath.Join(dir, "current")
+	download := filepath.Join(dir, "download")
+	if err := os.WriteFile(current, []byte("old binary"), 0o755); err != nil {
+		t.Fatalf("write current: %v", err)
+	}
+	if err := os.WriteFile(download, []byte("new binary"), 0o600); err != nil {
+		t.Fatalf("write download: %v", err)
+	}
+
+	scheduled, err := replaceExecutable(download, current, 0o755)
+	if err != nil {
+		t.Fatalf("replaceExecutable() error = %v", err)
+	}
+	if scheduled {
+		t.Fatalf("replaceExecutable() scheduled = true, want false on %s", runtime.GOOS)
+	}
+	assertFileContent(t, current, "new binary")
+	if got := fileMode(t, current); got != 0o755 {
+		t.Errorf("current mode = %v, want 0755", got)
+	}
+	if _, err := os.Stat(download); !os.IsNotExist(err) {
+		t.Errorf("temporary source still present after replacement: err = %v", err)
+	}
+}
+
+func TestReplaceExecutableFailureLeavesTargetUnchanged(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Windows schedules a cmd.exe helper that replaces the executable after this process exits")
+	}
+
+	t.Run("missing parent directory", func(t *testing.T) {
+		dir := t.TempDir()
+		download := filepath.Join(dir, "download")
+		if err := os.WriteFile(download, []byte("new binary"), 0o600); err != nil {
+			t.Fatalf("write download: %v", err)
+		}
+		target := filepath.Join(dir, "missing", "current")
+
+		if _, err := replaceExecutable(download, target, 0o755); err == nil {
+			t.Fatal("replaceExecutable() error = nil, want rename failure")
+		}
+		if _, err := os.Stat(target); !os.IsNotExist(err) {
+			t.Errorf("target exists after failed replacement: err = %v", err)
+		}
+		// A failed replacement must not destroy the verified download; Upgrade
+		// removes it through its deferred cleanup.
+		assertFileContent(t, download, "new binary")
+	})
+
+	t.Run("destination is an existing directory", func(t *testing.T) {
+		dir := t.TempDir()
+		download := filepath.Join(dir, "download")
+		if err := os.WriteFile(download, []byte("new binary"), 0o600); err != nil {
+			t.Fatalf("write download: %v", err)
+		}
+		target := filepath.Join(dir, "current")
+		if err := os.Mkdir(target, 0o755); err != nil {
+			t.Fatalf("mkdir target: %v", err)
+		}
+		old := filepath.Join(target, "old")
+		if err := os.WriteFile(old, []byte("old binary"), 0o755); err != nil {
+			t.Fatalf("write old: %v", err)
+		}
+
+		if _, err := replaceExecutable(download, target, 0o755); err == nil {
+			t.Fatal("replaceExecutable() error = nil, want rename failure")
+		}
+		assertFileContent(t, old, "old binary")
+	})
+}
+
+func TestUpgradeReplacesExecutable(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Windows defers replacement to a cmd.exe helper that runs after this process exits")
+	}
+	const asset = "warden-linux-amd64"
+	const payload = "new warden binary"
+	dir, exe := newExecutable(t, "warden", "old warden binary")
+	srv, _ := releaseServer(t, map[string]string{
+		"/" + asset:        payload,
+		"/" + checksumFile: sha256Hex(payload) + "  " + asset + "\n",
+	})
+
+	// Leaving Replace nil exercises the platform replacement default.
+	result, err := Upgrade(context.Background(), Client, Options{
+		ReleaseBaseURL: srv.URL,
+		HTTPClient:     srv.Client(),
+		GOOS:           "linux",
+		GOARCH:         "amd64",
+		ExecutablePath: exe,
+	})
+	if err != nil {
+		t.Fatalf("Upgrade() error = %v", err)
+	}
+	if want := (Result{Asset: asset, ExecutablePath: exe}); result != want {
+		t.Errorf("Upgrade() result = %+v, want %+v", result, want)
+	}
+	assertFileContent(t, exe, payload)
+	if got := fileMode(t, exe); got != 0o755 {
+		t.Errorf("executable mode = %v, want preserved 0755", got)
+	}
+	// The verified download must not survive a successful replacement.
+	assertDirEntries(t, dir, "warden")
+}
+
+func TestUpgradePreservesAdjacentState(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Windows defers replacement to a cmd.exe helper that runs after this process exits")
+	}
+	const asset = "warden-server-linux-amd64"
+	const payload = "new warden-server binary"
+	dir, exe := newExecutable(t, "warden-server", "old warden-server binary")
+	state := map[string]string{
+		"client.json":           `{"server":"https://warden.example"}`,
+		"server.json":           `{"listen":"127.0.0.1:8080"}`,
+		"warden.db":             "sqlite database bytes",
+		"master.key":            "0123456789abcdef0123456789abcdef",
+		"warden-server.service": "[Service]\nExecStart=/usr/local/bin/warden-server serve\n",
+	}
+	names := make([]string, 0, len(state)+1)
+	names = append(names, "warden-server")
+	for name, content := range state {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0o600); err != nil {
+			t.Fatalf("write %s: %v", name, err)
+		}
+		names = append(names, name)
+	}
+	srv, _ := releaseServer(t, map[string]string{
+		"/" + asset:        payload,
+		"/" + checksumFile: sha256Hex(payload) + "  " + asset + "\n",
+	})
+
+	if _, err := Upgrade(context.Background(), Server, Options{
+		ReleaseBaseURL: srv.URL,
+		HTTPClient:     srv.Client(),
+		GOOS:           "linux",
+		GOARCH:         "amd64",
+		ExecutablePath: exe,
+	}); err != nil {
+		t.Fatalf("Upgrade() error = %v", err)
+	}
+
+	assertFileContent(t, exe, payload)
+	for name, content := range state {
+		assertFileContent(t, filepath.Join(dir, name), content)
+	}
+	if got := fileMode(t, filepath.Join(dir, "master.key")); got != 0o600 {
+		t.Errorf("master.key mode = %v, want preserved 0600", got)
+	}
+	assertDirEntries(t, dir, names...)
+}
+
 type replaceCall struct {
 	tempPath       string
 	executablePath string
@@ -410,6 +568,15 @@ func newExecutable(t *testing.T, name, content string) (string, string) {
 func sha256Hex(data string) string {
 	sum := sha256.Sum256([]byte(data))
 	return hex.EncodeToString(sum[:])
+}
+
+func fileMode(t *testing.T, path string) fs.FileMode {
+	t.Helper()
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatalf("stat %s: %v", path, err)
+	}
+	return info.Mode().Perm()
 }
 
 func assertFileContent(t *testing.T, path, want string) {
