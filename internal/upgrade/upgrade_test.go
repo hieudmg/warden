@@ -3,9 +3,11 @@ package upgrade
 import (
 	"context"
 	"crypto/sha256"
+	"encoding/base64"
 	"encoding/hex"
 	"io"
 	"io/fs"
+	"maps"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -16,6 +18,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"unicode/utf16"
 )
 
 func TestAssetName(t *testing.T) {
@@ -347,19 +350,23 @@ func TestUpgradeRejectsMissingExecutableBeforeDownload(t *testing.T) {
 
 func TestReplaceExecutable(t *testing.T) {
 	if runtime.GOOS == "windows" {
-		t.Skip("Windows schedules a cmd.exe helper that replaces the executable after this process exits")
+		t.Skip("Windows schedules a PowerShell helper that replaces the executable after this process exits")
 	}
 	dir := t.TempDir()
 	current := filepath.Join(dir, "current")
 	download := filepath.Join(dir, "download")
-	if err := os.WriteFile(current, []byte("old binary"), 0o755); err != nil {
+	// A non-default mode catches an implementation that always chmods 0755.
+	if err := os.WriteFile(current, []byte("old binary"), 0o711); err != nil {
 		t.Fatalf("write current: %v", err)
+	}
+	if err := os.Chmod(current, 0o711); err != nil {
+		t.Fatalf("chmod current: %v", err)
 	}
 	if err := os.WriteFile(download, []byte("new binary"), 0o600); err != nil {
 		t.Fatalf("write download: %v", err)
 	}
 
-	scheduled, err := replaceExecutable(download, current, 0o755)
+	scheduled, err := replaceExecutable(download, current, 0o711)
 	if err != nil {
 		t.Fatalf("replaceExecutable() error = %v", err)
 	}
@@ -367,8 +374,8 @@ func TestReplaceExecutable(t *testing.T) {
 		t.Fatalf("replaceExecutable() scheduled = true, want false on %s", runtime.GOOS)
 	}
 	assertFileContent(t, current, "new binary")
-	if got := fileMode(t, current); got != 0o755 {
-		t.Errorf("current mode = %v, want 0755", got)
+	if got := fileMode(t, current); got != 0o711 {
+		t.Errorf("current mode = %v, want preserved 0711", got)
 	}
 	if _, err := os.Stat(download); !os.IsNotExist(err) {
 		t.Errorf("temporary source still present after replacement: err = %v", err)
@@ -377,7 +384,7 @@ func TestReplaceExecutable(t *testing.T) {
 
 func TestReplaceExecutableFailureLeavesTargetUnchanged(t *testing.T) {
 	if runtime.GOOS == "windows" {
-		t.Skip("Windows schedules a cmd.exe helper that replaces the executable after this process exits")
+		t.Skip("Windows schedules a PowerShell helper that replaces the executable after this process exits")
 	}
 
 	t.Run("missing parent directory", func(t *testing.T) {
@@ -423,7 +430,7 @@ func TestReplaceExecutableFailureLeavesTargetUnchanged(t *testing.T) {
 
 func TestUpgradeReplacesExecutable(t *testing.T) {
 	if runtime.GOOS == "windows" {
-		t.Skip("Windows defers replacement to a cmd.exe helper that runs after this process exits")
+		t.Skip("Windows defers replacement to a PowerShell helper that runs after this process exits")
 	}
 	const asset = "warden-linux-amd64"
 	const payload = "new warden binary"
@@ -457,7 +464,7 @@ func TestUpgradeReplacesExecutable(t *testing.T) {
 
 func TestUpgradePreservesAdjacentState(t *testing.T) {
 	if runtime.GOOS == "windows" {
-		t.Skip("Windows defers replacement to a cmd.exe helper that runs after this process exits")
+		t.Skip("Windows defers replacement to a PowerShell helper that runs after this process exits")
 	}
 	const asset = "warden-server-linux-amd64"
 	const payload = "new warden-server binary"
@@ -500,6 +507,109 @@ func TestUpgradePreservesAdjacentState(t *testing.T) {
 		t.Errorf("master.key mode = %v, want preserved 0600", got)
 	}
 	assertDirEntries(t, dir, names...)
+}
+
+func TestUpgradePreservesExecutableMode(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Windows defers replacement to a PowerShell helper that runs after this process exits")
+	}
+	const asset = "warden-linux-amd64"
+	const payload = "new warden binary"
+	dir, exe := newExecutable(t, "warden", "old warden binary")
+	// A non-default mode catches an implementation that always chmods 0755.
+	if err := os.Chmod(exe, 0o711); err != nil {
+		t.Fatalf("chmod executable: %v", err)
+	}
+	srv, _ := releaseServer(t, map[string]string{
+		"/" + asset:        payload,
+		"/" + checksumFile: sha256Hex(payload) + "  " + asset + "\n",
+	})
+
+	if _, err := Upgrade(context.Background(), Client, Options{
+		ReleaseBaseURL: srv.URL,
+		HTTPClient:     srv.Client(),
+		GOOS:           "linux",
+		GOARCH:         "amd64",
+		ExecutablePath: exe,
+	}); err != nil {
+		t.Fatalf("Upgrade() error = %v", err)
+	}
+
+	assertFileContent(t, exe, payload)
+	if got := fileMode(t, exe); got != 0o711 {
+		t.Errorf("executable mode = %v, want preserved 0711", got)
+	}
+	assertDirEntries(t, dir, "warden")
+}
+
+// The Windows helper runs only on Windows, so its command construction is
+// verified statically: paths must never reach the command line, and the encoded
+// program must round-trip.
+func TestWindowsHelperPassesPathsThroughEnvironment(t *testing.T) {
+	tempPath := `C:\Users\%PATH%\warden.exe.upgrade-1234`
+	executablePath := `C:\Program Files\100% & "quoted" 'single'\warden.exe`
+
+	encoded := encodePowerShellCommand(windowsHelperProgram)
+	for _, r := range encoded {
+		switch r {
+		case ' ', '"', '\'', '&', '|', '<', '>', '^', '%':
+			t.Fatalf("encoded command contains shell-significant character %q", r)
+		}
+	}
+
+	program := decodePowerShellCommand(t, encoded)
+	if program != windowsHelperProgram {
+		t.Fatal("encoded command did not round-trip to the helper program")
+	}
+	for _, needle := range []string{tempPath, executablePath, "%PATH%", `"quoted"`, "&"} {
+		if strings.Contains(program, needle) {
+			t.Errorf("helper program embeds %q; paths must travel through the environment", needle)
+		}
+	}
+
+	want := map[string]string{
+		windowsHelperSourceEnv:    tempPath,
+		windowsHelperTargetEnv:    executablePath,
+		windowsHelperParentPIDEnv: "4242",
+	}
+	got := make(map[string]string, len(want))
+	for _, entry := range windowsHelperEnv(tempPath, executablePath, 4242) {
+		name, value, ok := strings.Cut(entry, "=")
+		if !ok {
+			t.Fatalf("environment entry %q has no name/value separator", entry)
+		}
+		got[name] = value
+	}
+	if !maps.Equal(got, want) {
+		t.Errorf("helper environment = %q, want literal values %q", got, want)
+	}
+}
+
+func TestWindowsHelperWaitsAndRetriesMove(t *testing.T) {
+	program := windowsHelperProgram
+	for _, want := range []string{
+		"$env:" + windowsHelperSourceEnv,
+		"$env:" + windowsHelperTargetEnv,
+		"$env:" + windowsHelperParentPIDEnv,
+		"WaitForExit",
+		"while (",
+		"Move-Item -LiteralPath",
+	} {
+		if !strings.Contains(program, want) {
+			t.Errorf("helper program missing %q", want)
+		}
+	}
+	for _, unwanted := range []string{"cmd.exe", "del /f", "del /q", "ping -n"} {
+		if strings.Contains(program, unwanted) {
+			t.Errorf("helper program still contains legacy shell helper text %q", unwanted)
+		}
+	}
+	// The verified download may only be removed once the retry loop gives up.
+	loop := strings.Index(program, "while (")
+	cleanup := strings.Index(program, "Remove-Item")
+	if loop < 0 || cleanup < 0 || cleanup < loop {
+		t.Error("helper program removes the verified download before the retry loop")
+	}
 }
 
 type replaceCall struct {
@@ -563,6 +673,22 @@ func newExecutable(t *testing.T, name, content string) (string, string) {
 		t.Fatalf("write executable: %v", err)
 	}
 	return dir, path
+}
+
+func decodePowerShellCommand(t *testing.T, encoded string) string {
+	t.Helper()
+	raw, err := base64.StdEncoding.DecodeString(encoded)
+	if err != nil {
+		t.Fatalf("decode command: %v", err)
+	}
+	if len(raw)%2 != 0 {
+		t.Fatalf("decoded command has odd byte length %d", len(raw))
+	}
+	units := make([]uint16, len(raw)/2)
+	for i := range units {
+		units[i] = uint16(raw[2*i]) | uint16(raw[2*i+1])<<8
+	}
+	return string(utf16.Decode(units))
 }
 
 func sha256Hex(data string) string {
