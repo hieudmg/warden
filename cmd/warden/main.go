@@ -471,10 +471,17 @@ func writeConfigSearchResultsForMode(w io.Writer, query string, sshConns []model
 		writeConfigSearchResults(&decorated, query, sshConns, dbConns)
 		for _, line := range strings.Split(strings.TrimSuffix(decorated.String(), "\n"), "\n") {
 			if line == "" || line == "SSH" || line == "DB" {
+				fmt.Fprintln(w, line)
 				continue
 			}
-			line = strings.TrimPrefix(line, "├── ")
-			line = strings.TrimPrefix(line, "└── ")
+			if strings.HasPrefix(line, "├── ") {
+				fmt.Fprintln(w, "- "+strings.TrimPrefix(line, "├── "))
+				continue
+			}
+			if strings.HasPrefix(line, "└── ") {
+				fmt.Fprintln(w, "- "+strings.TrimPrefix(line, "└── "))
+				continue
+			}
 			fmt.Fprintln(w, line)
 		}
 		return

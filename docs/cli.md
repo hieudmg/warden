@@ -35,7 +35,9 @@ mode, results retain the fixed-width CLI table and `Query OK` status.
 `warden config search` searches redacted SSH and database profiles by words in
 name and host. Database profiles also search configured database names.
 Matching tolerates bounded typos, retains partial matches, and ranks SSH and
-DB sections independently.
+DB sections independently. Interactive output uses a tree; non-interactive
+output keeps the `SSH` and `DB` sections and renders each result as a bullet
+list.
 
 ## Database targets
 

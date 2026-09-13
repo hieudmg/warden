@@ -565,11 +565,11 @@ func TestRunConfigSearch(t *testing.T) {
 	}
 
 	var stdout, stderr bytes.Buffer
-	exitCode := run([]string{"config", "search", "PrOd"}, &stdout, &stderr, lookupEnv)
+	exitCode := run([]string{"-n", "config", "search", "PrOd"}, &stdout, &stderr, lookupEnv)
 	if exitCode != 0 {
 		t.Fatalf("run() exitCode = %d, want 0, stderr=%q", exitCode, stderr.String())
 	}
-	const want = "prod-web — edge.internal — Note: production web\nbastion — prod-gateway.internal\nreporting/analytics — prod-db.internal/analytics — SSH: prod-web — Note: read-only reporting\nprod-name/app — mysql.internal/app\n"
+	const want = "SSH\n- prod-web — edge.internal — Note: production web\n- bastion — prod-gateway.internal\n\nDB\n- reporting/analytics — prod-db.internal/analytics — SSH: prod-web — Note: read-only reporting\n- prod-name/app — mysql.internal/app\n"
 	if stdout.String() != want {
 		t.Errorf("stdout = %q, want %q", stdout.String(), want)
 	}
