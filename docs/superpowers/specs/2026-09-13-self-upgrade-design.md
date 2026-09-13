@@ -57,10 +57,12 @@ rename it over the current executable. A failure leaves the existing executable
 untouched.
 
 On Windows, the running client executable cannot be overwritten. Download and
-verify the replacement first, then launch a `cmd.exe` helper that waits for the
-parent process to exit and moves the temporary file over the target. The command
-reports that replacement was scheduled; the helper cleans up its temporary file
-on success or failure.
+verify the replacement first, then launch a detached `powershell.exe` helper
+with an encoded, static command. It receives the temporary and target paths
+through environment variables, uses literal-path operations, waits for the
+parent process to exit, and retries the move while the executable is locked. The
+command reports that replacement was scheduled; the helper cleans up its
+temporary file only after terminal failure.
 
 The server command is currently Linux-only. It replaces the binary but never
 restarts a service or changes `server.json`, `warden.db`, `master.key`, or the

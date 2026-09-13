@@ -230,13 +230,15 @@ wrapped errors without deleting or modifying the target when chmod/rename fails.
 
 - [ ] **Step 4: Add Windows replacement implementation**
 
-In `replace_windows.go` with `//go:build windows`, create a command helper using
-`cmd.exe /d /s /c` that waits briefly for the parent process to exit, moves the
-temporary file over the target with `move /y`, and deletes the temporary file on
-failure. Start it detached with inherited no standard streams, return
+In `replace_windows.go` with `//go:build windows`, create a detached
+`powershell.exe` helper with an encoded, static command. Pass the temporary and
+target paths through environment variables and use `Move-Item -LiteralPath` and
+`Remove-Item -LiteralPath`, so `%`, quotes, and command metacharacters remain
+data. The helper waits for the parent process to exit, retries the move while the
+executable is locked, and cleans up only after terminal failure. Return
 `(true, nil)` only after `Start` succeeds, and return a wrapped error if
-`cmd.exe` cannot be started. Do not attempt to replace the locked executable in
-the current process.
+`powershell.exe` cannot be started. Do not attempt to replace the locked
+executable in the current process.
 
 - [ ] **Step 5: Wire the default replacement function**
 
