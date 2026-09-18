@@ -585,6 +585,14 @@ func TestWindowsHelperPassesPathsThroughEnvironment(t *testing.T) {
 	}
 }
 
+func TestWindowsHelperDoesNotInheritParentConsole(t *testing.T) {
+	const detachedProcess = 0x00000008
+
+	if got := windowsHelperCreationFlags(); got&detachedProcess == 0 {
+		t.Fatalf("windows helper creation flags = %#x; want DETACHED_PROCESS (%#x)", got, detachedProcess)
+	}
+}
+
 func TestWindowsHelperWaitsAndRetriesMove(t *testing.T) {
 	program := windowsHelperProgram
 	for _, want := range []string{

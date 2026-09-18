@@ -90,7 +90,19 @@ const (
 	windowsHelperSourceEnv    = "WARDEN_UPGRADE_SOURCE"
 	windowsHelperTargetEnv    = "WARDEN_UPGRADE_TARGET"
 	windowsHelperParentPIDEnv = "WARDEN_UPGRADE_PARENT_PID"
+
+	// Windows process-creation flags. Keep these platform-independent so the
+	// helper lifecycle contract can be tested on every development platform.
+	windowsCreateNewProcessGroup = 0x00000200
+	windowsDetachedProcess       = 0x00000008
 )
+
+// windowsHelperCreationFlags prevents the replacement helper from inheriting
+// the caller's console, while keeping it in an isolated process group. The
+// helper must outlive the command that starts it to replace its executable.
+func windowsHelperCreationFlags() uint32 {
+	return windowsCreateNewProcessGroup | windowsDetachedProcess
+}
 
 // windowsHelperProgram is the PowerShell program run through -EncodedCommand.
 // It reads both paths from the environment, so Windows metacharacters such as
