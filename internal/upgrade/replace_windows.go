@@ -28,7 +28,7 @@ func replaceExecutable(tempPath, executablePath string, mode fs.FileMode) (bool,
 	cmd.Env = append(os.Environ(), windowsHelperEnv(tempPath, executablePath, os.Getpid())...)
 	cmd.SysProcAttr = &syscall.SysProcAttr{
 		HideWindow:    true,
-		CreationFlags: syscall.CREATE_NEW_PROCESS_GROUP,
+		CreationFlags: windowsHelperCreationFlags(),
 	}
 	if err := cmd.Start(); err != nil {
 		return false, fmt.Errorf("start replacement helper: %w", err)
