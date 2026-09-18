@@ -46,12 +46,11 @@ func (t termReadWriter) Write(p []byte) (int, error) { return t.term.Stdout().Wr
 
 // RunInteractive attaches the caller's terminal to an interactive remote
 // shell over the bundle's jump chain. It enters raw mode, requests a PTY
-// sized to the local terminal, streams bytes both ways, translates local
-// Ctrl-C into a remote SIGINT request, forwards Ctrl-D as a byte so the
-// remote shell/tty interprets it as EOF (OpenSSH semantics), delivers
-// resize changes as window-change requests, and restores the terminal on
-// every exit path. acceptNew enables interactive first-use host-key
-// confirmation on the terminal; changed and unconfirmed keys always fail.
+// sized to the local terminal, streams bytes both ways so the remote PTY
+// interprets control keys (including Ctrl-C and Ctrl-D), delivers resize
+// changes as window-change requests, and restores the terminal on every exit
+// path. acceptNew enables interactive first-use host-key confirmation on the
+// terminal; changed and unconfirmed keys always fail.
 func RunInteractive(ctx context.Context, bundle model.SSHBundle, term terminal.Session, acceptNew bool) error {
 	return runInteractive(ctx, bundle, term, DialOptions{
 		AcceptNew: acceptNew,
@@ -143,17 +142,17 @@ func runInteractive(ctx context.Context, bundle model.SSHBundle, term terminal.S
 		return fmt.Errorf("start remote shell: %w", err)
 	}
 
-	// Input pump: forward terminal bytes and translate Ctrl-C to a
-	// remote SIGINT request. Ctrl-D (0x04) is forwarded as a byte, like
-	// OpenSSH: the remote pty/shell interprets it as EOF. Closing local
-	// stdin instead would leave a real sshd pty session running (channel
-	// EOF does not end a pty shell). The pump exits on session end via
-	// stopPump; a read blocked on the terminal unwinds only when the
-	// process exits (or the reader closes), which is fine for a one-shot
-	// CLI.
+	// Input pump: forward terminal bytes unchanged so the remote PTY's
+	// line discipline interprets control keys. This is how direct ssh
+	// delivers Ctrl-C to the foreground process group and Ctrl-D as EOF.
+	// Closing local stdin instead would leave a real sshd pty session
+	// running (channel EOF does not end a pty shell). The pump exits on
+	// session end via stopPump; a read blocked on the terminal unwinds only
+	// when the process exits (or the reader closes), which is fine for a
+	// one-shot CLI.
 	stopPump := make(chan struct{})
 	go func() {
-		pumpInteractiveInput(ctx, session, stdinPipe, term.Stdin(), stopPump)
+		pumpInteractiveInput(ctx, stdinPipe, term.Stdin(), stopPump)
 	}()
 
 	// Resize pump: forward local size changes as window-change requests.
@@ -201,20 +200,16 @@ type readResult struct {
 	err error
 }
 
-// pumpInteractiveInput forwards local input bytes to the remote session's
-// stdin pipe. Byte 0x03 (Ctrl-C) is translated to a remote SIGINT signal
-// request instead of being forwarded; byte 0x04 (Ctrl-D) is forwarded as a
-// byte so the remote shell/tty interprets it as EOF, exactly like OpenSSH
-// in raw mode. All other bytes pass through unchanged. Signal request
-// failures are ignored: aborting the session because the remote rejected a
-// signal would be worse than a missed interrupt.
+// pumpInteractiveInput forwards local input bytes unchanged to the remote
+// session's stdin pipe. The remote PTY interprets control bytes, including
+// Ctrl-C (SIGINT) and Ctrl-D (EOF), just as it does for direct ssh input.
 //
 // The pump never closes pipe: runInteractive owns the stdin pipe and
 // closes it once after the session ends or the context is cancelled.
 // Closing from two goroutines would race on x/crypto's channel state.
 // A read blocked on the terminal unwinds only when the process exits (or
 // the reader closes), which is fine for a one-shot CLI.
-func pumpInteractiveInput(ctx context.Context, session *golangssh.Session, pipe io.Writer, stdin io.Reader, stop <-chan struct{}) {
+func pumpInteractiveInput(ctx context.Context, pipe io.Writer, stdin io.Reader, stop <-chan struct{}) {
 	buf := make([]byte, 256)
 	for {
 		readCh := make(chan readResult, 1)
@@ -232,23 +227,31 @@ func pumpInteractiveInput(ctx context.Context, session *golangssh.Session, pipe 
 			return
 		}
 
-		start := 0
-		for i, b := range buf[:r.n] {
-			if b == 0x03 { // Ctrl-C
-				if i > start {
-					pipe.Write(buf[start:i])
-				}
-				_ = session.Signal(golangssh.SIGINT)
-				start = i + 1
-			}
-		}
-		if start < r.n {
-			if _, err := pipe.Write(buf[start:r.n]); err != nil {
-				return
-			}
+		if err := writeAll(pipe, buf[:r.n]); err != nil {
+			return
 		}
 		if r.err != nil {
 			return
 		}
 	}
+}
+
+// writeAll preserves every input byte even when the destination accepts only
+// part of a write. A zero-byte write without an error cannot make progress
+// and is treated as a short write.
+func writeAll(w io.Writer, p []byte) error {
+	for len(p) > 0 {
+		n, err := w.Write(p)
+		if n < 0 || n > len(p) {
+			return io.ErrShortWrite
+		}
+		p = p[n:]
+		if err != nil {
+			return err
+		}
+		if n == 0 {
+			return io.ErrShortWrite
+		}
+	}
+	return nil
 }

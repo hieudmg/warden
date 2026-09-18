@@ -16,8 +16,7 @@ import (
 
 // Console input mode flags used for raw mode. ENABLE_PROCESSED_INPUT is
 // cleared so Ctrl-C arrives as byte 0x03 on the input stream and is
-// forwarded as a remote SIGINT by the interactive layer instead of
-// terminating the process.
+// forwarded unchanged to the remote PTY instead of terminating the process.
 const (
 	winRawInputMode  = windows.ENABLE_EXTENDED_FLAGS | windows.ENABLE_VIRTUAL_TERMINAL_INPUT
 	winInputToClear  = windows.ENABLE_PROCESSED_INPUT | windows.ENABLE_LINE_INPUT | windows.ENABLE_ECHO_INPUT
