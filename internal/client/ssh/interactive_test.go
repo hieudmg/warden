@@ -55,6 +55,18 @@ func (b *lockedBuffer) String() string {
 	return b.buf.String()
 }
 
+type partialWriter struct {
+	buf bytes.Buffer
+	max int
+}
+
+func (w *partialWriter) Write(p []byte) (int, error) {
+	if len(p) > w.max {
+		p = p[:w.max]
+	}
+	return w.buf.Write(p)
+}
+
 type fakeTerminalSession struct {
 	mu     sync.Mutex
 	in     io.Reader
@@ -138,11 +150,25 @@ type interactiveTestServer struct {
 	ptySizes     []ptySize
 	windowChange []ptySize
 	signals      []string
+	input        []byte
 	execStarted  bool
 }
 
 type ptySize struct {
 	cols, rows uint32
+}
+
+type recordingReader struct {
+	io.Reader
+	record func([]byte)
+}
+
+func (r recordingReader) Read(p []byte) (int, error) {
+	n, err := r.Reader.Read(p)
+	if n > 0 {
+		r.record(p[:n])
+	}
+	return n, err
 }
 
 // newInteractiveTestServer starts a server authenticating password "pw".
@@ -252,7 +278,7 @@ func (s *interactiveTestServer) handleSession(ch golangssh.Channel, reqs <-chan 
 			req.Reply(true, nil)
 			// The shell runs concurrently so the request loop keeps
 			// handling window-change/signal requests while it lives.
-			go runPTYShell(ch, payload.Command)
+			go runPTYShell(s, ch, payload.Command)
 		default:
 			req.Reply(false, nil)
 		}
@@ -268,6 +294,18 @@ func (s *interactiveTestServer) gotSignal(want string) bool {
 		}
 	}
 	return false
+}
+
+func (s *interactiveTestServer) recordInput(p []byte) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.input = append(s.input, p...)
+}
+
+func (s *interactiveTestServer) gotInputByte(want byte) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return bytes.Contains(s.input, []byte{want})
 }
 
 func (s *interactiveTestServer) lastWindowChange() (ptySize, bool) {
@@ -325,7 +363,7 @@ func openPTY() (master, slave *os.File, err error) {
 // pty keeps the remote shell line-buffered so output streams in real
 // time, exactly like a real sshd. When the client closes its stdin, EOF
 // is delivered to the pty (as EOT in canonical mode), ending the shell.
-func runPTYShell(ch golangssh.Channel, command string) {
+func runPTYShell(s *interactiveTestServer, ch golangssh.Channel, command string) {
 	master, slave, err := openPTY()
 	if err != nil {
 		ch.SendRequest("exit-status", false, golangssh.Marshal(struct{ Status uint32 }{Status: 1}))
@@ -357,7 +395,7 @@ func runPTYShell(ch golangssh.Channel, command string) {
 	inDone := make(chan struct{})
 	go func() {
 		defer close(inDone)
-		io.Copy(master, ch)
+		io.Copy(master, recordingReader{Reader: ch, record: s.recordInput})
 		// Channel EOF: deliver EOF to the pty so the shell terminates.
 		master.Write([]byte{0x04})
 	}()
@@ -480,6 +518,20 @@ func TestWriteProgressEscapesControlCharacters(t *testing.T) {
 	}
 }
 
+func TestPumpInteractiveInputForwardsEveryByte(t *testing.T) {
+	want := make([]byte, 256)
+	for i := range want {
+		want[i] = byte(i)
+	}
+	out := &partialWriter{max: 7}
+
+	pumpInteractiveInput(context.Background(), out, bytes.NewReader(want), make(chan struct{}))
+
+	if !bytes.Equal(out.buf.Bytes(), want) {
+		t.Fatalf("forwarded %d bytes, want all %d bytes", out.buf.Len(), len(want))
+	}
+}
+
 // TestRunInteractiveRequestsPTYAndStreamsOutput verifies the full
 // interactive flow: raw mode entered, PTY requested with the terminal
 // size, remote output streamed locally in real time, and Ctrl-D ending
@@ -558,9 +610,11 @@ func TestRunInteractiveSendsWindowChange(t *testing.T) {
 	}
 }
 
-// TestRunInteractiveCtrlCForwardsSIGINT verifies the 0x03 input byte is
-// translated to a remote SIGINT signal request, not forwarded as a byte.
-func TestRunInteractiveCtrlCForwardsSIGINT(t *testing.T) {
+// TestRunInteractiveCtrlCForwardsByte verifies Ctrl-C is forwarded through
+// the remote PTY as a control byte, matching direct ssh -t behavior. The
+// remote PTY's line discipline then turns the byte into SIGINT for its
+// foreground process group.
+func TestRunInteractiveCtrlCForwardsByte(t *testing.T) {
 	srv := newInteractiveTestServer(t)
 	inR, inW := io.Pipe()
 	t.Cleanup(func() { inR.Close() })
@@ -572,15 +626,23 @@ func TestRunInteractiveCtrlCForwardsSIGINT(t *testing.T) {
 	if _, err := inW.Write([]byte{0x03}); err != nil { // Ctrl-C
 		t.Fatal(err)
 	}
-	waitFor(t, "SIGINT signal request", func() bool { return srv.gotSignal("INT") })
-
-	if _, err := inW.Write([]byte{0x04}); err != nil {
+	waitFor(t, "Ctrl-C byte at remote PTY", func() bool {
+		return srv.gotInputByte(0x03)
+	})
+	if srv.gotSignal("INT") {
+		t.Fatal("Ctrl-C sent as an SSH signal request; want PTY input byte")
+	}
+	if _, err := inW.Write([]byte{0x04}); err != nil { // Ctrl-D
 		t.Fatal(err)
 	}
+
 	select {
 	case err := <-*session:
 		if err != nil {
-			t.Fatalf("runInteractive() err = %v, want nil", err)
+			var exitErr *ExitStatusError
+			if !errors.As(err, &exitErr) || exitErr.Status != 130 {
+				t.Fatalf("runInteractive() err = %v, want nil or Ctrl-C exit status 130", err)
+			}
 		}
 	case <-time.After(10 * time.Second):
 		t.Fatal("session did not end after Ctrl-D")
