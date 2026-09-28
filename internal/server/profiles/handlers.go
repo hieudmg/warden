@@ -80,6 +80,9 @@ func (h *Handler) Register(mux *http.ServeMux) {
 	mux.HandleFunc("DELETE /api/v1/key-pairs/{id}", h.deleteKeyPair)
 	mux.HandleFunc("GET /api/v1/key-pairs/{id}/dependents", h.keyPairDependents)
 
+	mux.HandleFunc("GET /api/v1/data/export", h.exportData)
+	mux.HandleFunc("POST /api/v1/data/import", h.importData)
+
 	mux.HandleFunc("GET /api/v1/transport/ssh/{id}", h.transportSSH)
 	mux.HandleFunc("GET /api/v1/transport/db/{id}", h.transportDB)
 }
@@ -411,7 +414,14 @@ func pathID(w http.ResponseWriter, r *http.Request) (int64, bool) {
 // fields, and exactly one JSON object. The first JSON value must be an
 // object: null, arrays, scalars, and strings are rejected.
 func decodeStrict(w http.ResponseWriter, r *http.Request, dst any) error {
-	r.Body = http.MaxBytesReader(w, r.Body, maxBodyBytes)
+	return decodeStrictLimit(w, r, dst, maxBodyBytes)
+}
+
+// decodeStrictLimit is decodeStrict with an explicit body-size bound so routes
+// whose documented payload is larger than the CRUD limit (data import) keep
+// the same object-only, no-unknown-field, single-value guarantees.
+func decodeStrictLimit(w http.ResponseWriter, r *http.Request, dst any, limit int64) error {
+	r.Body = http.MaxBytesReader(w, r.Body, limit)
 	br := bufio.NewReader(r.Body)
 	// Peek past leading whitespace and require the first JSON value to be
 	// an object before any decoding happens.
@@ -445,6 +455,10 @@ func decodeStrict(w http.ResponseWriter, r *http.Request, dst any) error {
 		return errInvalidJSON
 	}
 	if err := dec.Decode(&struct{}{}); !errors.Is(err, io.EOF) {
+		var maxErr *http.MaxBytesError
+		if errors.As(err, &maxErr) {
+			return errPayloadTooLarge
+		}
 		return errInvalidJSON
 	}
 	return nil

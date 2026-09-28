@@ -235,4 +235,69 @@ describe("api client", () => {
       api.createKeyPair({ name: "dup", public_key: null, private_key: null, private_key_passphrase: null }),
     ).rejects.toMatchObject({ name: "ApiError", code: "conflict", status: 409 })
   })
+
+  test("exports data as a raw attachment blob without JSON parsing", async () => {
+    const payload = JSON.stringify({ format: "warden-data", version: 1 })
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        new Response(payload, {
+          status: 200,
+          headers: {
+            "Content-Type": "application/json",
+            "Content-Disposition": 'attachment; filename="warden-data.json"',
+          },
+        }),
+      ),
+    )
+
+    const blob = await api.exportData()
+
+    expect(vi.mocked(fetch).mock.calls[0][0]).toBe("/api/v1/data/export")
+    expect(await blob.text()).toBe(payload)
+  })
+
+  test("exportData surfaces the stable JSON error envelope", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(jsonResponse({ code: "internal_error", message: "export data failed" }, 500)),
+    )
+    await expect(api.exportData()).rejects.toMatchObject({
+      name: "ApiError",
+      code: "internal_error",
+      message: "export data failed",
+      status: 500,
+    })
+  })
+
+  test("importData posts the selected file contents as strict JSON", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(null, { status: 204 }))
+    vi.stubGlobal("fetch", fetchMock)
+    const payload = JSON.stringify({ format: "warden-data", version: 1 })
+    const file = new File([payload], "warden-data.json", { type: "application/json" })
+
+    await expect(api.importData(file)).resolves.toBeUndefined()
+
+    const importCall = fetchMock.mock.calls[0]
+    expect(importCall[0]).toBe("/api/v1/data/import")
+    expect(importCall[1]?.method).toBe("POST")
+    expect(importCall[1]?.headers.get("Content-Type")).toBe("application/json")
+    expect(importCall[1]?.body).toBe(payload)
+  })
+
+  test("importData surfaces a non-empty destination conflict", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        jsonResponse({ code: "conflict", message: "destination already contains managed data" }, 409),
+      ),
+    )
+    const file = new File(["{}"], "warden-data.json", { type: "application/json" })
+    await expect(api.importData(file)).rejects.toMatchObject({
+      name: "ApiError",
+      code: "conflict",
+      message: "destination already contains managed data",
+      status: 409,
+    })
+  })
 })

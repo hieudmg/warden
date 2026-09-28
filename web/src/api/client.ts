@@ -31,7 +31,36 @@ export class ApiError extends Error {
 interface RequestOptions {
   method?: "GET" | "POST" | "PUT" | "DELETE"
   json?: unknown
+  /** Pre-serialized JSON body sent verbatim (used for uploaded files). */
+  body?: string
   signal?: AbortSignal
+}
+
+function networkError(error: unknown): ApiError {
+  return new ApiError("network_error", error instanceof Error ? error.message : String(error), 0)
+}
+
+/** Maps a non-OK response to an ApiError, preferring the stable JSON envelope. */
+async function responseError(response: Response): Promise<ApiError> {
+  const contentType = response.headers.get("Content-Type") ?? ""
+  const text = await response.text()
+  if (contentType.includes("application/json") && text !== "") {
+    try {
+      const envelope = JSON.parse(text) as { code?: string; message?: string }
+      return new ApiError(
+        envelope.code ?? `http_${response.status}`,
+        envelope.message ?? response.statusText,
+        response.status,
+      )
+    } catch {
+      // Fall through to the generic status error below.
+    }
+  }
+  return new ApiError(
+    `http_${response.status}`,
+    response.statusText || `HTTP ${response.status}`,
+    response.status,
+  )
 }
 
 async function request<T>(path: string, options: RequestOptions = {}): Promise<T | undefined> {
@@ -40,6 +69,9 @@ async function request<T>(path: string, options: RequestOptions = {}): Promise<T
   if (options.json !== undefined) {
     headers.set("Content-Type", "application/json")
     body = JSON.stringify(options.json)
+  } else if (options.body !== undefined) {
+    headers.set("Content-Type", "application/json")
+    body = options.body
   }
 
   let response: Response
@@ -54,43 +86,30 @@ async function request<T>(path: string, options: RequestOptions = {}): Promise<T
     if (error instanceof DOMException && error.name === "AbortError") {
       throw error
     }
-    throw new ApiError("network_error", error instanceof Error ? error.message : String(error), 0)
+    throw networkError(error)
   }
 
   if (response.status === 204) {
     return undefined
   }
 
-  const contentType = response.headers.get("Content-Type") ?? ""
-  const text = await response.text()
-
   if (!response.ok) {
-    if (contentType.includes("application/json") && text !== "") {
-      try {
-        const envelope = JSON.parse(text) as { code?: string; message?: string }
-        throw new ApiError(
-          envelope.code ?? `http_${response.status}`,
-          envelope.message ?? response.statusText,
-          response.status,
-        )
-      } catch (error) {
-        if (error instanceof ApiError) throw error
-      }
-    }
-    throw new ApiError(`http_${response.status}`, response.statusText || `HTTP ${response.status}`, response.status)
+    throw await responseError(response)
   }
 
+  const contentType = response.headers.get("Content-Type") ?? ""
+  const text = await response.text()
   if (text === "") {
     return undefined
   }
-  if (contentType.includes("application/json")) {
-    return JSON.parse(text) as T
+  if (!contentType.includes("application/json")) {
+    throw new ApiError(
+      `http_${response.status}`,
+      `unexpected content type ${contentType}`,
+      response.status,
+    )
   }
-  throw new ApiError(
-    `http_${response.status}`,
-    `unexpected content type ${contentType}`,
-    response.status,
-  )
+  return JSON.parse(text) as T
 }
 
 export const api = {
@@ -158,4 +177,26 @@ export const api = {
     ) as Promise<Report[]>,
   createReport: (payload: ReportRequest): Promise<Report> =>
     request<Report>("/api/v1/reports", { method: "POST", json: payload }) as Promise<Report>,
+
+  // Data transfer (migration between servers). The export is plaintext and
+  // contains secrets, so callers must warn before requesting or submitting it.
+  exportData: async (): Promise<Blob> => {
+    let response: Response
+    try {
+      response = await fetch("/api/v1/data/export")
+    } catch (error) {
+      if (error instanceof DOMException && error.name === "AbortError") {
+        throw error
+      }
+      throw networkError(error)
+    }
+    if (!response.ok) {
+      throw await responseError(response)
+    }
+    return response.blob()
+  },
+  importData: async (file: File): Promise<void> => {
+    const body = await file.text()
+    await request<void>("/api/v1/data/import", { method: "POST", body })
+  },
 }

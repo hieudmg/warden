@@ -33,6 +33,8 @@ vi.mock("@/api/client", () => ({
     listReports: vi.fn(),
     createProject: vi.fn(),
     createReport: vi.fn(),
+    exportData: vi.fn(),
+    importData: vi.fn(),
   },
 }))
 
@@ -294,6 +296,141 @@ describe("App", () => {
     await user.click(within(dialog).getByRole("radio", { name: "Stored key pair" }))
     await user.click(within(dialog).getByRole("combobox", { name: "Stored key pair" }))
     expect(await within(dialog).findByRole("option", { name: "pair-1" })).toBeInTheDocument()
+  })
+})
+
+describe("Data transfer", () => {
+  const createObjectURL = vi.fn(() => "blob:warden-data")
+  const revokeObjectURL = vi.fn()
+
+  beforeEach(() => {
+    mockedAPI.exportData.mockReset().mockResolvedValue(
+      new Blob([JSON.stringify({ format: "warden-data", version: 1 })], { type: "application/json" }),
+    )
+    mockedAPI.importData.mockReset().mockResolvedValue(undefined)
+    createObjectURL.mockClear()
+    revokeObjectURL.mockClear()
+    Object.defineProperty(URL, "createObjectURL", {
+      value: createObjectURL,
+      configurable: true,
+      writable: true,
+    })
+    Object.defineProperty(URL, "revokeObjectURL", {
+      value: revokeObjectURL,
+      configurable: true,
+      writable: true,
+    })
+  })
+
+  test("warns that the export file is unencrypted credentials before downloading", async () => {
+    // jsdom cannot navigate to a blob URL; capture the download click instead.
+    const downloadClick = vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => {})
+    const user = userEvent.setup()
+    render(<App />)
+
+    await user.click(screen.getByRole("button", { name: "Export data" }))
+    const dialog = await screen.findByRole("dialog")
+    expect(within(dialog).getByText(/unencrypted/i)).toBeInTheDocument()
+    expect(within(dialog).getByText(/credentials/i)).toBeInTheDocument()
+    expect(mockedAPI.exportData).not.toHaveBeenCalled()
+
+    await user.click(within(dialog).getByRole("button", { name: "Export" }))
+
+    await waitFor(() => expect(mockedAPI.exportData).toHaveBeenCalledTimes(1))
+    expect(createObjectURL).toHaveBeenCalledTimes(1)
+    expect(downloadClick).toHaveBeenCalledTimes(1)
+    expect(await screen.findByRole("status")).toHaveTextContent(/exported data/i)
+  })
+
+  test("reports an export failure without downloading a file", async () => {
+    mockedAPI.exportData.mockRejectedValue(new Error("export data failed"))
+    const user = userEvent.setup()
+    render(<App />)
+
+    await user.click(screen.getByRole("button", { name: "Export data" }))
+    const dialog = await screen.findByRole("dialog")
+    await user.click(within(dialog).getByRole("button", { name: "Export" }))
+
+    expect(await within(dialog).findByRole("alert")).toHaveTextContent("export data failed")
+    expect(createObjectURL).not.toHaveBeenCalled()
+  })
+
+  test("requires a selected file and confirmation before importing", async () => {
+    const user = userEvent.setup()
+    render(<App />)
+
+    await user.click(screen.getByRole("button", { name: "Import data" }))
+    const dialog = await screen.findByRole("dialog")
+    expect(within(dialog).getByText(/unencrypted/i)).toBeInTheDocument()
+    expect(within(dialog).getByText(/credentials/i)).toBeInTheDocument()
+
+    const confirm = within(dialog).getByRole("button", { name: "Import" })
+    expect(confirm).toBeDisabled()
+    expect(mockedAPI.importData).not.toHaveBeenCalled()
+
+    const file = new File([JSON.stringify({ format: "warden-data", version: 1 })], "warden-data.json", {
+      type: "application/json",
+    })
+    await user.upload(within(dialog).getByLabelText(/export file/i), file)
+    await user.click(confirm)
+
+    await waitFor(() => expect(mockedAPI.importData).toHaveBeenCalledTimes(1))
+    expect(mockedAPI.importData.mock.calls[0][0]).toBe(file)
+  })
+
+  test("refreshes every list after a successful import", async () => {
+    const user = userEvent.setup()
+    render(<App />)
+
+    await user.click(screen.getByRole("button", { name: "Import data" }))
+    const dialog = await screen.findByRole("dialog")
+    const file = new File([JSON.stringify({ format: "warden-data", version: 1 })], "warden-data.json", {
+      type: "application/json",
+    })
+    await user.upload(within(dialog).getByLabelText(/export file/i), file)
+    await user.click(within(dialog).getByRole("button", { name: "Import" }))
+
+    expect(await screen.findByRole("status")).toHaveTextContent(/imported/i)
+    for (const loader of [
+      mockedAPI.listSSH,
+      mockedAPI.listDB,
+      mockedAPI.listGroups,
+      mockedAPI.listProjects,
+      mockedAPI.listKeyPairs,
+    ]) {
+      await waitFor(() => expect(loader).toHaveBeenCalledTimes(2))
+    }
+  })
+
+  test("keeps the current data and reports the error when import is rejected", async () => {
+    mockedAPI.importData.mockRejectedValue(
+      Object.assign(new Error("destination already contains managed data"), {
+        name: "ApiError",
+        code: "conflict",
+        status: 409,
+      }),
+    )
+    const user = userEvent.setup()
+    render(<App />)
+
+    await user.click(screen.getByRole("button", { name: "Import data" }))
+    const dialog = await screen.findByRole("dialog")
+    const file = new File(["{}"], "warden-data.json", { type: "application/json" })
+    await user.upload(within(dialog).getByLabelText(/export file/i), file)
+    await user.click(within(dialog).getByRole("button", { name: "Import" }))
+
+    expect(await within(dialog).findByRole("alert")).toHaveTextContent(
+      "destination already contains managed data",
+    )
+    for (const loader of [
+      mockedAPI.listSSH,
+      mockedAPI.listDB,
+      mockedAPI.listGroups,
+      mockedAPI.listProjects,
+      mockedAPI.listKeyPairs,
+    ]) {
+      expect(loader).toHaveBeenCalledTimes(1)
+    }
   })
 })
 
