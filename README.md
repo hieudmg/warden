@@ -147,6 +147,23 @@ warden upgrade
 warden-server upgrade
 ```
 
+### Migrate data to another server
+
+The Warden Hub web view exports and imports every managed record: SSH and
+database connections, groups, key pairs, projects, reports, and connection notes.
+
+1. On the source server, open Warden Hub and choose **Export data**.
+2. Transfer the downloaded `warden-data.json` file securely.
+3. On the destination server, open Warden Hub and choose **Import data**, then
+   select the file.
+
+The export is unencrypted JSON containing plaintext credentials, including
+passwords, private keys, and passphrases. Store it securely and delete it once
+the migration is complete. Import only succeeds when the destination has no
+managed data, so it never overwrites or merges existing records; a failed import
+leaves the destination unchanged. The destination re-encrypts imported secrets
+with its own master key, so the source and destination do not need the same key.
+
 See [CLI guide](docs/cli.md) for advanced behavior, picker details, database
 targets, copy semantics, and host-key handling.
 

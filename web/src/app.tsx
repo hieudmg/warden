@@ -1,5 +1,16 @@
 import { useCallback, useEffect, useRef, useState } from "react"
 import { api } from "@/api/client"
+import { Button } from "@/components/ui/button"
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog"
+import { Input } from "@/components/ui/input"
+import { Label } from "@/components/ui/label"
 import {
   Toast,
   ToastClose,
@@ -73,6 +84,174 @@ export function Notifications({
   )
 }
 
+type TransferMode = "export" | "import"
+
+const exportFilename = "warden-data.json"
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error)
+}
+
+/** Triggers a browser download for an in-memory blob. */
+function downloadBlob(blob: Blob, filename: string): void {
+  const url = URL.createObjectURL(blob)
+  try {
+    const link = document.createElement("a")
+    link.href = url
+    link.download = filename
+    link.rel = "noopener"
+    document.body.append(link)
+    link.click()
+    link.remove()
+  } finally {
+    URL.revokeObjectURL(url)
+  }
+}
+
+interface DataTransferActionsProps {
+  onImported: () => Promise<void>
+  notify: Notify
+}
+
+/**
+ * Export/import controls for migrating data to another server. Both flows
+ * warn first: the export file is unencrypted and carries plaintext secrets.
+ */
+function DataTransferActions({ onImported, notify }: DataTransferActionsProps) {
+  const [mode, setMode] = useState<TransferMode | null>(null)
+  const [file, setFile] = useState<File | null>(null)
+  const [pending, setPending] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  const open = (next: TransferMode) => {
+    setMode(next)
+    setFile(null)
+    setError(null)
+  }
+
+  const close = () => {
+    if (pending) return
+    setMode(null)
+    setFile(null)
+    setError(null)
+  }
+
+  const confirmExport = async () => {
+    setPending(true)
+    setError(null)
+    try {
+      const blob = await api.exportData()
+      downloadBlob(blob, exportFilename)
+      notify(`Exported data to ${exportFilename}. Delete it after migration.`, "success")
+      setMode(null)
+    } catch (err) {
+      setError(`Export failed: ${errorMessage(err)}`)
+    } finally {
+      setPending(false)
+    }
+  }
+
+  const confirmImport = async () => {
+    if (!file) return
+    setPending(true)
+    setError(null)
+    try {
+      await api.importData(file)
+      await onImported()
+      notify("Imported data successfully.", "success")
+      setMode(null)
+      setFile(null)
+    } catch (err) {
+      setError(`Import failed: ${errorMessage(err)}`)
+    } finally {
+      setPending(false)
+    }
+  }
+
+  return (
+    <>
+      <div className="flex gap-2">
+        <Button type="button" variant="outline" size="sm" onClick={() => open("export")}>
+          Export data
+        </Button>
+        <Button type="button" variant="outline" size="sm" onClick={() => open("import")}>
+          Import data
+        </Button>
+      </div>
+      <Dialog
+        open={mode !== null}
+        onOpenChange={isOpen => {
+          if (!isOpen) close()
+        }}
+      >
+        <DialogContent>
+          {mode === "export" ? (
+            <>
+              <DialogHeader>
+                <DialogTitle>Export data</DialogTitle>
+                <DialogDescription>
+                  The export file is unencrypted JSON containing plaintext credentials such as
+                  passwords and private keys. Store it securely and delete it after migration.
+                </DialogDescription>
+              </DialogHeader>
+              {error && (
+                <p role="alert" className="text-sm text-destructive">
+                  {error}
+                </p>
+              )}
+              <DialogFooter>
+                <Button type="button" variant="outline" onClick={close} disabled={pending}>
+                  Cancel
+                </Button>
+                <Button type="button" onClick={() => void confirmExport()} disabled={pending}>
+                  {pending ? "Exporting" : "Export"}
+                </Button>
+              </DialogFooter>
+            </>
+          ) : (
+            <>
+              <DialogHeader>
+                <DialogTitle>Import data</DialogTitle>
+                <DialogDescription>
+                  Select an unencrypted Warden export file containing plaintext credentials. Import
+                  replaces nothing: it only succeeds when this server has no managed data, and a
+                  failed import leaves existing records unchanged.
+                </DialogDescription>
+              </DialogHeader>
+              <div className="grid gap-1.5">
+                <Label htmlFor="data-import-file">Export file</Label>
+                <Input
+                  id="data-import-file"
+                  type="file"
+                  accept="application/json,.json"
+                  onChange={event => setFile(event.target.files?.[0] ?? null)}
+                />
+              </div>
+              {error && (
+                <p role="alert" className="text-sm text-destructive">
+                  {error}
+                </p>
+              )}
+              <DialogFooter>
+                <Button type="button" variant="outline" onClick={close} disabled={pending}>
+                  Cancel
+                </Button>
+                <Button
+                  type="button"
+                  onClick={() => void confirmImport()}
+                  disabled={pending || file === null}
+                >
+                  {pending ? "Importing" : "Import"}
+                </Button>
+              </DialogFooter>
+            </>
+          )}
+        </DialogContent>
+      </Dialog>
+    </>
+  )
+}
+
 export function App() {
   const [route, setRoute] = useState<Route>(() => {
     const initialRoute = routeForPath(window.location.pathname)
@@ -115,13 +294,30 @@ export function App() {
     setRoute(nextRoute)
   }
 
+  // After a successful import the whole dataset changed, so every list
+  // resource must be re-read.
+  const reloadAll = useCallback(async () => {
+    await Promise.all([
+      ssh.reload(),
+      db.reload(),
+      groups.reload(),
+      projects.reload(),
+      keyPairs.reload(),
+    ])
+  }, [ssh.reload, db.reload, groups.reload, projects.reload, keyPairs.reload])
+
   return (
     <div className="flex min-h-screen flex-col bg-background text-foreground">
       <header className="border-b px-6 py-4">
-        <h1 className="text-xl font-semibold">Warden Hub</h1>
-        <p className="text-sm text-muted-foreground">
-          tailnet management plane — read-only view of secrets, execution happens on clients
-        </p>
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <h1 className="text-xl font-semibold">Warden Hub</h1>
+            <p className="text-sm text-muted-foreground">
+              tailnet management plane — read-only view of secrets, execution happens on clients
+            </p>
+          </div>
+          <DataTransferActions onImported={reloadAll} notify={notify} />
+        </div>
       </header>
       <Notifications items={notifications} onDismiss={dismissNotification} />
       <Tabs value={route} onValueChange={selectRoute} className="min-h-0 flex-1">
