@@ -232,6 +232,26 @@ func TestRunHelpCommandsSkipArgAndConfigValidation(t *testing.T) {
 	}
 }
 
+func TestRunXSSHRejectsRemovedAcceptNewFlag(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	if exitCode := run([]string{"xssh", "--accept-new", "prod"}, &stdout, &stderr, func(string) (string, bool) { return "", false }); exitCode != 2 {
+		t.Fatalf("run() exitCode = %d, want 2; stderr=%q", exitCode, stderr.String())
+	}
+	if !strings.Contains(stderr.String(), "flag provided but not defined") {
+		t.Fatalf("stderr = %q, want removed-flag error", stderr.String())
+	}
+}
+
+func TestRunXSSHHelpOmitsAcceptNewFlag(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	if exitCode := run([]string{"xssh", "--help"}, &stdout, &stderr, func(string) (string, bool) { return "", false }); exitCode != 0 {
+		t.Fatalf("run() exitCode = %d, want 0; stderr=%q", exitCode, stderr.String())
+	}
+	if strings.Contains(stdout.String(), "--accept-new") {
+		t.Fatalf("xssh help = %q, must not mention removed --accept-new flag", stdout.String())
+	}
+}
+
 func TestRunSSHUsesAgent(t *testing.T) {
 	apiSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {

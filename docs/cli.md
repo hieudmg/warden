@@ -11,7 +11,7 @@ warden [-n|--non-interactive|-i|--interactive] db <connection> <sql>
 warden [-n|--non-interactive|-i|--interactive] db <connection>/<database> <sql>
 warden [-n|--non-interactive|-i|--interactive] config search <query>
 warden report create <project> --title <title> --summary <summary> --agent-model <model>
-warden [-n|--non-interactive|-i|--interactive] xssh [--accept-new] [connection]
+warden [-n|--non-interactive|-i|--interactive] xssh [connection]
 warden [-n|--non-interactive|-i|--interactive] cp <source> <destination>
 warden [--config path] port-watch <ssh-connection> <port-range-list>
 warden upgrade
@@ -61,6 +61,15 @@ names, hostnames, and group names. Group headers are not selectable.
 The preview never shows passwords, private keys, passphrases, or proxy
 passwords; it shows whether each is configured. Terminals under 80 columns use
 a stacked layout.
+
+## SSH host keys
+
+On the first interactive `xssh` connection to an unknown host, Warden displays
+an OpenSSH-style host authenticity prompt with the key fingerprint. Enter `yes`
+or the displayed fingerprint to add the key to `known_hosts`; any other answer
+refuses it. Changed keys are always rejected. Non-interactive SSH-backed
+commands remain strict and do not prompt; use interactive `xssh` to verify and
+trust a new host first.
 
 ## Port watch
 

@@ -12,6 +12,7 @@ import (
 	"net"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"reflect"
 	"strconv"
 	"strings"
@@ -21,6 +22,7 @@ import (
 	"time"
 
 	golangssh "golang.org/x/crypto/ssh"
+	"golang.org/x/crypto/ssh/knownhosts"
 	"golang.org/x/sys/unix"
 
 	"warden/internal/client/terminal"
@@ -432,6 +434,51 @@ func interactiveBundle(srv *interactiveTestServer) model.SSHBundle {
 			ID: 1, Name: "test", Host: host, Port: port,
 			Username: "user", Password: []byte("pw"),
 		},
+	}
+}
+
+func TestRunInteractiveDoesNotForwardCRLFTerminator(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	srv := newInteractiveTestServer(t)
+	term := newFakeTerminalSession(bytes.NewBufferString("yes\r\n\x04"), &lockedBuffer{}, io.Discard)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	if err := RunInteractive(ctx, interactiveBundle(srv), term); err != nil {
+		t.Fatalf("RunInteractive: %v", err)
+	}
+	srv.mu.Lock()
+	gotInput := append([]byte(nil), srv.input...)
+	srv.mu.Unlock()
+	if bytes.Contains(gotInput, []byte{'\n'}) {
+		t.Fatalf("remote input = %q, want CRLF from host-key confirmation consumed", gotInput)
+	}
+}
+
+func TestRunInteractiveConfirmsUnknownHostByDefault(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	srv := newInteractiveTestServer(t)
+	out := &lockedBuffer{}
+	term := newFakeTerminalSession(bytes.NewBufferString("yes\r\x04"), out, io.Discard)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	if err := RunInteractive(ctx, interactiveBundle(srv), term); err != nil {
+		t.Fatalf("RunInteractive: %v", err)
+	}
+	if !strings.Contains(out.String(), "This key is not known by any other names.") {
+		t.Fatalf("output = %q, want first-use host-key confirmation", out.String())
+	}
+	knownHostsPath := filepath.Join(home, ".ssh", "known_hosts")
+	data, err := os.ReadFile(knownHostsPath)
+	if err != nil {
+		t.Fatalf("read known_hosts: %v", err)
+	}
+	want := knownhosts.Line([]string{srv.addr}, srv.hostKey) + "\n"
+	if string(data) != want {
+		t.Fatalf("known_hosts = %q, want accepted key %q", data, want)
 	}
 }
 

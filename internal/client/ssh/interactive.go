@@ -37,24 +37,51 @@ func buildInteractiveShellCommand(defaultDir string) string {
 	return cd + interactiveShellCommand
 }
 
-// termReadWriter adapts a terminal.Session to the io.ReadWriter used for
-// interactive host-key confirmation prompts.
-type termReadWriter struct{ term terminal.Session }
+// termReadWriter adapts a terminal.Session for host-key confirmation and
+// preserves a CRLF prompt terminator from being forwarded to the remote shell.
+type termReadWriter struct {
+	term            terminal.Session
+	prompting       bool
+	discardPromptLF bool
+}
 
-func (t termReadWriter) Read(p []byte) (int, error)  { return t.term.Stdin().Read(p) }
-func (t termReadWriter) Write(p []byte) (int, error) { return t.term.Stdout().Write(p) }
+func (t *termReadWriter) Read(p []byte) (int, error) {
+	if len(p) == 0 {
+		return 0, nil
+	}
+	if t.discardPromptLF {
+		t.discardPromptLF = false
+		var first [1]byte
+		n, err := t.term.Stdin().Read(first[:])
+		if n == 0 {
+			return n, err
+		}
+		if first[0] == '\n' {
+			return t.term.Stdin().Read(p)
+		}
+		p[0] = first[0]
+		return 1, nil
+	}
+	n, err := t.term.Stdin().Read(p)
+	if t.prompting && n > 0 && p[n-1] == '\r' {
+		t.discardPromptLF = true
+	}
+	return n, err
+}
+
+func (t *termReadWriter) Write(p []byte) (int, error) { return t.term.Stdout().Write(p) }
 
 // RunInteractive attaches the caller's terminal to an interactive remote
 // shell over the bundle's jump chain. It enters raw mode, requests a PTY
 // sized to the local terminal, streams bytes both ways so the remote PTY
 // interprets control keys (including Ctrl-C and Ctrl-D), delivers resize
 // changes as window-change requests, and restores the terminal on every exit
-// path. acceptNew enables interactive first-use host-key confirmation on the
-// terminal; changed and unconfirmed keys always fail.
-func RunInteractive(ctx context.Context, bundle model.SSHBundle, term terminal.Session, acceptNew bool) error {
+// path. Unknown host keys prompt for interactive first-use confirmation;
+// changed and unconfirmed keys always fail.
+func RunInteractive(ctx context.Context, bundle model.SSHBundle, term terminal.Session) error {
 	return runInteractive(ctx, bundle, term, DialOptions{
-		AcceptNew: acceptNew,
-		Terminal:  termReadWriter{term},
+		AcceptNew: true,
+		Terminal:  &termReadWriter{term: term},
 		Progress: func(message string) {
 			WriteProgress(term.Stderr(), message)
 		},
@@ -97,7 +124,14 @@ func runInteractive(ctx context.Context, bundle model.SSHBundle, term terminal.S
 	}
 	defer term.Restore()
 
+	promptTerminal, _ := opts.Terminal.(*termReadWriter)
+	if promptTerminal != nil {
+		promptTerminal.prompting = true
+	}
 	client, clients, err := DialChain(ctx, bundle, opts)
+	if promptTerminal != nil {
+		promptTerminal.prompting = false
+	}
 	if err != nil {
 		return err
 	}
@@ -151,8 +185,12 @@ func runInteractive(ctx context.Context, bundle model.SSHBundle, term terminal.S
 	// when the process exits (or the reader closes), which is fine for a
 	// one-shot CLI.
 	stopPump := make(chan struct{})
+	input := io.Reader(term.Stdin())
+	if promptTerminal != nil {
+		input = promptTerminal
+	}
 	go func() {
-		pumpInteractiveInput(ctx, stdinPipe, term.Stdin(), stopPump)
+		pumpInteractiveInput(ctx, stdinPipe, input, stopPump)
 	}()
 
 	// Resize pump: forward local size changes as window-change requests.
