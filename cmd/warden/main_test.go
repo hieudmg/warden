@@ -200,6 +200,11 @@ func TestRunHelpCommandsSkipArgAndConfigValidation(t *testing.T) {
 			args:      []string{"config", "search", "--help"},
 			wantUsage: "warden config search <query>",
 		},
+		{
+			name:      "port watch",
+			args:      []string{"port-watch", "--help"},
+			wantUsage: "warden port-watch <ssh-connection> <port-range-list>",
+		},
 	}
 
 	lookupEnv := func(string) (string, bool) {
@@ -285,6 +290,62 @@ func TestRunSSHUsesAgent(t *testing.T) {
 	}
 	if stderr.Len() != 0 {
 		t.Fatalf("stderr = %q, want empty", stderr.String())
+	}
+}
+
+func TestRunPortWatchRequiresRange(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	if exitCode := run([]string{"port-watch", "prod"}, &stdout, &stderr, func(string) (string, bool) { return "", false }); exitCode != 2 {
+		t.Fatalf("run() exitCode = %d, want 2; stderr=%q", exitCode, stderr.String())
+	}
+	if !strings.Contains(stderr.String(), "warden port-watch <ssh-connection> <port-range-list>") {
+		t.Fatalf("stderr = %q, want port-watch usage", stderr.String())
+	}
+}
+
+func TestRunPortWatchUsesSavedConnection(t *testing.T) {
+	apiSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/v1/ssh-connections":
+			io.WriteString(w, `[{"id":17,"name":"prod","host":"ssh.example","port":22,"username":"user"}]`)
+		case "/api/v1/transport/ssh/17":
+			io.WriteString(w, `{"target":{"id":17,"name":"prod","host":"ssh.example","port":22,"username":"user","password":"c2VjcmV0"},"jumps":[]}`)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer apiSrv.Close()
+
+	lookupEnv := func(key string) (string, bool) {
+		switch key {
+		case "HOME":
+			return t.TempDir(), true
+		case "WARDEN_CLIENT_API_BASE_URL":
+			return apiSrv.URL, true
+		case "WARDEN_CLIENT_TIMEOUT":
+			return "10s", true
+		}
+		return "", false
+	}
+
+	oldRunPortWatch := runPortWatch
+	defer func() { runPortWatch = oldRunPortWatch }()
+	var gotBundle model.SSHBundle
+	var gotRanges string
+	runPortWatch = func(_ context.Context, bundle model.SSHBundle, ranges string, _ io.Writer, _ io.Writer) error {
+		gotBundle = bundle
+		gotRanges = ranges
+		return nil
+	}
+	var stdout, stderr bytes.Buffer
+	if exitCode := run([]string{"port-watch", "prod", "3000,5000-6000"}, &stdout, &stderr, lookupEnv); exitCode != 0 {
+		t.Fatalf("run() exitCode = %d, stderr=%q", exitCode, stderr.String())
+	}
+	if gotBundle.Target.ID != 17 || gotBundle.Target.Host != "ssh.example" || string(gotBundle.Target.Password) != "secret" {
+		t.Fatalf("bundle = %+v, want resolved saved connection", gotBundle)
+	}
+	if gotRanges != "3000,5000-6000" {
+		t.Fatalf("ranges = %q, want exact requested range string", gotRanges)
 	}
 }
 

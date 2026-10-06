@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"os/signal"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -21,6 +22,7 @@ import (
 	"warden/internal/client/api"
 	clientdb "warden/internal/client/db"
 	"warden/internal/client/picker"
+	"warden/internal/client/portwatch"
 	clientreport "warden/internal/client/report"
 	clientssh "warden/internal/client/ssh"
 	"warden/internal/client/terminal"
@@ -43,6 +45,7 @@ var (
 	runAgentServe = agent.Serve
 	runDirectDB   = clientdb.RunQueryWithOptions
 	runUpgrade    = upgrade.Upgrade
+	runPortWatch  = portwatch.Watch
 )
 
 func main() {
@@ -101,6 +104,8 @@ func run(args []string, stdout, stderr io.Writer, lookupEnv func(string) (string
 		return runConfig(rest[1:], *configPath, configPathSet, stdout, stderr, lookupEnv, mode)
 	case "cp":
 		return runCP(rest[1:], *configPath, configPathSet, stdout, stderr, lookupEnv)
+	case "port-watch":
+		return runPortWatchCommand(rest[1:], *configPath, configPathSet, stdout, stderr, lookupEnv)
 	case "upgrade":
 		return runClientUpgrade(rest[1:], stdout, stderr, lookupEnv)
 	default:
@@ -897,6 +902,58 @@ func resolveAgentCPEndpoint(ep cpEndpoint, cl *api.Client, ctx context.Context) 
 	return agent.CopyEndpoint{Path: ep.path, Bundle: &bundle}, nil
 }
 
+func runPortWatchCommand(args []string, configPath string, configPathSet bool, stdout, stderr io.Writer, lookupEnv func(string) (string, bool)) int {
+	if len(args) == 1 && isFlagHelp(args[0]) {
+		printPortWatchUsage(stdout)
+		return 0
+	}
+	if len(args) != 2 {
+		fmt.Fprintln(stderr, "usage: warden port-watch <ssh-connection> <port-range-list>")
+		return 2
+	}
+	if _, err := portwatch.ParsePortRanges(args[1]); err != nil {
+		fmt.Fprintf(stderr, "port-watch: %v\n", err)
+		return 2
+	}
+
+	cfg, err := loadClient(configPath, configPathSet, lookupEnv)
+	if err != nil {
+		fmt.Fprintf(stderr, "invalid client config: %v\n", err)
+		return 1
+	}
+	cl := api.New(cfg.APIBaseURL, &http.Client{Timeout: cfg.Timeout})
+	ctx := context.Background()
+	connections, err := cl.ListSSH(ctx)
+	if err != nil {
+		fmt.Fprintf(stderr, "port-watch: %v\n", err)
+		return 1
+	}
+	var id int64 = -1
+	for _, connection := range connections {
+		if connection.Name == args[0] {
+			id = connection.ID
+			break
+		}
+	}
+	if id < 0 {
+		fmt.Fprintf(stderr, "port-watch: SSH connection %q not found\n", args[0])
+		return 1
+	}
+	bundle, err := cl.GetSSHBundle(ctx, id)
+	if err != nil {
+		fmt.Fprintf(stderr, "port-watch: %v\n", err)
+		return 1
+	}
+
+	watchCtx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
+	defer stop()
+	if err := runPortWatch(watchCtx, bundle, args[1], stdout, stderr); err != nil {
+		fmt.Fprintf(stderr, "port-watch: %v\n", err)
+		return 1
+	}
+	return 0
+}
+
 // runClientUpgrade replaces this executable with the latest released client
 // binary. It takes no settings and never reads or writes client config, so an
 // upgrade cannot lose a configured endpoint or credential.
@@ -974,6 +1031,16 @@ func printCPUsage(w io.Writer) {
 `)
 }
 
+func printPortWatchUsage(w io.Writer) {
+	fmt.Fprint(w, `Usage:
+  warden port-watch <ssh-connection> <port-range-list>
+
+Polls remote TCP listeners in the requested ports/ranges and forwards matching
+ports to the same port on 127.0.0.1 until interrupted. The target is assumed
+to be Linux and must provide the remote ss utility.
+`)
+}
+
 func printUpgradeUsage(w io.Writer) {
 	fmt.Fprint(w, `Usage:
   warden upgrade
@@ -1001,6 +1068,7 @@ func printUsage(w io.Writer) {
   warden [--config path] report create <project> --title <title> --summary <summary> --agent-model <name>
   warden [-n|--non-interactive|-i|--interactive] [--config path] config search <query>
   warden [-n|--non-interactive|-i|--interactive] [--config path] cp <source> <destination>
+  warden [--config path] port-watch <ssh-connection> <port-range-list>
   warden upgrade
   warden --help
 
