@@ -230,16 +230,16 @@ func validHostPattern(pattern string) bool {
 
 // handleUnknown verifies an unknown host key. With acceptNew an interactive
 // terminal is prompted, and confirmation persists the key. In every other
-// case (no --accept-new, no terminal, or refused confirmation) the key is
+// case (acceptNew disabled, no terminal, or refused confirmation) the key is
 // rejected.
 func handleUnknown(hostname string, key ssh.PublicKey, path string, acceptNew bool, terminal io.ReadWriter) error {
 	normalized := knownhosts.Normalize(hostname)
 	if !acceptNew {
-		return fmt.Errorf("unknown host key for %s: SHA-256 %s; use --accept-new with an interactive terminal to trust it",
+		return fmt.Errorf("unknown host key for %s: SHA-256 %s; use interactive warden xssh to verify and trust it",
 			normalized, ssh.FingerprintSHA256(key))
 	}
 	if terminal == nil {
-		return fmt.Errorf("unknown host key for %s: SHA-256 %s; --accept-new requires an interactive terminal",
+		return fmt.Errorf("unknown host key for %s: SHA-256 %s; trust confirmation requires an interactive terminal",
 			normalized, ssh.FingerprintSHA256(key))
 	}
 	if !confirmHost(terminal, normalized, key) {
@@ -248,17 +248,20 @@ func handleUnknown(hostname string, key ssh.PublicKey, path string, acceptNew bo
 	return persist(path, hostname, key)
 }
 
-// confirmHost prints the fingerprint and requires an explicit "yes".
-// The reader is consumed byte-by-byte until a CR (\r) or LF (\n)
+// confirmHost uses OpenSSH's first-use fingerprint prompt. It accepts only
+// an explicit "yes" or the displayed fingerprint; every other response rejects
+// the key. The reader is consumed byte-by-byte until a CR (\r) or LF (\n)
 // terminator or EOF is observed. ReadString('\n') would not work here:
 // in raw mode `term.MakeRaw` disables ICRNL, so Enter yields CR and
 // ReadString('\n') blocks forever. Byte-by-byte reading handles CR
 // alone, LF alone, and CRLF, and ignores any empty lines between the
 // prompt and the response.
 func confirmHost(terminal io.ReadWriter, hostname string, key ssh.PublicKey) bool {
-	fmt.Fprintf(terminal, "The authenticity of host %q can't be established.\n", hostname)
-	fmt.Fprintf(terminal, "%s key fingerprint is %s.\n", key.Type(), ssh.FingerprintSHA256(key))
-	fmt.Fprintf(terminal, "Are you sure you want to continue connecting (yes/no)? ")
+	fingerprint := ssh.FingerprintSHA256(key)
+	fmt.Fprintf(terminal, "The authenticity of host '%s' can't be established.\n", hostname)
+	fmt.Fprintf(terminal, "%s key fingerprint is %s.\n", openSSHKeyType(key), fingerprint)
+	fmt.Fprintln(terminal, "This key is not known by any other names.")
+	fmt.Fprint(terminal, "Are you sure you want to continue connecting (yes/no/[fingerprint])? ")
 
 	var buf []byte
 	one := make([]byte, 1)
@@ -280,7 +283,26 @@ func confirmHost(terminal io.ReadWriter, hostname string, key ssh.PublicKey) boo
 			break
 		}
 	}
-	return strings.TrimSpace(string(buf)) == "yes"
+	answer := string(buf)
+	return answer == "yes" || answer == fingerprint
+}
+
+func openSSHKeyType(key ssh.PublicKey) string {
+	typeName := key.Type()
+	switch {
+	case typeName == "ssh-rsa" || strings.HasPrefix(typeName, "rsa-sha2-"):
+		return "RSA"
+	case strings.HasPrefix(typeName, "ecdsa-sha2-"):
+		return "ECDSA"
+	case strings.HasPrefix(typeName, "ssh-ed25519"):
+		return "ED25519"
+	case strings.HasPrefix(typeName, "sk-ecdsa-sha2-"):
+		return "ECDSA-SK"
+	case strings.HasPrefix(typeName, "sk-ssh-ed25519"):
+		return "ED25519-SK"
+	default:
+		return strings.ToUpper(strings.TrimPrefix(typeName, "ssh-"))
+	}
 }
 
 // persist appends the accepted key to the known_hosts file, creating the

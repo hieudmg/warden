@@ -259,7 +259,6 @@ func runXSSH(args []string, configPath string, configPathSet bool, stdout, stder
 	fs := flag.NewFlagSet("xssh", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	fs.Usage = func() {}
-	acceptNew := fs.Bool("accept-new", false, "accept unknown host keys after interactive confirmation")
 	if err := fs.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			printXSSHUsage(stdout)
@@ -268,7 +267,7 @@ func runXSSH(args []string, configPath string, configPathSet bool, stdout, stder
 		return 2
 	}
 	if fs.NArg() > 1 {
-		fmt.Fprintln(stderr, "usage: warden xssh [--accept-new] [connection]")
+		fmt.Fprintln(stderr, "usage: warden xssh [connection]")
 		return 2
 	}
 	name := ""
@@ -340,7 +339,7 @@ func runXSSH(args []string, configPath string, configPathSet bool, stdout, stder
 		return 1
 	}
 
-	if err := clientssh.RunInteractive(ctx, bundle, term, *acceptNew); err != nil {
+	if err := clientssh.RunInteractive(ctx, bundle, term); err != nil {
 		var exitErr *clientssh.ExitStatusError
 		if errors.As(err, &exitErr) {
 			return exitErr.Status
@@ -1099,9 +1098,6 @@ func printDBUsage(w io.Writer) {
 func printXSSHUsage(w io.Writer) {
 	fmt.Fprint(w, `Usage:
   warden xssh [connection]
-
-Options:
-  --accept-new  accept unknown host keys after interactive confirmation
 `)
 }
 

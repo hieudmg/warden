@@ -36,9 +36,9 @@ The client verifies host keys against:
 - Windows: `%USERPROFILE%\.ssh\known_hosts`
 
 Known keys are accepted. Changed keys fail as a possible man-in-the-middle
-attack. Unknown keys fail closed by default. Interactive `xssh --accept-new`
-can show the SHA-256 fingerprint and persist explicit confirmation; it never
-prompts in noninteractive mode.
+attack. Interactive `xssh` shows an OpenSSH-style fingerprint prompt for unknown
+keys and persists only explicit confirmation. Non-interactive SSH-backed
+commands fail closed and never prompt for unknown keys.
 
 Malformed `known_hosts` lines are skipped OpenSSH-style, with a warning.
 

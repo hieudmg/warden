@@ -35,8 +35,8 @@ type DialOptions struct {
 	// AcceptNew allows unknown host keys to be accepted after
 	// interactive confirmation (see hostkey.Callback).
 	AcceptNew bool
-	// Terminal is the interactive prompt used for --accept-new
-	// confirmation. Nil means noninteractive: unknown keys always fail.
+	// Terminal is the interactive prompt used to confirm unknown host keys.
+	// Nil means noninteractive: unknown keys always fail.
 	Terminal io.ReadWriter
 	// Progress receives non-secret interactive connection status messages.
 	// It is ignored when nil.

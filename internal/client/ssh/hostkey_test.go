@@ -102,7 +102,7 @@ func TestChangedHostKeyRejected(t *testing.T) {
 	}
 }
 
-func TestAcceptNewPersistsKey(t *testing.T) {
+func TestConfirmedUnknownHostPersistsKey(t *testing.T) {
 	t.Parallel()
 
 	srv := newTestSSHServer(t, "s3cret", nil)
@@ -114,10 +114,20 @@ func TestAcceptNewPersistsKey(t *testing.T) {
 		t.Fatalf("Callback: %v", err)
 	}
 	if err := dialWithHostKey(t, srv, cb); err != nil {
-		t.Fatalf("dial with accept-new: %v", err)
+		t.Fatalf("dial after explicit confirmation: %v", err)
 	}
-	if !strings.Contains(terminal.out.String(), "127.0.0.1") {
-		t.Errorf("prompt = %q, want host shown", terminal.out.String())
+	prompt := terminal.out.String()
+	fingerprint := ssh.FingerprintSHA256(srv.hostKey)
+	for _, want := range []string{
+		"The authenticity of host ",
+		"127.0.0.1",
+		"ED25519 key fingerprint is " + fingerprint + ".",
+		"This key is not known by any other names.",
+		"Are you sure you want to continue connecting (yes/no/[fingerprint])?",
+	} {
+		if !strings.Contains(prompt, want) {
+			t.Errorf("OpenSSH-style prompt = %q, want it to contain %q", prompt, want)
+		}
 	}
 
 	data, err := os.ReadFile(path)
@@ -130,7 +140,7 @@ func TestAcceptNewPersistsKey(t *testing.T) {
 		t.Fatalf("known_hosts does not contain accepted key: %q", data)
 	}
 
-	// Second connect without accept-new succeeds because the key is known.
+	// A later connection succeeds without prompting because the key is known.
 	cb2, err := hostkey.Callback(path, false, nil)
 	if err != nil {
 		t.Fatalf("Callback: %v", err)
@@ -140,7 +150,42 @@ func TestAcceptNewPersistsKey(t *testing.T) {
 	}
 }
 
-func TestAcceptNewRefused(t *testing.T) {
+func TestWhitespaceWrappedConfirmationIsRejected(t *testing.T) {
+	srv := newTestSSHServer(t, "s3cret", nil)
+	path := filepath.Join(t.TempDir(), "known_hosts")
+	terminal := &fakeTerminal{in: bytes.NewBufferString(" yes\n"), out: &bytes.Buffer{}}
+	cb, err := hostkey.Callback(path, true, terminal)
+	if err != nil {
+		t.Fatalf("Callback: %v", err)
+	}
+	if err := dialWithHostKey(t, srv, cb); err == nil {
+		t.Fatal("dial succeeded with whitespace-wrapped yes, want exact response rejection")
+	}
+	if data, err := os.ReadFile(path); err == nil && len(data) != 0 {
+		t.Fatalf("known_hosts written despite invalid confirmation: %q", data)
+	}
+}
+
+func TestFingerprintConfirmationPersistsKey(t *testing.T) {
+	t.Parallel()
+
+	srv := newTestSSHServer(t, "s3cret", nil)
+	path := filepath.Join(t.TempDir(), "known_hosts")
+	fingerprint := ssh.FingerprintSHA256(srv.hostKey)
+	terminal := &fakeTerminal{in: bytes.NewBufferString(fingerprint + "\n"), out: &bytes.Buffer{}}
+	cb, err := hostkey.Callback(path, true, terminal)
+	if err != nil {
+		t.Fatalf("Callback: %v", err)
+	}
+	if err := dialWithHostKey(t, srv, cb); err != nil {
+		t.Fatalf("dial with OpenSSH fingerprint confirmation: %v", err)
+	}
+	if data, err := os.ReadFile(path); err != nil || len(data) == 0 {
+		t.Fatalf("known_hosts after fingerprint confirmation = %q, %v; want saved key", data, err)
+	}
+}
+
+func TestUnknownHostConfirmationRefused(t *testing.T) {
 	t.Parallel()
 
 	srv := newTestSSHServer(t, "s3cret", nil)
@@ -274,13 +319,13 @@ func TestConfirmHostRawTerminalCR(t *testing.T) {
 	}
 }
 
-func TestAcceptNewNonInteractiveRejected(t *testing.T) {
+func TestUnknownHostNonInteractiveRejected(t *testing.T) {
 	t.Parallel()
 
 	srv := newTestSSHServer(t, "s3cret", nil)
 	path := filepath.Join(t.TempDir(), "known_hosts")
 
-	// acceptNew is true but terminal is nil: must still fail.
+	// Interactive acceptance is enabled but terminal is nil: must still fail.
 	cb, err := hostkey.Callback(path, true, nil)
 	if err != nil {
 		t.Fatalf("Callback: %v", err)
