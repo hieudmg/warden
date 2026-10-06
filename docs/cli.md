@@ -13,6 +13,7 @@ warden [-n|--non-interactive|-i|--interactive] config search <query>
 warden report create <project> --title <title> --summary <summary> --agent-model <model>
 warden [-n|--non-interactive|-i|--interactive] xssh [--accept-new] [connection]
 warden [-n|--non-interactive|-i|--interactive] cp <source> <destination>
+warden [--config path] port-watch <ssh-connection> <port-range-list>
 warden upgrade
 ```
 
@@ -60,6 +61,24 @@ names, hostnames, and group names. Group headers are not selectable.
 The preview never shows passwords, private keys, passphrases, or proxy
 passwords; it shows whether each is configured. Terminals under 80 columns use
 a stacked layout.
+
+## Port watch
+
+`warden port-watch` watches TCP listeners on a saved SSH connection and
+forwards matching ports to the same port on `127.0.0.1`:
+
+```text
+warden port-watch prod 3000,5000-6000,9999-12222
+```
+
+The comma-separated port/range list is required; ranges are inclusive and ports
+must be between 1 and 65535. The target is assumed to be Linux and must provide
+the `ss` utility for listener discovery; if `ss` is unavailable or fails, the
+watcher exits with an error. Warden polls it every two seconds, creates forwards
+when a matching listener appears, and closes forwards when it disappears. Local
+forwards bind only to `127.0.0.1`; if a local port is already occupied, that
+forward is skipped and retried on the next poll. The foreground watcher exits
+on Ctrl-C and closes all of its forwards.
 
 ## File copy
 

@@ -142,6 +142,9 @@ warden xssh
 # Copy files through configured hosts.
 warden cp ./release.tar prod:/srv/releases/
 
+# Watch and forward remote listeners (Linux target with ss required).
+warden port-watch prod 3000,5000-6000,9999-12222
+
 # Upgrade a binary in place from the latest release.
 warden upgrade
 warden-server upgrade
