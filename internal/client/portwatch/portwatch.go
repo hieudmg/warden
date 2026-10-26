@@ -159,7 +159,7 @@ func watchPorts(ctx context.Context, scan func(context.Context) ([]int, error), 
 			_ = forward.Close()
 			delete(active, port)
 			delete(lastFailure, port)
-			fmt.Fprintf(stdout, "closed localhost:%d (remote listener stopped)\n", port)
+			fmt.Fprintf(stdout, "closed http://127.0.0.1:%d/ (remote listener stopped)\n", port)
 		}
 		for _, port := range sortedPorts(listening) {
 			if active[port] != nil {
@@ -176,7 +176,7 @@ func watchPorts(ctx context.Context, scan func(context.Context) ([]int, error), 
 			}
 			active[port] = forward
 			delete(lastFailure, port)
-			fmt.Fprintf(stdout, "forwarding localhost:%d -> 127.0.0.1:%d\n", port, port)
+			fmt.Fprintf(stdout, "forwarding http://127.0.0.1:%d/ -> 127.0.0.1:%d\n", port, port)
 		}
 
 		timer := time.NewTimer(interval)

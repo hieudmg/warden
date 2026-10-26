@@ -123,8 +123,11 @@ func TestWatchPortsClosesForwardWhenRemotePortDisappears(t *testing.T) {
 	if err := watchPorts(ctx, scan, ranges, echoPortDialer{}, &stdout, &stderr, time.Millisecond); err != nil {
 		t.Fatalf("watchPorts: %v", err)
 	}
-	if got := stdout.String(); !strings.Contains(got, "forwarding localhost:") || !strings.Contains(got, "closed localhost:") {
-		t.Fatalf("stdout = %q, want forward-open and remote-close events", got)
+	localURL := "http://127.0.0.1:" + strconv.Itoa(port) + "/"
+	wantOutput := "forwarding " + localURL + " -> 127.0.0.1:" + strconv.Itoa(port) + "\n" +
+		"closed " + localURL + " (remote listener stopped)\n"
+	if got := stdout.String(); got != wantOutput {
+		t.Fatalf("stdout = %q, want %q", got, wantOutput)
 	}
 	if stderr.Len() != 0 {
 		t.Fatalf("stderr = %q, want empty", stderr.String())
