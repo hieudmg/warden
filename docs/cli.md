@@ -85,8 +85,9 @@ must be between 1 and 65535. The target is assumed to be Linux and must provide
 the `ss` utility for listener discovery; if `ss` is unavailable or fails, the
 watcher exits with an error. Warden polls it every two seconds, creates forwards
 when a matching listener appears, and closes forwards when it disappears. Local
-forwards bind only to `127.0.0.1`; if a local port is already occupied, that
-forward is skipped and retried on the next poll. The foreground watcher exits
+forwards bind only to `127.0.0.1` and are printed as URLs, such as
+`http://127.0.0.1:3000/`; if a local port is already occupied, that forward is
+skipped and retried on the next poll. The foreground watcher exits
 on Ctrl-C and closes all of its forwards.
 
 ## File copy
