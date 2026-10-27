@@ -32,6 +32,7 @@ import (
 	clientagent "warden/internal/client/agent"
 	clientdb "warden/internal/client/db"
 	clientssh "warden/internal/client/ssh"
+	"warden/internal/client/terminal"
 	"warden/internal/model"
 	"warden/internal/upgrade"
 )
@@ -1015,6 +1016,73 @@ func TestRunDBUnknownConnection(t *testing.T) {
 	}
 	if !strings.Contains(stderr.String(), "not found") {
 		t.Fatalf("stderr = %q, want not-found message", stderr.String())
+	}
+}
+
+// TestRunXSSHReturnsToPickerAfterSessionEnds verifies picker mode presents
+// the connection menu again after both a remote shell exit and a disconnect.
+func TestRunXSSHReturnsToPickerAfterSessionEnds(t *testing.T) {
+	apiSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/v1/ssh-connections":
+			io.WriteString(w, `[{"id":1,"name":"prod"}]`)
+		case "/api/v1/transport/ssh/1":
+			io.WriteString(w, `{"target":{"id":1},"jumps":[]}`)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer apiSrv.Close()
+
+	lookupEnv := func(key string) (string, bool) {
+		switch key {
+		case "HOME":
+			return t.TempDir(), true
+		case "WARDEN_CLIENT_API_BASE_URL":
+			return apiSrv.URL, true
+		case "WARDEN_CLIENT_TIMEOUT":
+			return "10s", true
+		}
+		return "", false
+	}
+
+	oldNewTerminalSession := newTerminalSession
+	oldSelectXSSHConnection := selectXSSHConnection
+	oldRunInteractiveXSSH := runInteractiveXSSH
+	t.Cleanup(func() {
+		newTerminalSession = oldNewTerminalSession
+		selectXSSHConnection = oldSelectXSSHConnection
+		runInteractiveXSSH = oldRunInteractiveXSSH
+	})
+
+	newTerminalSession = func() (terminal.Session, error) { return nil, nil }
+	pickerCalls := 0
+	selectXSSHConnection = func(_ terminal.Session, conns []model.SSHConnection) (model.SSHConnection, error) {
+		pickerCalls++
+		if pickerCalls < 3 {
+			return conns[0], nil
+		}
+		return model.SSHConnection{}, errors.New("selection aborted")
+	}
+	sessionCalls := 0
+	runInteractiveXSSH = func(context.Context, model.SSHBundle, terminal.Session) error {
+		sessionCalls++
+		if sessionCalls == 1 {
+			return &clientssh.ExitStatusError{Status: 23}
+		}
+		return errors.New("remote shell failed: connection reset")
+	}
+
+	var stdout, stderr bytes.Buffer
+	exitCode := runXSSH(nil, "", false, &stdout, &stderr, lookupEnv, outputModeInteractive)
+	if exitCode != 1 || !strings.Contains(stderr.String(), "selection aborted") || !strings.Contains(stderr.String(), "connection reset") {
+		t.Fatalf("runXSSH() = %d, stderr=%q; want SSH disconnect error and picker cancellation", exitCode, stderr.String())
+	}
+	if pickerCalls != 3 {
+		t.Fatalf("picker calls = %d, want 3 after the SSH sessions end", pickerCalls)
+	}
+	if sessionCalls != 2 {
+		t.Fatalf("interactive session calls = %d, want 2", sessionCalls)
 	}
 }
 

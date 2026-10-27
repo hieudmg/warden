@@ -39,13 +39,16 @@ const (
 )
 
 var (
-	runAgentSSH   = agent.RunSSH
-	runAgentCopy  = agent.RunCopy
-	runAgentDB    = agent.RunTunneledDBWithOptions
-	runAgentServe = agent.Serve
-	runDirectDB   = clientdb.RunQueryWithOptions
-	runUpgrade    = upgrade.Upgrade
-	runPortWatch  = portwatch.Watch
+	runAgentSSH          = agent.RunSSH
+	runAgentCopy         = agent.RunCopy
+	runAgentDB           = agent.RunTunneledDBWithOptions
+	runAgentServe        = agent.Serve
+	runDirectDB          = clientdb.RunQueryWithOptions
+	runUpgrade           = upgrade.Upgrade
+	runPortWatch         = portwatch.Watch
+	newTerminalSession   = terminal.NewSession
+	selectXSSHConnection = picker.Select
+	runInteractiveXSSH   = clientssh.RunInteractive
 )
 
 func main() {
@@ -294,60 +297,74 @@ func runXSSH(args []string, configPath string, configPathSet bool, stdout, stder
 		return 1
 	}
 
-	var sel model.SSHConnection
-	if name != "" {
-		found := false
-		for _, c := range conns {
-			if c.Name == name {
-				sel = c
-				found = true
-				break
+	for {
+		var sel model.SSHConnection
+		if name != "" {
+			found := false
+			for _, c := range conns {
+				if c.Name == name {
+					sel = c
+					found = true
+					break
+				}
+			}
+			if !found {
+				fmt.Fprintf(stderr, "xssh: connection %q not found\n", name)
+				return 1
+			}
+		} else {
+			// The picker owns its terminal session: Select enters raw mode,
+			// renders, and restores the terminal before returning, so no
+			// picker goroutine remains to consume input meant for the SSH
+			// session. A fresh terminal session is created below for the
+			// interactive SSH session.
+			pickerSession, err := newTerminalSession()
+			if err != nil {
+				fmt.Fprintf(stderr, "xssh: %v\n", err)
+				return 1
+			}
+			sel, err = selectXSSHConnection(pickerSession, conns)
+			if err != nil {
+				fmt.Fprintf(stderr, "xssh: %v\n", err)
+				return 1
 			}
 		}
-		if !found {
-			fmt.Fprintf(stderr, "xssh: connection %q not found\n", name)
-			return 1
-		}
-	} else {
-		// The picker owns its terminal session: Select enters raw mode,
-		// renders, and restores the terminal before returning, so no
-		// picker goroutine remains to consume input meant for the SSH
-		// session. A fresh terminal session is created below for the
-		// interactive SSH session.
-		pickerSession, err := terminal.NewSession()
+
+		clientssh.WriteProgress(stderr, "Fetching credentials...")
+		bundle, err := cl.GetSSHBundle(ctx, sel.ID)
 		if err != nil {
 			fmt.Fprintf(stderr, "xssh: %v\n", err)
 			return 1
 		}
-		sel, err = picker.Select(pickerSession, conns)
+
+		term, err := newTerminalSession()
 		if err != nil {
 			fmt.Fprintf(stderr, "xssh: %v\n", err)
 			return 1
 		}
-	}
 
-	clientssh.WriteProgress(stderr, "Fetching credentials...")
-	bundle, err := cl.GetSSHBundle(ctx, sel.ID)
-	if err != nil {
-		fmt.Fprintf(stderr, "xssh: %v\n", err)
-		return 1
-	}
-
-	term, err := terminal.NewSession()
-	if err != nil {
-		fmt.Fprintf(stderr, "xssh: %v\n", err)
-		return 1
-	}
-
-	if err := clientssh.RunInteractive(ctx, bundle, term); err != nil {
-		var exitErr *clientssh.ExitStatusError
-		if errors.As(err, &exitErr) {
-			return exitErr.Status
+		err = runInteractiveXSSH(ctx, bundle, term)
+		if name != "" {
+			if err != nil {
+				var exitErr *clientssh.ExitStatusError
+				if errors.As(err, &exitErr) {
+					return exitErr.Status
+				}
+				fmt.Fprintf(stderr, "xssh: %v\n", err)
+				return 1
+			}
+			return 0
 		}
-		fmt.Fprintf(stderr, "xssh: %v\n", err)
-		return 1
+
+		// In picker mode, ending the remote shell or losing the SSH session
+		// returns to the connection menu. Escape from the picker exits xssh.
+		if err != nil {
+			var exitErr *clientssh.ExitStatusError
+			if !errors.As(err, &exitErr) {
+				fmt.Fprintf(stderr, "xssh: %v\n", err)
+			}
+		}
 	}
-	return 0
 }
 
 func runReport(args []string, configPath string, configPathSet bool, stdout, stderr io.Writer, lookupEnv func(string) (string, bool)) int {
