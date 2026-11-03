@@ -14,6 +14,17 @@ function jsonResponse(body: unknown, status = 200) {
 }
 
 describe("api client", () => {
+  test.each([
+    ["SSH", api.archiveSSH, "/api/v1/ssh-connections/12/archive"],
+    ["DB", api.archiveDB, "/api/v1/db-connections/12/archive"],
+  ])("archives and restores %s connections using the archive endpoint", async (_kind, archive, path) => {
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse({ archived: true }))
+    vi.stubGlobal("fetch", fetchMock)
+    await archive(12, true)
+    expect(fetchMock.mock.calls[0][0]).toBe(path)
+    expect(fetchMock.mock.calls[0][1]).toMatchObject({ method: "PUT", body: JSON.stringify({ archived: true }) })
+  })
+
   test("decodes stable JSON error envelopes", async () => {
     vi.stubGlobal(
       "fetch",

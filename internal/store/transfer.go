@@ -172,7 +172,7 @@ func (s *Store) exportSSHConnections(ctx context.Context, tx *sql.Tx) ([]model.T
 		SELECT s.id, s.name, s.host, s.port, s.username, s.password,
 		       COALESCE(s.proxy_host, ''), COALESCE(s.proxy_port, 0),
 		       COALESCE(s.proxy_username, ''), s.proxy_password,
-		       s.jump_connection_ids, s.default_dir, s.group_id, s.key_pair_id,
+		       s.jump_connection_ids, s.default_dir, s.group_id, s.key_pair_id, s.archived,
 		       s.created_at, s.updated_at
 		FROM ssh_connections s
 		ORDER BY s.id`)
@@ -188,7 +188,7 @@ func (s *Store) exportSSHConnections(ctx context.Context, tx *sql.Tx) ([]model.T
 		var createdAt, updatedAt string
 		if err := rows.Scan(&c.ID, &c.Name, &c.Host, &c.Port, &c.Username, &password,
 			&c.ProxyHost, &c.ProxyPort, &c.ProxyUsername, &proxyPassword,
-			&c.JumpConnectionIDs, &c.DefaultDir, &c.GroupID, &c.KeyPairID,
+			&c.JumpConnectionIDs, &c.DefaultDir, &c.GroupID, &c.KeyPairID, &c.Archived,
 			&createdAt, &updatedAt); err != nil {
 			return nil, fmt.Errorf("scan ssh_connection: %w", err)
 		}
@@ -221,7 +221,7 @@ func (s *Store) exportSSHConnections(ctx context.Context, tx *sql.Tx) ([]model.T
 func (s *Store) exportDBConnections(ctx context.Context, tx *sql.Tx) ([]model.TransferDBConnection, error) {
 	rows, err := tx.QueryContext(ctx, `
 		SELECT d.id, d.name, d.host, d.port, d.username, d.password, d.database,
-		       d.ssh_connection_id, d.group_id, d.created_at, d.updated_at
+		       d.ssh_connection_id, d.group_id, d.archived, d.created_at, d.updated_at
 		FROM db_connections d
 		ORDER BY d.id`)
 	if err != nil {
@@ -235,7 +235,7 @@ func (s *Store) exportDBConnections(ctx context.Context, tx *sql.Tx) ([]model.Tr
 		var password []byte
 		var storedDatabases, createdAt, updatedAt string
 		if err := rows.Scan(&c.ID, &c.Name, &c.Host, &c.Port, &c.Username, &password,
-			&storedDatabases, &c.SSHConnectionID, &c.GroupID,
+			&storedDatabases, &c.SSHConnectionID, &c.GroupID, &c.Archived,
 			&createdAt, &updatedAt); err != nil {
 			return nil, fmt.Errorf("scan db_connection: %w", err)
 		}
@@ -666,11 +666,11 @@ func (s *Store) insertSSHConnections(ctx context.Context, tx *sql.Tx, connection
 			INSERT INTO ssh_connections
 				(id, name, host, port, username, password, proxy_host, proxy_port,
 				 proxy_username, proxy_password, jump_connection_ids, default_dir,
-				 group_id, key_pair_id, created_at, updated_at)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+				 group_id, key_pair_id, archived, created_at, updated_at)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 			c.ID, c.Name, c.Host, c.Port, c.Username, password, c.ProxyHost, c.ProxyPort,
 			c.ProxyUsername, proxyPassword, c.JumpConnectionIDs, c.DefaultDir,
-			c.GroupID, c.KeyPairID,
+			c.GroupID, c.KeyPairID, c.Archived,
 			formatTransferTime(c.CreatedAt), formatTransferTime(c.UpdatedAt)); err != nil {
 			return fmt.Errorf("insert ssh connection %d: %w", c.ID, err)
 		}
@@ -691,10 +691,10 @@ func (s *Store) insertDBConnections(ctx context.Context, tx *sql.Tx, connections
 		if _, err := tx.ExecContext(ctx, `
 			INSERT INTO db_connections
 				(id, name, host, port, username, password, database,
-				 ssh_connection_id, group_id, created_at, updated_at)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+				 ssh_connection_id, group_id, archived, created_at, updated_at)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 			c.ID, c.Name, c.Host, c.Port, c.Username, password, databases,
-			c.SSHConnectionID, c.GroupID,
+			c.SSHConnectionID, c.GroupID, c.Archived,
 			formatTransferTime(c.CreatedAt), formatTransferTime(c.UpdatedAt)); err != nil {
 			return fmt.Errorf("insert db connection %d: %w", c.ID, err)
 		}

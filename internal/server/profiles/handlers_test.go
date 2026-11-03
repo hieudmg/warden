@@ -15,6 +15,115 @@ import (
 	"warden/internal/model"
 )
 
+func TestArchiveStateAPI(t *testing.T) {
+	mux, s, path := newTestAPI(t)
+	ssh := createSSH(t, s, "toggle-ssh", "[]")
+	db := createDB(t, s, "toggle-db", 0)
+
+	for _, tc := range []struct {
+		name, endpoint, resourceType string
+		id                           int64
+		check                        func(bool) bool
+	}{
+		{"ssh", "/api/v1/ssh-connections/", "ssh_connection", ssh.ID, func(want bool) bool {
+			p, err := s.GetSSH(context.Background(), ssh.ID)
+			return err == nil && p.Archived == want
+		}},
+		{"db", "/api/v1/db-connections/", "db_connection", db.ID, func(want bool) bool {
+			p, err := s.GetDB(context.Background(), db.ID)
+			return err == nil && p.Archived == want
+		}},
+	} {
+		for _, archived := range []bool{true, false} {
+			body := fmt.Sprintf(`{"archived":%t}`, archived)
+			rec := doRequest(t, mux, "PUT", fmt.Sprintf("%s%d/archive", tc.endpoint, tc.id), body)
+			if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), fmt.Sprintf(`"archived":%t`, archived)) {
+				t.Fatalf("%s archive status response = %d %s", tc.name, rec.Code, rec.Body.String())
+			}
+			if !tc.check(archived) {
+				t.Fatalf("%s archived state did not persist as %t", tc.name, archived)
+			}
+			event := lastAuditEvent(t, path)
+			if event.Operation != tc.resourceType+".archive" || event.ResourceType != tc.resourceType || event.ResourceID != fmt.Sprint(tc.id) || event.Result != "success" {
+				t.Fatalf("%s archive audit = %+v", tc.name, event)
+			}
+			if !strings.Contains(event.Metadata, fmt.Sprintf(`"archived":%t`, archived)) {
+				t.Fatalf("%s archive audit metadata = %s, want archived=%t", tc.name, event.Metadata, archived)
+			}
+			list := doRequest(t, mux, "GET", strings.TrimSuffix(tc.endpoint, "/"), "")
+			if list.Code != http.StatusOK || listedArchiveState(t, list.Body.Bytes(), tc.id) != archived {
+				t.Fatalf("%s inclusive list response = %d %s", tc.name, list.Code, list.Body.String())
+			}
+		}
+	}
+
+	sshList := doRequest(t, mux, "GET", "/api/v1/ssh-connections", "")
+	dbList := doRequest(t, mux, "GET", "/api/v1/db-connections", "")
+	if sshList.Code != http.StatusOK || !strings.Contains(sshList.Body.String(), `"archived":false`) {
+		t.Fatalf("inclusive SSH list response = %d %s", sshList.Code, sshList.Body.String())
+	}
+	if dbList.Code != http.StatusOK || !strings.Contains(dbList.Body.String(), `"archived":false`) {
+		t.Fatalf("inclusive DB list response = %d %s", dbList.Code, dbList.Body.String())
+	}
+}
+
+func listedArchiveState(t *testing.T, payload []byte, id int64) bool {
+	t.Helper()
+	var profiles []struct {
+		ID       int64 `json:"id"`
+		Archived bool  `json:"archived"`
+	}
+	if err := json.Unmarshal(payload, &profiles); err != nil {
+		t.Fatalf("decode profile list: %v", err)
+	}
+	for _, profile := range profiles {
+		if profile.ID == id {
+			return profile.Archived
+		}
+	}
+	t.Fatalf("profile id %d missing from inclusive list", id)
+	return false
+}
+
+func TestArchiveStateAPIRejectsInvalidStateAndAuditsFailure(t *testing.T) {
+	mux, s, path := newTestAPI(t)
+	ssh := createSSH(t, s, "invalid-ssh", "[]")
+	db := createDB(t, s, "invalid-db", 0)
+	for _, tc := range []struct {
+		name, endpoint, resourceType string
+		id                           int64
+	}{
+		{"ssh", "/api/v1/ssh-connections/", "ssh_connection", ssh.ID},
+		{"db", "/api/v1/db-connections/", "db_connection", db.ID},
+	} {
+		for _, body := range []string{`{}`, `{"archived":null}`, `{"archived":"yes","secret":"do-not-log"}`} {
+			rec := doRequest(t, mux, "PUT", fmt.Sprintf("%s%d/archive", tc.endpoint, tc.id), body)
+			if rec.Code != http.StatusBadRequest {
+				t.Fatalf("%s invalid archive body %s status = %d, want 400", tc.name, body, rec.Code)
+			}
+			event := lastAuditEvent(t, path)
+			if event.Operation != tc.resourceType+".archive" || event.Result != "failure" || event.Error == "" {
+				t.Fatalf("%s invalid archive audit = %+v", tc.name, event)
+			}
+			if strings.Contains(event.Metadata, "do-not-log") || strings.Contains(event.Error, "do-not-log") {
+				t.Fatalf("%s invalid archive audit leaks request data: %+v", tc.name, event)
+			}
+		}
+	}
+}
+
+func TestArchivedTransportReturnsGenericNotFound(t *testing.T) {
+	mux, s, _ := newTestAPI(t)
+	p := createSSH(t, s, "archived", "[]")
+	if err := s.SetSSHArchived(context.Background(), p.ID, true); err != nil {
+		t.Fatal(err)
+	}
+	rec := doRequest(t, mux, "GET", fmt.Sprintf("/api/v1/transport/ssh/%d", p.ID), "")
+	if rec.Code != http.StatusNotFound || !strings.Contains(rec.Body.String(), `"code":"not_found"`) || !strings.Contains(rec.Body.String(), `"message":"connection not found"`) {
+		t.Fatalf("archived transport response = %d %s", rec.Code, rec.Body.String())
+	}
+}
+
 func TestListSSHRedactsSecrets(t *testing.T) {
 	mux, s, _ := newTestAPI(t)
 	ctx := context.Background()

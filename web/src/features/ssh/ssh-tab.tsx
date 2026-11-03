@@ -143,6 +143,92 @@ export function SSHTab({ resource, groups, keyPairs, notify }: SSHTabProps) {
     dependents !== null && dependents !== undefined &&
     (dependents.ssh.length > 0 || dependents.db.length > 0)
   const tableRows = groupedTableRows(resource.data)
+  const activeRows = tableRows.filter(row => !row.item.archived)
+  const archivedRows = tableRows.filter(row => row.item.archived)
+  const archiveConnection = async (connection: SSHConnection) => {
+    try {
+      await api.archiveSSH(connection.id, !connection.archived)
+      await resource.reload()
+      notify(`${connection.archived ? "Restored" : "Archived"} SSH connection "${connection.name}".`, "success")
+    } catch (error) {
+      notify(errorMessage(error), "error")
+    }
+  }
+  const renderConnectionRow = (
+    connection: SSHConnection,
+    groupLabel: string,
+    backgroundClass: string,
+  ) => (
+    <TableRow key={connection.id} className={backgroundClass}>
+      <TableCell>
+        {connection.group_id === 0 && !connection.group_name ? (
+          <span className="text-sm text-muted-foreground">{groupLabel}</span>
+        ) : (
+          groupLabel
+        )}
+      </TableCell>
+      <TableCell className="font-medium">{connection.name}</TableCell>
+      <TableCell className="max-w-xs whitespace-pre-wrap">
+        {connection.note || "—"}
+      </TableCell>
+      <TableCell>{connection.host}:{connection.port}</TableCell>
+      <TableCell>{connection.username}</TableCell>
+      <TableCell>
+        <div className="flex flex-wrap gap-1">
+          {connection.has_password && <Badge variant="secondary">Password</Badge>}
+          {connection.key_pair_id !== 0 && (
+            <Badge variant="secondary">
+              {connection.key_pair_name
+                ? `Key pair: ${connection.key_pair_name}`
+                : `Missing key pair #${connection.key_pair_id}`}
+            </Badge>
+          )}
+          {connection.has_proxy_password && <Badge variant="secondary">Proxy password</Badge>}
+          {!connection.has_password &&
+            connection.key_pair_id === 0 &&
+            !connection.has_proxy_password && (
+              <span className="text-sm text-muted-foreground">None</span>
+            )}
+        </div>
+      </TableCell>
+      <TableCell>
+        {connection.proxy_host ? `${connection.proxy_host}:${connection.proxy_port}` : "—"}
+      </TableCell>
+      <TableCell>{jumpRouteLabels(connection, resource.data)}</TableCell>
+      <TableCell>{connection.default_dir || "—"}</TableCell>
+      <TableCell className="text-right">
+        <div className="flex justify-end gap-1">
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            aria-label={`Edit ${connection.name}`}
+            onClick={event => openEdit(connection, event.currentTarget)}
+          >
+            Edit
+          </Button>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            aria-label={`${connection.archived ? "Restore" : "Archive"} ${connection.name}`}
+            onClick={() => void archiveConnection(connection)}
+          >
+            {connection.archived ? "Restore" : "Archive"}
+          </Button>
+          <Button
+            type="button"
+            variant="destructive"
+            size="sm"
+            aria-label={`Delete ${connection.name}`}
+            onClick={event => void requestDelete(connection, event.currentTarget)}
+          >
+            Delete
+          </Button>
+        </div>
+      </TableCell>
+    </TableRow>
+  )
 
   return (
     <div className="p-4">
@@ -181,72 +267,22 @@ export function SSHTab({ resource, groups, keyPairs, notify }: SSHTabProps) {
             </TableRow>
           </TableHeader>
           <TableBody>
-            {tableRows.map(({ item: connection, groupLabel, backgroundClass }) => (
-              <TableRow key={connection.id} className={backgroundClass}>
-                <TableCell>
-                  {connection.group_id === 0 && !connection.group_name ? (
-                    <span className="text-sm text-muted-foreground">{groupLabel}</span>
-                  ) : (
-                    groupLabel
-                  )}
-                </TableCell>
-                <TableCell className="font-medium">{connection.name}</TableCell>
-                <TableCell className="max-w-xs whitespace-pre-wrap">
-                  {connection.note || "—"}
-                </TableCell>
-                <TableCell>
-                  {connection.host}:{connection.port}
-                </TableCell>
-                <TableCell>{connection.username}</TableCell>
-                <TableCell>
-                  <div className="flex flex-wrap gap-1">
-                    {connection.has_password && <Badge variant="secondary">Password</Badge>}
-                    {connection.key_pair_id !== 0 && (
-                      <Badge variant="secondary">
-                        {connection.key_pair_name
-                          ? `Key pair: ${connection.key_pair_name}`
-                          : `Missing key pair #${connection.key_pair_id}`}
-                      </Badge>
-                    )}
-                    {connection.has_proxy_password && <Badge variant="secondary">Proxy password</Badge>}
-                    {!connection.has_password &&
-                      connection.key_pair_id === 0 &&
-                      !connection.has_proxy_password && (
-                        <span className="text-sm text-muted-foreground">None</span>
-                      )}
-                  </div>
-                </TableCell>
-                <TableCell>
-                  {connection.proxy_host
-                    ? `${connection.proxy_host}:${connection.proxy_port}`
-                    : "—"}
-                </TableCell>
-                <TableCell>{jumpRouteLabels(connection, resource.data)}</TableCell>
-                <TableCell>{connection.default_dir || "—"}</TableCell>
-                <TableCell className="text-right">
-                  <div className="flex justify-end gap-1">
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="sm"
-                      aria-label={`Edit ${connection.name}`}
-                      onClick={event => openEdit(connection, event.currentTarget)}
-                    >
-                      Edit
-                    </Button>
-                    <Button
-                      type="button"
-                      variant="destructive"
-                      size="sm"
-                      aria-label={`Delete ${connection.name}`}
-                      onClick={event => void requestDelete(connection, event.currentTarget)}
-                    >
-                      Delete
-                    </Button>
-                  </div>
-                </TableCell>
+            {archivedRows.length > 0 && activeRows.length > 0 && (
+              <TableRow>
+                <TableCell colSpan={10}><h3>Active SSH connections</h3></TableCell>
               </TableRow>
-            ))}
+            )}
+            {activeRows.map(({ item, groupLabel, backgroundClass }) =>
+              renderConnectionRow(item, groupLabel, backgroundClass),
+            )}
+            {archivedRows.length > 0 && (
+              <TableRow>
+                <TableCell colSpan={10}><h3>Archived SSH connections</h3></TableCell>
+              </TableRow>
+            )}
+            {archivedRows.map(({ item, groupLabel, backgroundClass }) =>
+              renderConnectionRow(item, groupLabel, backgroundClass),
+            )}
           </TableBody>
         </Table>
       )}

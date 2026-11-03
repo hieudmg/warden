@@ -161,6 +161,78 @@ export function DBTab({ resource, sshProfiles, groups, notify }: DBTabProps) {
     dependents !== null && dependents !== undefined &&
     (dependents.ssh.length > 0 || dependents.db.length > 0)
   const tableRows = groupedTableRows(resource.data)
+  const activeRows = tableRows.filter(row => !row.item.archived)
+  const archivedRows = tableRows.filter(row => row.item.archived)
+  const archiveConnection = async (connection: DBConnection) => {
+    try {
+      await api.archiveDB(connection.id, !connection.archived)
+      await resource.reload()
+      notify(`${connection.archived ? "Restored" : "Archived"} database connection "${connection.name}".`, "success")
+    } catch (error) {
+      notify(errorMessage(error), "error")
+    }
+  }
+  const renderConnectionRow = (
+    connection: DBConnection,
+    groupLabel: string,
+    backgroundClass: string,
+  ) => (
+    <TableRow key={connection.id} className={backgroundClass}>
+      <TableCell>
+        {connection.group_id === 0 && !connection.group_name ? (
+          <span className="text-sm text-muted-foreground">{groupLabel}</span>
+        ) : (
+          groupLabel
+        )}
+      </TableCell>
+      <TableCell className="font-medium">{connection.name}</TableCell>
+      <TableCell className="max-w-xs whitespace-pre-wrap">
+        {connection.note || "—"}
+      </TableCell>
+      <TableCell>{connection.host}:{connection.port}</TableCell>
+      <TableCell>{connection.username}</TableCell>
+      <TableCell>
+        {connection.has_password ? (
+          <Badge variant="secondary">Password</Badge>
+        ) : (
+          <span className="text-sm text-muted-foreground">None</span>
+        )}
+      </TableCell>
+      <TableCell>{databaseCell(connection)}</TableCell>
+      <TableCell>{sshCell(connection, sshProfiles)}</TableCell>
+      <TableCell className="text-right">
+        <div className="flex justify-end gap-1">
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            aria-label={`Edit ${connection.name}`}
+            onClick={event => openEdit(connection, event.currentTarget)}
+          >
+            Edit
+          </Button>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            aria-label={`${connection.archived ? "Restore" : "Archive"} ${connection.name}`}
+            onClick={() => void archiveConnection(connection)}
+          >
+            {connection.archived ? "Restore" : "Archive"}
+          </Button>
+          <Button
+            type="button"
+            variant="destructive"
+            size="sm"
+            aria-label={`Delete ${connection.name}`}
+            onClick={event => void requestDelete(connection, event.currentTarget)}
+          >
+            Delete
+          </Button>
+        </div>
+      </TableCell>
+    </TableRow>
+  )
 
   return (
     <div className="p-4">
@@ -198,56 +270,22 @@ export function DBTab({ resource, sshProfiles, groups, notify }: DBTabProps) {
             </TableRow>
           </TableHeader>
           <TableBody>
-            {tableRows.map(({ item: connection, groupLabel, backgroundClass }) => (
-              <TableRow key={connection.id} className={backgroundClass}>
-                <TableCell>
-                  {connection.group_id === 0 && !connection.group_name ? (
-                    <span className="text-sm text-muted-foreground">{groupLabel}</span>
-                  ) : (
-                    groupLabel
-                  )}
-                </TableCell>
-                <TableCell className="font-medium">{connection.name}</TableCell>
-                <TableCell className="max-w-xs whitespace-pre-wrap">
-                  {connection.note || "—"}
-                </TableCell>
-                <TableCell>
-                  {connection.host}:{connection.port}
-                </TableCell>
-                <TableCell>{connection.username}</TableCell>
-                <TableCell>
-                  {connection.has_password ? (
-                    <Badge variant="secondary">Password</Badge>
-                  ) : (
-                    <span className="text-sm text-muted-foreground">None</span>
-                  )}
-                </TableCell>
-                <TableCell>{databaseCell(connection)}</TableCell>
-                <TableCell>{sshCell(connection, sshProfiles)}</TableCell>
-                <TableCell className="text-right">
-                  <div className="flex justify-end gap-1">
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="sm"
-                      aria-label={`Edit ${connection.name}`}
-                      onClick={event => openEdit(connection, event.currentTarget)}
-                    >
-                      Edit
-                    </Button>
-                    <Button
-                      type="button"
-                      variant="destructive"
-                      size="sm"
-                      aria-label={`Delete ${connection.name}`}
-                      onClick={event => void requestDelete(connection, event.currentTarget)}
-                    >
-                      Delete
-                    </Button>
-                  </div>
-                </TableCell>
+            {archivedRows.length > 0 && activeRows.length > 0 && (
+              <TableRow>
+                <TableCell colSpan={9}><h3>Active database connections</h3></TableCell>
               </TableRow>
-            ))}
+            )}
+            {activeRows.map(({ item, groupLabel, backgroundClass }) =>
+              renderConnectionRow(item, groupLabel, backgroundClass),
+            )}
+            {archivedRows.length > 0 && (
+              <TableRow>
+                <TableCell colSpan={9}><h3>Archived database connections</h3></TableCell>
+              </TableRow>
+            )}
+            {archivedRows.map(({ item, groupLabel, backgroundClass }) =>
+              renderConnectionRow(item, groupLabel, backgroundClass),
+            )}
           </TableBody>
         </Table>
       )}

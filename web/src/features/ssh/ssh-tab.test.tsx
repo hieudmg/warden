@@ -22,6 +22,7 @@ vi.mock("@/api/client", () => {
       createSSH: vi.fn(),
       updateSSH: vi.fn(),
       deleteSSH: vi.fn(),
+      archiveSSH: vi.fn(),
       sshDependents: vi.fn(),
     },
     ApiError: MockApiError,
@@ -49,6 +50,7 @@ function ssh(id: number, name: string, overrides: Partial<SSHConnection> = {}): 
     note: "",
     created_at: "2026-08-24T00:00:00Z",
     updated_at: "2026-08-24T00:00:00Z",
+    archived: false,
     ...overrides,
   }
 }
@@ -87,6 +89,23 @@ beforeEach(() => {
 })
 
 describe("SSHTab", () => {
+  test("separates archived connections and restores them", async () => {
+    const user = userEvent.setup()
+    const reload = vi.fn().mockResolvedValue(undefined)
+    mockedAPI.archiveSSH.mockResolvedValue(undefined)
+    render(<SSHTab resource={resource({ data: [ssh(1, "active"), ssh(2, "old", { archived: true, has_password: true, key_pair_id: 7, key_pair_name: "retired-key", has_proxy_password: true, proxy_host: "proxy.example", proxy_port: 1080 })], reload })} groups={[]} keyPairs={[]} notify={notify} />)
+    expect(screen.getByRole("heading", { name: "Archived SSH connections" })).toBeInTheDocument()
+    expect(screen.getByText("Key pair: retired-key")).toBeInTheDocument()
+    expect(screen.getByText("Proxy password")).toBeInTheDocument()
+    expect(screen.getByText("proxy.example:1080")).toBeInTheDocument()
+    await user.click(screen.getByRole("button", { name: "Restore old" }))
+    await waitFor(() => expect(mockedAPI.archiveSSH).toHaveBeenCalledWith(2, false))
+    expect(reload).toHaveBeenCalled()
+    expect(notify).toHaveBeenCalledWith('Restored SSH connection "old".', "success")
+    expect(screen.getByRole("button", { name: "Edit old" })).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "Delete old" })).toBeInTheDocument()
+  })
+
   test("shows a loading state while the resource loads", () => {
     render(<SSHTab resource={resource({ loading: true })} groups={[]} keyPairs={[]} notify={notify} />)
     expect(screen.getByText("Loading…")).toBeInTheDocument()

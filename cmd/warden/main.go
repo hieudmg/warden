@@ -323,7 +323,7 @@ func runXSSH(args []string, configPath string, configPathSet bool, stdout, stder
 				fmt.Fprintf(stderr, "xssh: %v\n", err)
 				return 1
 			}
-			sel, err = selectXSSHConnection(pickerSession, conns)
+			sel, err = selectXSSHConnection(pickerSession, activeSSHConnections(conns))
 			if err != nil {
 				fmt.Fprintf(stderr, "xssh: %v\n", err)
 				return 1
@@ -514,6 +514,16 @@ func writeConfigSearchResultsForMode(w io.Writer, query string, sshConns []model
 	writeConfigSearchResults(w, query, sshConns, dbConns)
 }
 
+func activeSSHConnections(conns []model.SSHConnection) []model.SSHConnection {
+	active := make([]model.SSHConnection, 0, len(conns))
+	for _, conn := range conns {
+		if !conn.Archived {
+			active = append(active, conn)
+		}
+	}
+	return active
+}
+
 func writeConfigSearchResults(w io.Writer, query string, sshConns []model.SSHConnection, dbConns []model.DBConnection) {
 	sshNames := make(map[int64]string, len(sshConns))
 	type matchedSSH struct {
@@ -522,6 +532,9 @@ func writeConfigSearchResults(w io.Writer, query string, sshConns []model.SSHCon
 	}
 	var sshMatches []matchedSSH
 	for index, conn := range sshConns {
+		if conn.Archived {
+			continue
+		}
 		sshNames[conn.ID] = conn.Name
 		if score, ok := scoreConfigSearch(query, conn.Name, conn.Host); ok {
 			score.originalIndex = index
@@ -540,6 +553,9 @@ func writeConfigSearchResults(w io.Writer, query string, sshConns []model.SSHCon
 	var dbMatches []matchedDatabase
 	index := 0
 	for _, conn := range dbConns {
+		if conn.Archived {
+			continue
+		}
 		for _, database := range conn.Databases {
 			if score, ok := scoreConfigSearch(query, conn.Name, conn.Host, database.Name); ok {
 				score.originalIndex = index

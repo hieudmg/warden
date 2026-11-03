@@ -602,4 +602,14 @@ func TestOpenMigratesExistingConnectionsToUngrouped(t *testing.T) {
 	if sshGroupID != 0 || dbGroupID != 0 || groupCount != 0 {
 		t.Fatalf("migration result = ssh:%d db:%d groups:%d; want 0, 0, 0", sshGroupID, dbGroupID, groupCount)
 	}
+	var sshArchived, dbArchived bool
+	if err := s.db.QueryRow("SELECT archived FROM ssh_connections WHERE id=1").Scan(&sshArchived); err != nil {
+		t.Fatalf("read migrated SSH archive state: %v", err)
+	}
+	if err := s.db.QueryRow("SELECT archived FROM db_connections WHERE id=1").Scan(&dbArchived); err != nil {
+		t.Fatalf("read migrated DB archive state: %v", err)
+	}
+	if sshArchived || dbArchived {
+		t.Fatalf("legacy archive states = SSH:%v DB:%v; want active", sshArchived, dbArchived)
+	}
 }

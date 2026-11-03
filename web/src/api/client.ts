@@ -120,6 +120,8 @@ export const api = {
     request<SSHConnection>("/api/v1/ssh-connections", { method: "POST", json: payload }) as Promise<SSHConnection>,
   updateSSH: (id: number, payload: SSHConnectionRequest): Promise<SSHConnection> =>
     request<SSHConnection>(`/api/v1/ssh-connections/${id}`, { method: "PUT", json: payload }) as Promise<SSHConnection>,
+  archiveSSH: (id: number, archived: boolean): Promise<void> =>
+    request<void>(`/api/v1/ssh-connections/${id}/archive`, { method: "PUT", json: { archived } }).then(() => undefined),
   deleteSSH: (id: number): Promise<void> =>
     request<void>(`/api/v1/ssh-connections/${id}`, { method: "DELETE" }).then(() => undefined),
   sshDependents: (id: number): Promise<DependentsResponse> =>
@@ -132,6 +134,8 @@ export const api = {
     request<DBConnection>("/api/v1/db-connections", { method: "POST", json: payload }) as Promise<DBConnection>,
   updateDB: (id: number, payload: DBConnectionRequest): Promise<DBConnection> =>
     request<DBConnection>(`/api/v1/db-connections/${id}`, { method: "PUT", json: payload }) as Promise<DBConnection>,
+  archiveDB: (id: number, archived: boolean): Promise<void> =>
+    request<void>(`/api/v1/db-connections/${id}/archive`, { method: "PUT", json: { archived } }).then(() => undefined),
   deleteDB: (id: number): Promise<void> =>
     request<void>(`/api/v1/db-connections/${id}`, { method: "DELETE" }).then(() => undefined),
   dbDependents: (id: number): Promise<DependentsResponse> =>

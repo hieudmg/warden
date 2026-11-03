@@ -383,7 +383,7 @@ func (s *Store) GetSSH(ctx context.Context, id int64) (model.SSHProfile, error) 
 		       s.proxy_host, s.proxy_port, s.proxy_username,
 		       s.proxy_password, s.jump_connection_ids, s.default_dir,
 		       s.group_id, COALESCE(g.name, ''), s.key_pair_id, COALESCE(k.name, ''),
-		       COALESCE(n.note, ''), s.created_at, s.updated_at
+		       COALESCE(n.note, ''), s.archived, s.created_at, s.updated_at
 		FROM ssh_connections s
 		LEFT JOIN groups g ON g.id = s.group_id
 		LEFT JOIN key_pairs k ON k.id = s.key_pair_id
@@ -396,7 +396,7 @@ func (s *Store) GetSSH(ctx context.Context, id int64) (model.SSHProfile, error) 
 	err := row.Scan(&p.ID, &p.Name, &p.Host, &p.Port, &p.Username,
 		&password, &p.ProxyHost, &p.ProxyPort, &p.ProxyUsername,
 		&proxyPassword, &p.JumpConnectionIDs, &p.DefaultDir,
-		&p.GroupID, &p.GroupName, &p.KeyPairID, &p.KeyPairName, &p.Note, &createdAt, &updatedAt)
+		&p.GroupID, &p.GroupName, &p.KeyPairID, &p.KeyPairName, &p.Note, &p.Archived, &createdAt, &updatedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return model.SSHProfile{}, ErrNotFound
 	}
@@ -695,7 +695,7 @@ func (s *Store) CreateDB(ctx context.Context, p model.DBProfile) (model.DBProfil
 func (s *Store) GetDB(ctx context.Context, id int64) (model.DBProfile, error) {
 	row := s.db.QueryRowContext(ctx, `
 		SELECT d.id, d.name, d.host, d.port, d.username, d.password, d.database, d.ssh_connection_id,
-		       d.group_id, COALESCE(g.name, ''), COALESCE(n.note, ''), d.created_at, d.updated_at
+		       d.group_id, COALESCE(g.name, ''), COALESCE(n.note, ''), d.archived, d.created_at, d.updated_at
 		FROM db_connections d
 		LEFT JOIN groups g ON g.id = d.group_id
 		LEFT JOIN connection_notes n ON n.connection_type='db' AND n.connection_id=d.id
@@ -706,7 +706,7 @@ func (s *Store) GetDB(ctx context.Context, id int64) (model.DBProfile, error) {
 	var storedDatabases string
 	var createdAt, updatedAt string
 	err := row.Scan(&p.ID, &p.Name, &p.Host, &p.Port, &p.Username, &password,
-		&storedDatabases, &p.SSHConnectionID, &p.GroupID, &p.GroupName, &p.Note, &createdAt, &updatedAt)
+		&storedDatabases, &p.SSHConnectionID, &p.GroupID, &p.GroupName, &p.Note, &p.Archived, &createdAt, &updatedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return model.DBProfile{}, ErrNotFound
 	}
@@ -929,4 +929,32 @@ func validateDBMetadata(p model.DBProfile) error {
 
 func parseTime(value string) (t time.Time, err error) {
 	return time.Parse(timeLayout, value)
+}
+
+// SetSSHArchived updates the archive state without changing editable profile fields.
+func (s *Store) SetSSHArchived(ctx context.Context, id int64, archived bool) error {
+	return setArchived(ctx, s.db, "ssh_connections", id, archived)
+}
+
+// SetDBArchived updates the archive state without changing editable profile fields.
+func (s *Store) SetDBArchived(ctx context.Context, id int64, archived bool) error {
+	return setArchived(ctx, s.db, "db_connections", id, archived)
+}
+
+func setArchived(ctx context.Context, db *sql.DB, table string, id int64, archived bool) error {
+	if id <= 0 {
+		return ErrNotFound
+	}
+	res, err := db.ExecContext(ctx, "UPDATE "+table+" SET archived=?, updated_at=? WHERE id=?", archived, nowUTC(), id)
+	if err != nil {
+		return fmt.Errorf("update archived state: %w", err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("rows affected: %w", err)
+	}
+	if n == 0 {
+		return ErrNotFound
+	}
+	return nil
 }

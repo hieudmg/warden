@@ -88,6 +88,7 @@ type TransferSSHConnection struct {
 	DefaultDir        string    `json:"default_dir"`
 	GroupID           int64     `json:"group_id"`
 	KeyPairID         int64     `json:"key_pair_id"`
+	Archived          bool      `json:"archived,omitempty"`
 	CreatedAt         time.Time `json:"created_at"`
 	UpdatedAt         time.Time `json:"updated_at"`
 }
@@ -106,6 +107,7 @@ type TransferDBConnection struct {
 	Databases       []DatabaseInfo `json:"databases"`
 	SSHConnectionID int64          `json:"ssh_connection_id"`
 	GroupID         int64          `json:"group_id"`
+	Archived        bool           `json:"archived,omitempty"`
 	CreatedAt       time.Time      `json:"created_at"`
 	UpdatedAt       time.Time      `json:"updated_at"`
 }

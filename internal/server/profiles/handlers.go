@@ -57,6 +57,7 @@ func (h *Handler) Register(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/v1/ssh-connections/{id}", h.getSSH)
 	mux.HandleFunc("PUT /api/v1/ssh-connections/{id}", h.updateSSH)
 	mux.HandleFunc("DELETE /api/v1/ssh-connections/{id}", h.deleteSSH)
+	mux.HandleFunc("PUT /api/v1/ssh-connections/{id}/archive", h.archiveSSH)
 	mux.HandleFunc("GET /api/v1/ssh-connections/{id}/dependents", h.sshDependents)
 
 	mux.HandleFunc("GET /api/v1/db-connections", h.listDB)
@@ -64,6 +65,7 @@ func (h *Handler) Register(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/v1/db-connections/{id}", h.getDB)
 	mux.HandleFunc("PUT /api/v1/db-connections/{id}", h.updateDB)
 	mux.HandleFunc("DELETE /api/v1/db-connections/{id}", h.deleteDB)
+	mux.HandleFunc("PUT /api/v1/db-connections/{id}/archive", h.archiveDB)
 	mux.HandleFunc("GET /api/v1/db-connections/{id}/dependents", h.dbDependents)
 
 	mux.HandleFunc("GET /api/v1/groups", h.listGroups)
@@ -85,6 +87,47 @@ func (h *Handler) Register(mux *http.ServeMux) {
 
 	mux.HandleFunc("GET /api/v1/transport/ssh/{id}", h.transportSSH)
 	mux.HandleFunc("GET /api/v1/transport/db/{id}", h.transportDB)
+}
+
+type archiveRequest struct {
+	Archived *bool `json:"archived"`
+}
+
+func (h *Handler) archiveSSH(w http.ResponseWriter, r *http.Request) { h.setArchive(w, r, "ssh") }
+func (h *Handler) archiveDB(w http.ResponseWriter, r *http.Request)  { h.setArchive(w, r, "db") }
+func (h *Handler) setArchive(w http.ResponseWriter, r *http.Request, kind string) {
+	id, ok := pathID(w, r)
+	if !ok {
+		return
+	}
+	resourceType := kind + "_connection"
+	operation := resourceType + ".archive"
+	resourceID := strconv.FormatInt(id, 10)
+	var req archiveRequest
+	if err := decodeStrict(w, r, &req); err != nil {
+		h.record(r, operation, resourceType, resourceID, "failure", err, nil)
+		writeDecodeError(w, err)
+		return
+	}
+	if req.Archived == nil {
+		h.record(r, operation, resourceType, resourceID, "failure", errInvalidJSON, nil)
+		writeDecodeError(w, errInvalidJSON)
+		return
+	}
+	var err error
+	if kind == "ssh" {
+		err = h.store.SetSSHArchived(r.Context(), id, *req.Archived)
+	} else {
+		err = h.store.SetDBArchived(r.Context(), id, *req.Archived)
+	}
+	metadata := map[string]any{"archived": *req.Archived}
+	if err != nil {
+		h.record(r, operation, resourceType, resourceID, "failure", err, metadata)
+		writeStoreError(w, err)
+		return
+	}
+	h.record(r, operation, resourceType, resourceID, "success", nil, metadata)
+	server.WriteJSON(w, http.StatusOK, map[string]bool{"archived": *req.Archived})
 }
 
 func (h *Handler) listSSH(w http.ResponseWriter, r *http.Request) {
@@ -527,6 +570,7 @@ func redactSSH(p model.SSHProfile) model.SSHConnection {
 		DefaultDir:        p.DefaultDir,
 		GroupID:           p.GroupID,
 		GroupName:         p.GroupName,
+		Archived:          p.Archived,
 		CreatedAt:         p.CreatedAt,
 		UpdatedAt:         p.UpdatedAt,
 	}
@@ -598,6 +642,7 @@ func redactDB(p model.DBProfile) model.DBConnection {
 		SSHConnectionID: p.SSHConnectionID,
 		GroupID:         p.GroupID,
 		GroupName:       p.GroupName,
+		Archived:        p.Archived,
 		CreatedAt:       p.CreatedAt,
 		UpdatedAt:       p.UpdatedAt,
 	}

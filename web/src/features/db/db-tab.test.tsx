@@ -22,6 +22,7 @@ vi.mock("@/api/client", () => {
       createDB: vi.fn(),
       updateDB: vi.fn(),
       deleteDB: vi.fn(),
+      archiveDB: vi.fn(),
       dbDependents: vi.fn(),
     },
     ApiError: MockApiError,
@@ -34,6 +35,7 @@ function db(id: number, name: string, overrides: Partial<DBConnection> = {}): DB
   const connection = {
     id,
     name,
+    archived: false,
     host: "127.0.0.1",
     port: 3306,
     username: "app",
@@ -57,6 +59,7 @@ function ssh(id: number, name: string): SSHConnection {
   return {
     id,
     name,
+    archived: false,
     host: "10.0.0.1",
     port: 22,
     username: "root",
@@ -95,6 +98,20 @@ beforeEach(() => {
 })
 
 describe("DBTab", () => {
+  test("separates archived databases and archives active ones", async () => {
+    const user = userEvent.setup()
+    const reload = vi.fn().mockResolvedValue(undefined)
+    mockedAPI.archiveDB.mockResolvedValue(undefined)
+    render(<DBTab resource={resource({ data: [db(1, "active"), db(2, "old", { archived: true })], reload })} sshProfiles={[]} groups={[]} notify={notify} />)
+    expect(screen.getByRole("heading", { name: "Archived database connections" })).toBeInTheDocument()
+    await user.click(screen.getByRole("button", { name: "Archive active" }))
+    await waitFor(() => expect(mockedAPI.archiveDB).toHaveBeenCalledWith(1, true))
+    expect(reload).toHaveBeenCalled()
+    expect(notify).toHaveBeenCalledWith('Archived database connection "active".', "success")
+    expect(screen.getByRole("button", { name: "Edit old" })).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "Delete old" })).toBeInTheDocument()
+  })
+
   test("shows a loading state while the resource loads", () => {
     render(<DBTab resource={resource({ loading: true })} sshProfiles={[]} groups={[]} notify={notify} />)
     expect(screen.getByText("Loading…")).toBeInTheDocument()

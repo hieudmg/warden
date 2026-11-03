@@ -126,6 +126,22 @@ func (c *Client) DBDependents(ctx context.Context, id int64) (model.DependentsRe
 	return out, err
 }
 
+// SetSSHArchived sets or clears the archive state for an SSH profile.
+func (c *Client) SetSSHArchived(ctx context.Context, id int64, archived bool) error {
+	var out struct {
+		Archived bool `json:"archived"`
+	}
+	return c.requestJSON(ctx, http.MethodPut, "/api/v1/ssh-connections/"+strconv.FormatInt(id, 10)+"/archive", map[string]bool{"archived": archived}, &out, http.StatusOK)
+}
+
+// SetDBArchived sets or clears the archive state for a DB profile.
+func (c *Client) SetDBArchived(ctx context.Context, id int64, archived bool) error {
+	var out struct {
+		Archived bool `json:"archived"`
+	}
+	return c.requestJSON(ctx, http.MethodPut, "/api/v1/db-connections/"+strconv.FormatInt(id, 10)+"/archive", map[string]bool{"archived": archived}, &out, http.StatusOK)
+}
+
 // GetJSON performs a GET and strictly decodes a successful JSON response.
 // It is the exported form of getJSON used by API surface extensions that
 // live outside this package (e.g. reports).

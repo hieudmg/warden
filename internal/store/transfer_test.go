@@ -2,9 +2,11 @@ package store
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -733,5 +735,81 @@ func TestImportDataRollsBackOnMidImportFailure(t *testing.T) {
 	}
 	if got := countManagedRecords(t, dst); got != 0 {
 		t.Errorf("managed records after rolled-back import = %d, want 0", got)
+	}
+}
+
+func TestTransferPreservesArchiveState(t *testing.T) {
+	ctx := context.Background()
+	src := newStoreWithKey(t, transferSourceKey)
+	sshProfile, err := src.CreateSSH(ctx, model.SSHProfile{Name: "archived-ssh", Host: "ssh.invalid", Port: 22, Username: "u", JumpConnectionIDs: "[]"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	dbProfile, err := src.CreateDB(ctx, model.DBProfile{Name: "archived-db", Host: "db.invalid", Port: 3306, Username: "u", Databases: []model.DatabaseInfo{{Name: "app", IsDefault: true}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := src.SetSSHArchived(ctx, sshProfile.ID, true); err != nil {
+		t.Fatal(err)
+	}
+	if err := src.SetDBArchived(ctx, dbProfile.ID, true); err != nil {
+		t.Fatal(err)
+	}
+	bundle, err := src.ExportData(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dst := newStoreWithKey(t, transferDestKey)
+	if err := dst.ImportData(ctx, bundle); err != nil {
+		t.Fatal(err)
+	}
+	gotSSH, err := dst.GetSSH(ctx, sshProfile.ID)
+	if err != nil || !gotSSH.Archived {
+		t.Fatalf("imported ssh archived=%v err=%v", gotSSH.Archived, err)
+	}
+	gotDB, err := dst.GetDB(ctx, dbProfile.ID)
+	if err != nil || !gotDB.Archived {
+		t.Fatalf("imported db archived=%v err=%v", gotDB.Archived, err)
+	}
+}
+
+func TestImportLegacyTransferDefaultsConnectionsToActive(t *testing.T) {
+	ctx := context.Background()
+	src := newStoreWithKey(t, transferSourceKey)
+	sshProfile, err := src.CreateSSH(ctx, model.SSHProfile{Name: "legacy-ssh", Host: "ssh.invalid", Port: 22, Username: "u", JumpConnectionIDs: "[]"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	dbProfile, err := src.CreateDB(ctx, model.DBProfile{Name: "legacy-db", Host: "db.invalid", Port: 3306, Username: "u", Databases: []model.DatabaseInfo{{Name: "app", IsDefault: true}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	bundle, err := src.ExportData(ctx)
+	if err != nil {
+		t.Fatalf("ExportData: %v", err)
+	}
+	legacyJSON, err := json.Marshal(bundle)
+	if err != nil {
+		t.Fatalf("marshal legacy-shape data: %v", err)
+	}
+	if strings.Contains(string(legacyJSON), `"archived"`) {
+		t.Fatalf("active archive state should be omitted from legacy transfer shape: %s", legacyJSON)
+	}
+	var legacyBundle model.DataBundle
+	if err := json.Unmarshal(legacyJSON, &legacyBundle); err != nil {
+		t.Fatalf("decode legacy transfer: %v", err)
+	}
+
+	dst := newStoreWithKey(t, transferDestKey)
+	if err := dst.ImportData(ctx, legacyBundle); err != nil {
+		t.Fatalf("ImportData legacy transfer: %v", err)
+	}
+	gotSSH, err := dst.GetSSH(ctx, sshProfile.ID)
+	if err != nil || gotSSH.Archived {
+		t.Fatalf("legacy SSH archived=%v err=%v, want active", gotSSH.Archived, err)
+	}
+	gotDB, err := dst.GetDB(ctx, dbProfile.ID)
+	if err != nil || gotDB.Archived {
+		t.Fatalf("legacy DB archived=%v err=%v, want active", gotDB.Archived, err)
 	}
 }
