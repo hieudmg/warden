@@ -20,6 +20,7 @@ function db(id: number, name: string, overrides: Partial<DBConnection> = {}): DB
   const connection = {
     id,
     name,
+    archived: false,
     host: "127.0.0.1",
     port: 3306,
     username: "app",
@@ -43,6 +44,7 @@ function ssh(id: number, name: string, overrides: Partial<SSHConnection> = {}): 
   return {
     id,
     name,
+    archived: false,
     host: `${name}.example`,
     port: 22,
     username: "root",

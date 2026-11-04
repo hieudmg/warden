@@ -13,6 +13,7 @@ function ssh(id: number, name: string, overrides: Partial<SSHConnection> = {}): 
   return {
     id,
     name,
+    archived: false,
     host: `${name}.example`,
     port: 22,
     username: "root",

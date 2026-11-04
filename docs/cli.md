@@ -126,3 +126,5 @@ the command returns.
 Set `WARDEN_REPO` or `WARDEN_RELEASE_BASE_URL` to upgrade from a release source
 other than the default `hieudmg/warden` GitHub releases. The server has its own
 `warden-server upgrade` command; see [Deployment](deployment.md).
+
+Archived SSH and database profiles remain available for management, but are omitted from `warden config search` and the interactive `warden xssh` picker. Attempts to connect to an archived profile (including an explicitly named `xssh` profile or an archived jump/tunnel host) are rejected by the server as `404 connection not found`.

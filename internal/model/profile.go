@@ -37,6 +37,7 @@ type SSHProfile struct {
 	DefaultDir string
 	GroupID    int64
 	GroupName  string
+	Archived   bool
 	CreatedAt  time.Time
 	UpdatedAt  time.Time
 }
@@ -65,6 +66,7 @@ type DBProfile struct {
 	SSHConnectionID int64
 	GroupID         int64
 	GroupName       string
+	Archived        bool
 	CreatedAt       time.Time
 	UpdatedAt       time.Time
 }

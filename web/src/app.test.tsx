@@ -44,6 +44,7 @@ function sshConnection(id: number): SSHConnection {
   return {
     id,
     name: `ssh-${id}`,
+    archived: false,
     host: "10.0.0.1",
     port: 22,
     username: "root",
@@ -65,6 +66,7 @@ function dbConnection(id: number): DBConnection {
   return {
     id,
     name: `db-${id}`,
+    archived: false,
     host: "127.0.0.1",
     port: 3306,
     username: "app",

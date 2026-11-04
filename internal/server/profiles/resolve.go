@@ -60,6 +60,9 @@ func (r *Resolver) ResolveSSHBundle(ctx context.Context, id int64) (model.SSHBun
 	if err != nil {
 		return model.SSHBundle{}, err
 	}
+	if target.Archived {
+		return model.SSHBundle{}, store.ErrNotFound
+	}
 
 	// Pass 1: validate the full jump graph and collect the ordered hop
 	// profiles. No key-pair secrets are decrypted during this pass, so a
@@ -113,6 +116,9 @@ func (r *Resolver) resolveJumps(ctx context.Context, ownerID int64, jumpJSON str
 			}
 			return err
 		}
+		if node.Archived {
+			return store.ErrNotFound
+		}
 		path[jid] = true
 		if err := r.resolveJumps(ctx, jid, node.JumpConnectionIDs, path, hops); err != nil {
 			return err
@@ -139,6 +145,9 @@ func (r *Resolver) ResolveDBBundle(ctx context.Context, id int64, databaseName .
 	db, err := r.store.GetDB(ctx, id)
 	if err != nil {
 		return model.DBBundle{}, err
+	}
+	if db.Archived {
+		return model.DBBundle{}, store.ErrNotFound
 	}
 	selected, err := selectDatabase(db.Databases, selector)
 	if err != nil {

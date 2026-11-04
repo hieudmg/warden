@@ -16,7 +16,45 @@ import (
 
 	"warden/internal/model"
 	"warden/internal/server/profiles"
+	"warden/internal/store"
 )
+
+func TestResolveSSHBundleRejectsArchivedTargetAndJump(t *testing.T) {
+	_, s, _ := newTestAPI(t)
+	r := profiles.NewResolver(s)
+	ctx := context.Background()
+
+	target := createSSH(t, s, "target", "[]")
+	if err := s.SetSSHArchived(ctx, target.ID, true); err != nil {
+		t.Fatalf("archive target: %v", err)
+	}
+	if _, err := r.ResolveSSHBundle(ctx, target.ID); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("archived target error = %v, want ErrNotFound", err)
+	}
+
+	hop := createSSH(t, s, "hop", "[]")
+	target = createSSH(t, s, "through-hop", fmt.Sprintf("[%d]", hop.ID))
+	if err := s.SetSSHArchived(ctx, hop.ID, true); err != nil {
+		t.Fatalf("archive jump: %v", err)
+	}
+	if _, err := r.ResolveSSHBundle(ctx, target.ID); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("archived jump error = %v, want ErrNotFound", err)
+	}
+}
+
+func TestResolveDBBundleRejectsArchivedTarget(t *testing.T) {
+	_, s, _ := newTestAPI(t)
+	db, err := s.CreateDB(context.Background(), model.DBProfile{Name: "archived-db", Host: "db.invalid", Port: 3306, Username: "u", Databases: []model.DatabaseInfo{{Name: "app", IsDefault: true}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SetDBArchived(context.Background(), db.ID, true); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := profiles.NewResolver(s).ResolveDBBundle(context.Background(), db.ID); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("archived DB error = %v, want ErrNotFound", err)
+	}
+}
 
 func TestResolveSSHBundleLinearChain(t *testing.T) {
 	_, s, _ := newTestAPI(t)

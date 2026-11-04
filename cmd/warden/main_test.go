@@ -664,6 +664,19 @@ func TestRunConfigSearch(t *testing.T) {
 	}
 }
 
+func TestArchiveHidesProfilesFromSearchAndPicker(t *testing.T) {
+	conns := []model.SSHConnection{{Name: "active"}, {Name: "archived", Archived: true}}
+	picker := activeSSHConnections(conns)
+	if len(picker) != 1 || picker[0].Name != "active" {
+		t.Fatalf("picker connections = %+v", picker)
+	}
+	var out bytes.Buffer
+	writeConfigSearchResults(&out, "archived", conns, []model.DBConnection{{Name: "old-db", Host: "db", Archived: true, Databases: []model.DatabaseInfo{{Name: "archive", IsDefault: true}}}})
+	if strings.Contains(out.String(), "archived") || strings.Contains(out.String(), "old-db") {
+		t.Fatalf("archived profiles in search output: %q", out.String())
+	}
+}
+
 func TestWriteConfigSearchResultsRanksWordMatchesAndTypoDistance(t *testing.T) {
 	var stdout bytes.Buffer
 	writeConfigSearchResults(&stdout, "prd web", []model.SSHConnection{
@@ -1088,6 +1101,43 @@ func TestRunXSSHReturnsToPickerAfterSessionEnds(t *testing.T) {
 
 // TestRunXSSHUnknownConnection verifies a missing connection name fails
 // cleanly before any transport or terminal setup.
+func TestRunXSSHExplicitArchivedProfileReachesTransportEndpoint(t *testing.T) {
+	transportRequested := false
+	apiSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/v1/ssh-connections":
+			io.WriteString(w, `[{"id":1,"name":"retired","host":"host","port":22,"username":"u","archived":true}]`)
+		case "/api/v1/transport/ssh/1":
+			transportRequested = true
+			http.Error(w, `{"code":"not_found","message":"connection not found"}`, http.StatusNotFound)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer apiSrv.Close()
+	lookupEnv := func(key string) (string, bool) {
+		switch key {
+		case "HOME":
+			return t.TempDir(), true
+		case "WARDEN_CLIENT_API_BASE_URL":
+			return apiSrv.URL, true
+		case "WARDEN_CLIENT_TIMEOUT":
+			return "10s", true
+		}
+		return "", false
+	}
+	var stdout, stderr bytes.Buffer
+	if code := run([]string{"xssh", "retired"}, &stdout, &stderr, lookupEnv); code != 1 {
+		t.Fatalf("exit code = %d, stderr=%q", code, stderr.String())
+	}
+	if !transportRequested {
+		t.Fatal("explicit archived xssh did not request server transport bundle")
+	}
+	if !strings.Contains(stderr.String(), "connection not found") {
+		t.Fatalf("stderr = %q", stderr.String())
+	}
+}
+
 func TestRunXSSHUnknownConnection(t *testing.T) {
 	apiSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/api/v1/ssh-connections" {

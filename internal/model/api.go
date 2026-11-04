@@ -29,6 +29,7 @@ type SSHConnection struct {
 	DefaultDir        string    `json:"default_dir"`
 	GroupID           int64     `json:"group_id"`
 	GroupName         string    `json:"group_name,omitempty"`
+	Archived          bool      `json:"archived"`
 	CreatedAt         time.Time `json:"created_at"`
 	UpdatedAt         time.Time `json:"updated_at"`
 }
@@ -47,6 +48,7 @@ type DBConnection struct {
 	SSHConnectionID int64          `json:"ssh_connection_id"`
 	GroupID         int64          `json:"group_id"`
 	GroupName       string         `json:"group_name,omitempty"`
+	Archived        bool           `json:"archived"`
 	CreatedAt       time.Time      `json:"created_at"`
 	UpdatedAt       time.Time      `json:"updated_at"`
 }

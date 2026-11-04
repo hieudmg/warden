@@ -5,6 +5,7 @@
 export interface SSHConnection {
   id: number
   name: string
+  archived: boolean
   note?: string
   host: string
   port: number
@@ -32,6 +33,7 @@ export interface DatabaseInfo {
 export interface DBConnection {
   id: number
   name: string
+  archived: boolean
   note?: string
   host: string
   port: number

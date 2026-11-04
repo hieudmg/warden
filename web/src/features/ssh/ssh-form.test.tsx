@@ -33,6 +33,7 @@ function connection(overrides: Partial<SSHConnection> = {}): SSHConnection {
   return {
     id: 1,
     name: "bastion",
+    archived: false,
     host: "10.0.0.1",
     port: 22,
     username: "root",
