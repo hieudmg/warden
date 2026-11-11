@@ -17,6 +17,7 @@ import (
 	golangssh "golang.org/x/crypto/ssh"
 
 	clientssh "warden/internal/client/ssh"
+	"warden/internal/client/terminal"
 	"warden/internal/model"
 )
 
@@ -114,16 +115,31 @@ func Watch(ctx context.Context, bundle model.SSHBundle, rangeSpec string, stdout
 	}
 	defer graph.Close()
 
-	fmt.Fprintf(stdout, "port-watch: watching %s on %s; forwards listen on 127.0.0.1\n", rangeSpec, bundle.Target.Name)
 	scan := func(ctx context.Context) ([]int, error) {
 		return scanListeningPorts(ctx, graph.Target())
 	}
+	if terminalOutput(stdout) {
+		session, err := terminal.NewSession()
+		if err == nil {
+			if session.SupportsANSI() {
+				return runFullScreen(ctx, session, stdout, bundle.Target.Name, rangeSpec, func(ctx context.Context, update func([]portRow)) error {
+					return watchPortsWithView(ctx, scan, ranges, graph.Target(), io.Discard, io.Discard, pollInterval, update)
+				})
+			}
+			_ = session.Restore()
+		}
+	}
+	fmt.Fprintf(stdout, "port-watch: watching %s on %s; forwards listen on 127.0.0.1\n", rangeSpec, bundle.Target.Name)
 	return watchPorts(ctx, scan, ranges, graph.Target(), stdout, stderr, pollInterval)
 }
 
 // watchPorts owns the changing set of local listeners. The scan callback is
 // called immediately and then at interval until cancellation.
 func watchPorts(ctx context.Context, scan func(context.Context) ([]int, error), ranges PortRanges, target portDialer, stdout, stderr io.Writer, interval time.Duration) error {
+	return watchPortsWithView(ctx, scan, ranges, target, stdout, stderr, interval, nil)
+}
+
+func watchPortsWithView(ctx context.Context, scan func(context.Context) ([]int, error), ranges PortRanges, target portDialer, stdout, stderr io.Writer, interval time.Duration, update func([]portRow)) error {
 	active := make(map[int]*portForward)
 	lastFailure := make(map[int]string)
 	defer func() {
@@ -177,6 +193,14 @@ func watchPorts(ctx context.Context, scan func(context.Context) ([]int, error), 
 			active[port] = forward
 			delete(lastFailure, port)
 			fmt.Fprintf(stdout, "forwarding http://127.0.0.1:%d/ -> 127.0.0.1:%d\n", port, port)
+		}
+
+		if update != nil {
+			rows := make([]portRow, 0, len(listening))
+			for _, port := range sortedPorts(listening) {
+				rows = append(rows, portRow{port: port, failure: lastFailure[port]})
+			}
+			update(rows)
 		}
 
 		timer := time.NewTimer(interval)
