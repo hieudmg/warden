@@ -150,6 +150,14 @@ warden upgrade
 warden-server upgrade
 ```
 
+`port-watch` opens a full-screen view on an ANSI-capable terminal, showing the
+connection, watched ranges, and currently listening ports. Successful forwards
+have clickable local HTTP URLs; forwarding failures appear in red in the LOCAL
+URL column and are retried automatically. Use `j`/`k` to scroll, `g`/`G` for the
+top/end, and `q` or Ctrl-C to quit. URLs assume HTTP; use the forwarded port with
+the appropriate client for non-HTTP services. Redirected output keeps the
+plain-text forwarding/closure log without terminal escape sequences.
+
 ### Migrate data to another server
 
 The Warden Hub web view exports and imports every managed record: SSH and
