@@ -43,6 +43,26 @@ remediation remain separate; external DB/proxy behavior is unchanged. In-flight
 context-insensitive SSH dialing can still delay shutdown until T12; no all-states
 bounded-shutdown claim is made.
 
+## Legacy transfer and rollback (T5)
+
+Only [old-release v1 export → fresh init → manual import](migration.md) is
+supported; no in-place legacy encrypted-DB compatibility or automatic deletion.
+Export plaintext already contains the source values, so import needs only the
+destination's freshly unlocked DEK, never a source master key. All managed data
+is transactionally restored with original IDs/timestamps/references/notes/archive
+flags and destination row/field AEAD. A failed import preserves managed state and
+identity; a nonempty managed destination is refused. Initialized auth/session/
+client/audit rows do not block import and never travel in the bundle. Approved
+client verifiers remain bound to their existing destination generation.
+
+Retain the old executable/config/coherent DB+WAL/SHM/key for rollback; verify full
+data before cutover. Exports are plaintext offline secrets, and retained old
+snapshots/keys/wrappers remain decryptable after current credential or recovery
+rotation. Do not place exports in logs/shared/synced folders or infer disposal
+from a successful import. Tests use only synthetic data/disposable SQLite; this
+is not live-account, native Windows, browser PRF/CSP or release acceptance.
+Existing external DB/proxy transport risks are unchanged.
+
 ## Historical pre-0.23 server notes
 
 The server/master-key notes below describe the previous release, **not** the

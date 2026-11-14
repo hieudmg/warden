@@ -111,8 +111,10 @@ Never point init at an old, unknown, corrupt or initialized database. It refuses
 existing DB paths and sidecars without opening/migrating/chmodding them. Retain
 the old binary, config, DB plus coherent WAL/SHM backup and master key. With the
 old release, export the documented `warden-data` version 1; initialize **fresh
-storage** and use T5's later import/cutover workflow. Do not run a real migration
-for this checkpoint. Export version 1 and external transport behavior are unchanged.
+storage**, authenticate/unlock and follow the [manual import/verify/cutover and
+rollback runbook](migration.md). T5 proof uses synthetic disposable data only;
+no real migration is performed by this checkpoint. Export version 1 and external
+transport behavior are unchanged.
 
 Tests include real ECDSA-signed fixtures through the maintained verifier,
 setup HTTPS tests with a test-only ceremony seam, normal-runtime subprocess

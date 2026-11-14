@@ -23,7 +23,8 @@ import (
 )
 
 func printInitUsage(w io.Writer) {
-	fmt.Fprintln(w, "Usage: warden-server init [--config path]\n\nPrompts on the controlling terminal for fresh storage and HTTPS/RP/TLS or\nliteral-loopback proxy configuration. Creates only a temporary password-gated\nsetup plane, confirms passkey PRF and saved recovery, then exits. Existing\nstorage is never reset. T1 normal serve remains disabled until T2.")
+	fmt.Fprintln(w, "Usage: warden-server init [--config path]\n\nPrompts on the controlling terminal for fresh storage and HTTPS/RP/TLS or\nliteral-loopback proxy configuration. Creates only a temporary password-gated\nsetup plane, confirms passkey PRF and saved recovery, then exits. Existing\nstorage is never reset. Normal serve starts locked after initialization.")
+	fmt.Fprint(w, transferHelp)
 }
 func runInit(args []string, stdout, stderr io.Writer) int {
 	cmd := flag.NewFlagSet("init", flag.ContinueOnError)

@@ -20,6 +20,11 @@ Installer/service examples below describe the previous release. On this branch
 use [explicit HTTPS initialization](docs/initialization.md) and verified-HTTPS
 client enrollment; installer/release acceptance is still pending.
 
+For old data, follow [old-release export → fresh init → v1 import](docs/migration.md).
+Never reuse/delete the old encrypted database to make this branch start. Keep the
+old binary/config/coherent DB+WAL/SHM/key for rollback and manually verify imported
+data before cutover. Export files contain plaintext secrets.
+
 Installers download and SHA-256-verify assets from the latest GitHub release.
 They ask for configuration and can be rerun to update an existing installation.
 Client timeout, server database, and master key are preserved on update; client

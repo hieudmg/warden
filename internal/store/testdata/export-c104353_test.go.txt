@@ -1,0 +1,86 @@
+package store
+
+// Executed ONLY against source extracted from c104353 in a disposable module.
+// Direct SQL seeds the historical schema, not the importer or today's models.
+import (
+	"context"
+	"encoding/json"
+	"os"
+	"path/filepath"
+	"testing"
+	"time"
+	"warden/internal/crypto"
+)
+
+func TestSyntheticHistoricalExport(t *testing.T) {
+	ctx := context.Background()
+	s, err := Open(ctx, filepath.Join(t.TempDir(), "old.db"), [32]byte{0xa1, 2})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	const created = "2025-08-21T01:02:03.123456789Z"
+	const updated = "2026-11-02T04:05:06.987654321Z"
+	exec := func(query string, args ...any) {
+		t.Helper()
+		if _, e := s.db.ExecContext(ctx, query, args...); e != nil {
+			t.Fatal(e)
+		}
+	}
+	exec(`INSERT INTO groups VALUES (11,'production',?,?),(19,'staging',?,?)`, created, updated, created, updated)
+	exec(`INSERT INTO key_pairs(id,name,created_at,updated_at) VALUES (23,'deploy-key',?,?),(29,'empty-key',?,?)`, created, updated, created, updated)
+	exec(`INSERT INTO ssh_connections(id,name,host,port,username,jump_connection_ids,default_dir,group_id,key_pair_id,archived,created_at,updated_at)
+ VALUES (31,'password-host','ssh.invalid',2222,'deploy','[]','/srv/app',11,0,0,?,?),
+ (37,'key-host','key.invalid',22,'root','[31, 31]','/opt/app',19,23,1,?,?),
+ (41,'dangling-host','missing.invalid',22,'user','[31, 999, 31]','',999,999,0,?,?)`, created, updated, created, updated, created, updated)
+	exec(`UPDATE ssh_connections SET proxy_host='proxy.invalid',proxy_port=3128,proxy_username='proxy-user' WHERE id=31`)
+	exec(`INSERT INTO db_connections(id,name,host,port,username,database,ssh_connection_id,group_id,archived,created_at,updated_at)
+ VALUES (43,'multi-db','db.invalid',3306,'app','[{"name":"app","is_default":false},{"name":"analytics","is_default":true}]',31,19,1,?,?),
+ (47,'dangling-db','other.invalid',3307,'reader','[{"name":"archive","is_default":true}]',999,999,0,?,?)`, created, updated, created, updated)
+	exec(`INSERT INTO projects VALUES (53,'alpha'),(59,'empty-project')`)
+	exec(`INSERT INTO reports VALUES (61,53,'Synthetic report','## Synthetic summary
+
+No real secrets.','synthetic-model',?),(67,53,'Second report','Preserve relationships.','other-model',?)`, created, updated)
+	exec(`INSERT INTO connection_notes VALUES ('ssh',31,'primary SSH\nUnicode: 雪'),('ssh',37,''),('db',43,'database note'),('db',999,'orphan DB'),('ssh',999,''),('legacy',-7,'unknown type'),('',0,'empty type')`)
+	type secret struct {
+		Table      string `json:"table"`
+		ID         int64  `json:"id"`
+		Field      string `json:"field"`
+		AAD        string `json:"aad"`
+		Ciphertext []byte `json:"ciphertext"`
+	}
+	secrets := []secret{
+		{Table: "key_pairs", ID: 23, Field: "public_key", AAD: "warden/key-pair/23/public_key"},
+		{Table: "key_pairs", ID: 23, Field: "private_key", AAD: "warden/key-pair/23/private_key"},
+		{Table: "key_pairs", ID: 23, Field: "private_key_passphrase", AAD: "warden/key-pair/23/private_key_passphrase"},
+		{Table: "ssh_connections", ID: 31, Field: "password", AAD: "warden/ssh/31/password"},
+		{Table: "ssh_connections", ID: 31, Field: "proxy_password", AAD: "warden/ssh/31/proxy_password"},
+		{Table: "db_connections", ID: 43, Field: "password", AAD: "warden/db/43/password"},
+		{Table: "db_connections", ID: 47, Field: "password", AAD: "warden/db/47/password"},
+	}
+	plaintext := []string{"synthetic-public", "synthetic-private\nnot-a-real-key", "synthetic-passphrase", "synthetic-ssh-password", "synthetic-proxy-password", "synthetic-db-password", "synthetic-other-db-password"}
+	codec := crypto.Codec{Key: [32]byte{0xa1, 2}}
+	for i := range secrets {
+		x := &secrets[i]
+		x.Ciphertext, err = codec.Encrypt([]byte(plaintext[i]), []byte(x.AAD))
+		if err != nil {
+			t.Fatal(err)
+		}
+		exec("UPDATE "+x.Table+" SET "+x.Field+"=? WHERE id=?", x.Ciphertext, x.ID)
+	}
+	bundle, err := s.ExportData(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Only nondeterministic export metadata is frozen, never a managed timestamp.
+	bundle.ExportedAt = time.Date(2026, 11, 14, 12, 0, 0, 0, time.UTC)
+	for name, value := range map[string]any{"warden-data-v1-c104353.json": bundle, "ciphertexts-c104353.json": secrets} {
+		raw, e := json.MarshalIndent(value, "", "  ")
+		if e != nil {
+			t.Fatal(e)
+		}
+		if e = os.WriteFile(filepath.Join(os.Getenv("WARDEN_SYNTHETIC_OUTPUT"), name), append(raw, '\n'), 0600); e != nil {
+			t.Fatal(e)
+		}
+	}
+}

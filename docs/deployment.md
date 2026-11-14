@@ -4,6 +4,18 @@ Warden server is intended for a private tailnet. The release installer is the
 simplest path; the detailed traditional systemd deployment reference is
 [`deploy/systemd/README.md`](../deploy/systemd/README.md).
 
+## Breaking-storage cutover on the security-hardening branch
+
+The installer/service examples below describe the previous release; installer
+hardening remains T14. They are **not** an encrypted database migration. Follow
+[the manual v1 transfer and rollback runbook](migration.md): export with the old
+release, retain its binary/config/coherent DB+WAL/SHM/master key, initialize a
+separate fresh destination, authenticate/unlock/import and verify before
+operator-approved cutover. Never delete old storage, reuse its path or copy
+legacy encrypted tables into the destination. Normal startup refuses it without
+migration/WAL/chmod/key-loader fallback. No real deployment is exercised by the
+synthetic T5 tests, and no automatic restart/deletion/cleanup is added.
+
 ## Release installers
 
 Installers download and SHA-256-verify assets from the latest GitHub release.

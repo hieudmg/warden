@@ -170,6 +170,15 @@ func uiAssets(staticFS string) fs.FS {
 	return web.Distribution()
 }
 
+const transferHelp = `
+Legacy transfer (no in-place encrypted database upgrade):
+  Use the old release to export warden-data version 1 (plaintext secrets).
+  Initialize fresh storage; serve, authenticate and unlock, then import into
+  empty managed tables. Manually verify records and secrets before cutover.
+  Retain the old binary/config/DB/WAL/SHM/key together for rollback; never delete
+  or overwrite them to make startup work. See docs/migration.md.
+`
+
 func printUsage(w io.Writer) {
 	fmt.Fprint(w, `Usage:
   warden-server init [--config path]
@@ -185,6 +194,7 @@ Environment overrides:
   WARDEN_REPO
   WARDEN_RELEASE_BASE_URL
 `)
+	fmt.Fprint(w, transferHelp)
 }
 
 func printUpgradeUsage(w io.Writer) {
@@ -203,6 +213,7 @@ func printServeUsage(w io.Writer) {
 	fmt.Fprint(w, `Usage:
   warden-server serve [--config path]
 `)
+	fmt.Fprint(w, transferHelp)
 }
 
 func isHelp(value string) bool {
