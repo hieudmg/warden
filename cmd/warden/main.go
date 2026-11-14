@@ -1058,8 +1058,23 @@ func runAgent(args []string, stderr io.Writer) int {
 }
 
 func printCPUsage(w io.Writer) {
-	fmt.Fprint(w, `Usage:
+	fmt.Fprint(w, `Copy files or directories over SFTP, recursively for directories.
+
+Usage:
   warden cp <source> <destination>
+
+Operands are local paths or <connection>:<path>, using an exact configured SSH
+connection name. Supports upload, download, and remote-to-remote copies.
+Does not support local-to-local copies or remote endpoints on the same host
+and SSH port. Existing destination files may be overwritten.
+
+Examples:
+  warden cp ./release.tar prod:/srv/releases/
+  warden cp prod:/var/log/app.log ./app.log
+  warden cp staging:/srv/assets prod:/srv/assets
+
+Discover connection names with warden -n config search "production".
+Global flags such as --config must go before cp.
 `)
 }
 
@@ -1069,7 +1084,16 @@ func printPortWatchUsage(w io.Writer) {
 
 Polls remote TCP listeners in the requested ports/ranges and forwards matching
 ports to the same port on 127.0.0.1 until interrupted. The target is assumed
-to be Linux and must provide the remote ss utility.
+to be Linux and must provide the remote ss utility. Runs until Ctrl-C.
+
+The port list is comma-separated ports and inclusive ranges (1-65535).
+This is a long-running forwarding workflow, not a one-shot command.
+
+Example:
+  warden port-watch prod 3000,5000-5010
+
+Use an exact configured SSH connection name; discover names with config search.
+Global flags such as --config must go before port-watch.
 `)
 }
 
@@ -1093,68 +1117,190 @@ func loadClient(configPath string, configPathSet bool, lookupEnv func(string) (s
 }
 
 func printUsage(w io.Writer) {
-	fmt.Fprint(w, `Usage:
-  warden [-n|--non-interactive|-i|--interactive] [--config path] ssh <connection> <command>
-  warden [-n|--non-interactive|-i|--interactive] [--config path] db <connection> <sql>
-  warden [-n|--non-interactive|-i|--interactive] [--config path] xssh [connection]
-  warden [--config path] report create <project> --title <title> --summary <summary> --agent-model <name>
-  warden [-n|--non-interactive|-i|--interactive] [--config path] config search <query>
-  warden [-n|--non-interactive|-i|--interactive] [--config path] cp <source> <destination>
-  warden [--config path] port-watch <ssh-connection> <port-range-list>
-  warden upgrade
-  warden --help
+	fmt.Fprint(w, `Warden client: use configured SSH and database connections through Warden Hub.
 
-Output mode defaults to automatic TTY detection. Use -n/--non-interactive
-for machine-readable output or -i/--interactive for terminal output.
+Usage:
+  warden [global flags] <command> [arguments]
+  warden <command> --help
+
+Commands:
+  config search <query>       Discover SSH and database connection targets
+  ssh <connection> <command>  Run one remote command over SSH
+  db <connection> <sql>       Execute one MySQL/MariaDB statement
+  xssh [connection]           Open an interactive SSH shell (picker if omitted)
+  cp <source> <destination>   Copy files/directories over SFTP
+  report create <project> --title <title> --summary <summary> --agent-model <name>
+                             Create a project report
+  port-watch <ssh-connection> <port-range-list>
+                             Watch and forward remote TCP listeners until interrupted
+  upgrade                    Verify and install the latest released client binary
+
+Global flags (before the command):
+  --config <path>             Client config JSON path
+  -n, --non-interactive       Plain output for agents and scripts
+  -i, --interactive           Terminal-oriented output; cannot combine with -n
+  -h, --help                  Show help (also available after each command)
+
+Output mode defaults to automatic TTY detection. -n changes presentation, not
+permissions or SSH host-key verification; it does not make xssh headless.
+DB results use tab-separated text with a column header; config search uses
+SSH/DB headings and bullet lists. Neither format is JSON. SSH streams the remote
+command's output unchanged. See command help for details and examples.
+
+For agents and scripts:
+  1. Discover targets: warden -n config search "production"
+  2. Use the exact returned connection name or DB connection/database target;
+     do not guess hosts, credentials, or connection names.
+  3. Pass the entire remote command or SQL as one quoted argument:
+       warden -n ssh prod "uname -a"
+       warden -n db prod/app "SELECT 1"
+  Use ssh for one-shot commands; xssh needs a terminal, while port-watch runs
+  until interrupted.
+  Examples use placeholder connection/project names; replace them with yours.
+
+Configuration:
+  Default file: client.json in the OS user config directory under warden
+  (usually ~/.config/warden/client.json on Linux, %APPDATA%\warden\client.json
+  on Windows). A missing default file is optional; an explicit path must exist.
+  JSON fields: {"api_base_url":"http://127.0.0.1:8080","timeout":"30s"}
+  --config takes precedence over WARDEN_CLIENT_CONFIG for file selection.
+  Environment values override JSON fields; otherwise built-in defaults apply.
 
 Environment overrides:
-  WARDEN_CLIENT_CONFIG
-  WARDEN_CLIENT_API_BASE_URL
-  WARDEN_CLIENT_TIMEOUT
-  WARDEN_REPO
-  WARDEN_RELEASE_BASE_URL
+  WARDEN_CLIENT_CONFIG        Client config path (when --config is not supplied)
+  WARDEN_CLIENT_API_BASE_URL  Hub API URL (default http://127.0.0.1:8080)
+  WARDEN_CLIENT_TIMEOUT       Hub HTTP timeout as a duration (default 30s, e.g. 1m);
+                             not a remote command or SQL execution deadline
+  WARDEN_REPO                Upgrade release repository (owner/repo)
+  WARDEN_RELEASE_BASE_URL     Upgrade release base URL
+
+Exit status:
+  0 success (including help and config search with no matches)
+  1 operational/configuration failure; 2 invalid CLI usage
+  SSH commands can instead return the remote command's exit status.
+  Check the exit status and stderr, not just whether stdout is empty.
 `)
 }
 
 func printSSHUsage(w io.Writer) {
-	fmt.Fprint(w, `Usage:
+	fmt.Fprint(w, `Run one remote command over SSH using an exact configured SSH connection name.
+
+Usage:
   warden ssh <connection> <command>
+
+Pass the entire remote command as one quoted argument so your local shell does
+not split it or expand remote pipes/redirects. stdout and stderr stream from
+the remote command; success returns 0, otherwise the remote command's exit status
+is returned when available. Connection/setup errors return 1.
+SSH host-key verification still applies in non-interactive mode.
+
+Examples:
+  warden -n config search "production"
+  warden -n ssh prod "uname -a"
+  warden --config ./client.json -n ssh prod "df -h /"
+
+Global flags (-n, -i, --config) must go before ssh. Use xssh for a terminal shell.
 `)
 }
 
 func printDBUsage(w io.Writer) {
-	fmt.Fprint(w, `Usage:
+	fmt.Fprint(w, `Execute one SQL statement on a configured MySQL/MariaDB connection.
+
+Usage:
   warden db <connection> <sql>
+  warden db <connection>/<database> <sql>
+
+Use an exact configured DB connection name. A bare connection uses the profile's
+default database, including profiles with multiple databases. Specify
+<connection>/<database> to select another configured database.
+Pass the entire SQL statement as one quoted argument. Discover configured targets
+with config search; a host/database result is descriptive, not a connection name.
+
+Output:
+  -n: tab-separated text with a column header, not JSON. SQL NULL is printed as
+      NULL; cell control characters are replaced with spaces, so this is not a
+      lossless data export. Statements without a result set produce no output.
+  -i: formatted table, or Query OK for statements without a result set.
+  Without either flag, output mode follows stdout TTY detection.
+
+Examples:
+  warden -n config search "production"
+  warden -n db prod/app "SELECT 1"
+  warden -n db prod "SHOW TABLES"
+
+Global flags (-n, -i, --config) must go before db. SQL can modify data; -n only
+changes output formatting and does not make a query read-only.
 `)
 }
 
 func printXSSHUsage(w io.Writer) {
-	fmt.Fprint(w, `Usage:
+	fmt.Fprint(w, `Open an interactive SSH shell in a terminal.
+
+Usage:
   warden xssh [connection]
+
+With a connection, open that exact configured SSH profile directly. Without one,
+show a connection picker; after disconnecting, return to the picker (Esc exits).
+A terminal is required even with -n. Non-interactive output mode requires an
+explicit connection and does not turn the shell into a headless command runner.
+Unknown SSH host keys prompt for confirmation; existing verification is retained.
+Use ssh for one-shot commands from agents and scripts.
+
+Examples:
+  warden xssh prod
+  warden -i xssh
+
+Global flags (-n, -i, --config) must go before xssh.
 `)
 }
 
 func printReportUsage(w io.Writer) {
-	fmt.Fprint(w, `Usage:
-  warden report create <project> --title <title> --summary <summary> --agent-model <name>
-`)
+	printReportCreateUsage(w)
 }
 
 func printReportCreateUsage(w io.Writer) {
-	fmt.Fprint(w, `Usage:
+	fmt.Fprint(w, `Create a report for a project in Warden Hub.
+
+Usage:
   warden report create <project> --title <title> --summary <summary> --agent-model <name>
+
+The project and all three flags are required. Put the project before the flags.
+Quote titles and summaries containing spaces; --summary accepts Markdown text.
+Success prints a one-line confirmation with the report ID, project, and timestamp,
+not the report body.
+
+Example:
+  warden report create my-project --title "Check complete" --summary "Checks passed." --agent-model "my-model"
+
+Global flags such as --config must go before report.
 `)
 }
 
 func printConfigUsage(w io.Writer) {
-	fmt.Fprint(w, `Usage:
-  warden config search <query>
-`)
+	printConfigSearchUsage(w)
 }
 
 func printConfigSearchUsage(w io.Writer) {
-	fmt.Fprint(w, `Usage:
+	fmt.Fprint(w, `Discover configured SSH and database targets without exposing credentials.
+
+Usage:
   warden config search <query>
+
+Fuzzy-search active connection names, hosts, and database names. Pass a non-empty
+query as one quoted argument. Results include names, hosts, and optional notes,
+not credentials. Archived profiles are excluded.
+
+SSH results show the connection name to use with ssh, xssh, cp, or port-watch.
+DB results show connection/database targets to use with db; the accompanying
+host/database is descriptive, not a CLI connection target.
+-n prints SSH/DB headings and bullet lists, not JSON; -i uses a tree layout.
+No matches prints "No matching connections." and still exits successfully.
+
+Examples:
+  warden -n config search "production"
+  warden -n config search "app"
+
+Global flags (-n, -i, --config) must go before config.
 `)
 }
 
