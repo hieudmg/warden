@@ -8,7 +8,7 @@ type Credentials = Pick<CredentialsContainer,'create'|'get'>
 
 // Serialize only signed ceremony fields. Never call credential.toJSON(): it
 // includes client extension outputs, which may contain plaintext PRF material.
-function signedCredential(c: PublicKeyCredential,registration: boolean) {
+export function signedCredential(c: PublicKeyCredential,registration: boolean) {
  const common={id:encode(c.rawId),rawId:encode(c.rawId),type:'public-key',clientExtensionResults:{}}
  if(registration){const r=c.response as AuthenticatorAttestationResponse;return {...common,response:{clientDataJSON:encode(r.clientDataJSON),attestationObject:encode(r.attestationObject)}}}
  const r=c.response as AuthenticatorAssertionResponse

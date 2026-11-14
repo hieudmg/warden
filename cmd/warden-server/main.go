@@ -8,6 +8,10 @@ import (
 	"io"
 	"io/fs"
 	"os"
+	"os/signal"
+	"syscall"
+
+	runtimeplane "warden/internal/server/runtime"
 
 	"warden/internal/config"
 	"warden/internal/upgrade"
@@ -71,15 +75,17 @@ func runServe(args []string, stdout, stderr io.Writer, lookupEnv func(string) (s
 		return 1
 	}
 
-	// T1 is an intentionally incomplete milestone: never mount the old
-	// unauthenticated management plane, even for a newly initialized vault.
-	// Do not open SQLite, configure WAL, chmod, migrate, or load a disk key.
-	if _, err := os.Lstat(cfg.DBPath); errors.Is(err, os.ErrNotExist) {
-		fmt.Fprintln(stderr, "storage is uninitialized; run warden-server init")
-	} else {
-		fmt.Fprintln(stderr, "serve is disabled until authenticated locked runtime (T2). For legacy storage retain DB/WAL/SHM/config/master key, export with the old release, then use warden-server init with fresh storage; never reset existing storage.")
+	if cfg.Security == nil {
+		fmt.Fprintln(stderr, "storage requires explicit HTTPS security configuration and warden-server init; retain DB/WAL/SHM/config/master key, export legacy data with the old release and initialize fresh storage; never reset existing storage")
+		return 1
 	}
-	return 1
+	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer cancel()
+	if err := runtimeplane.Run(ctx, runtimeplane.Options{Config: *cfg.Security, Bind: cfg.ListenAddr, DBPath: cfg.DBPath, Assets: uiAssets(cfg.StaticFS)}); err != nil && !errors.Is(err, context.Canceled) {
+		fmt.Fprintf(stderr, "serve refused: %v; run warden-server init only with fresh storage; retain legacy DB/WAL/SHM/config/master key and export using the old release\n", err)
+		return 1
+	}
+	return 0
 }
 
 // runServerUpgrade replaces this executable with the latest released server

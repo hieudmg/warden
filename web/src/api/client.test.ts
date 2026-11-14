@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, test, vi } from "vitest"
 import { api, ApiError } from "./client"
+import { invalidateSecurity, setCSRF } from "../auth/session"
 import type { KeyPairRequest, SSHConnectionRequest } from "./types"
 
 afterEach(() => {
@@ -14,6 +15,22 @@ function jsonResponse(body: unknown, status = 200) {
 }
 
 describe("api client", () => {
+ test('auth/data fetches are no-store and same-origin with CSRF on mutations', async () => {
+  const fetcher=vi.fn().mockImplementation(async()=>jsonResponse([]));vi.stubGlobal('fetch',fetcher);setCSRF('memory-csrf')
+  await api.listSSH();await api.deleteSSH(1);await api.exportData()
+  for(const [,options] of fetcher.mock.calls){expect(options).toMatchObject({cache:'no-store',credentials:'same-origin'})}
+  expect(fetcher.mock.calls[1][1].headers.get('X-CSRF-Token')).toBe('memory-csrf')
+ })
+ test('late JSON and export Blob are rejected after global security reset', async()=>{
+  let resolve!:(r:Response)=>void;vi.stubGlobal('fetch',vi.fn(()=>new Promise(r=>{resolve=r})))
+  const pending=api.listSSH();invalidateSecurity();resolve(jsonResponse([{password:'synthetic secret'}]));await expect(pending).rejects.toMatchObject({name:'AbortError'})
+  const blob=api.exportData();invalidateSecurity();resolve(new Response('synthetic export'));await expect(blob).rejects.toMatchObject({name:'AbortError'})
+ })
+ test('late uploaded file read cannot start import after reset',async()=>{
+  const fetcher=vi.fn();vi.stubGlobal('fetch',fetcher);let resolve!:(s:string)=>void
+  const pending=api.importData({text:()=>new Promise<string>(r=>{resolve=r})} as File)
+  invalidateSecurity();resolve('{}');await expect(pending).rejects.toMatchObject({name:'AbortError'});expect(fetcher).not.toHaveBeenCalled()
+ })
   test.each([
     ["SSH", api.archiveSSH, "/api/v1/ssh-connections/12/archive"],
     ["DB", api.archiveDB, "/api/v1/db-connections/12/archive"],

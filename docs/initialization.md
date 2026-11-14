@@ -1,17 +1,22 @@
-# Explicit initialization (T1 checkpoint)
+# Explicit initialization and authenticated runtime (T1/T2 checkpoint)
 
-This checkpoint implements **setup only**, not authenticated management. Normal
-`warden-server serve` intentionally exits without opening SQLite or reading a
-master-key file, including after successful initialization. T2 and T3 are still
-needed for login, locked runtime, unlock, management, multiple passkeys and
-recovery replacement. This is not M1 or a release-ready security upgrade.
+Initialization remains a separate setup-only process. After it exits, normal
+`warden-server serve --config /your/fresh/private-directory/server.json` now
+starts the authenticated HTTPS runtime **locked**, without loading a disk key.
+Log in with the registered passkey, then use a new required-UV assertion and PRF
+unwrap to unlock management. Logout revokes only that browser session; Lock vault
+cancels/drains global key access. Key reveal/mutation, transport extraction and
+export/import are fail-closed until fresh sensitive-action support is delivered.
+Multiple passkeys and recovery replacement remain T3 work. See the
+[T2 implementation/evidence report](superpowers/reports/2026-11-14-t2-authenticated-runtime.md).
+This is not M1 or a release-ready security upgrade.
 
 ## Build and run against fresh disposable storage
 
 ```sh
 npm --prefix web run build
-go build -o /tmp/warden-server-t1 ./cmd/warden-server
-/tmp/warden-server-t1 init --config /your/fresh/private-directory/server.json
+go build -o /tmp/warden-server-t2 ./cmd/warden-server
+/tmp/warden-server-t2 init --config /your/fresh/private-directory/server.json
 ```
 
 Run from an interactive controlling terminal. Without `--config`, init also
@@ -78,8 +83,9 @@ CLI, profile, report, transport, export/import and normal UI routes are absent.
 5. Finalization atomically publishes the complete identity and wrappers, closes
    the temporary listener and exits. Persisted state has no raw DEK, PRF output,
    recovery key, or recovery-auth subkey. Any restart remains locked; there is no
-   persisted unlock token or master-key fallback. At T1, normal serve still fails
-   closed rather than exposing the old unauthenticated management plane.
+   persisted unlock token or master-key fallback. Start normal serve explicitly
+   with the same configuration; it offers login/status while locked, never the
+   old unauthenticated management plane.
 
 Unsupported PRF, failed/canceled ceremonies, bad saved recovery proof, expiry,
 process interruption or commit failure cannot create a partially initialized
@@ -89,7 +95,7 @@ the reservation on process exit; the lock file is deliberately not unlinked.
 A crash can also leave a private `.warden-init-*.db` staging file. Init never loads
 it as a fallback or deletes old artifacts automatically. After publication, rerun
 init refuses the installation. A failed HTTP response around commit is ambiguous:
-do not reset storage; retain it and inspect with the later authenticated runtime.
+do not reset storage; retain it and inspect with the authenticated runtime.
 
 ## Existing storage and limitations
 
@@ -100,9 +106,9 @@ old release, export the documented `warden-data` version 1; initialize **fresh
 storage** and use T5's later import/cutover workflow. Do not run a real migration
 for this checkpoint. Export version 1 and external transport behavior are unchanged.
 
-Tests include real ECDSA-signed fixtures through the maintained verifier, a
-production-runtime disposable HTTPS test with a test-only ceremony seam, and
-actual WebCrypto/shared envelope vectors. **A genuine PRF-capable authenticator's
+Tests include real ECDSA-signed fixtures through the maintained verifier,
+setup HTTPS tests with a test-only ceremony seam, normal-runtime subprocess
+TLS/proxy restart tests using the real verifier, and WebCrypto/shared vectors. **A genuine PRF-capable authenticator's
 positive HTTPS/browser ceremony remains external acceptance pending.** Mocks and
 vectors do not prove provider/browser/authenticator PRF behavior. Native Windows
 execution and full browser CSP enforcement are also not established by Linux
