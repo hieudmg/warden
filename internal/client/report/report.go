@@ -26,7 +26,7 @@ func New(cl *api.Client) *Client {
 // ListProjects returns all projects ordered by name.
 func (c *Client) ListProjects(ctx context.Context) ([]model.Project, error) {
 	var out []model.Project
-	err := c.api.GetJSON(ctx, "/api/v1/projects", &out)
+	err := c.api.GetJSON(ctx, "/api/v1/client/projects", &out)
 	return out, err
 }
 
@@ -34,7 +34,7 @@ func (c *Client) ListProjects(ctx context.Context) ([]model.Project, error) {
 // stable identifier for a given name (idempotent).
 func (c *Client) CreateProject(ctx context.Context, name string) (model.Project, error) {
 	var out model.Project
-	err := c.api.PostJSON(ctx, "/api/v1/projects", model.ProjectRequest{Name: name}, &out)
+	err := c.api.PostJSON(ctx, "/api/v1/client/projects", model.ProjectRequest{Name: name}, &out)
 	return out, err
 }
 
@@ -42,13 +42,13 @@ func (c *Client) CreateProject(ctx context.Context, name string) (model.Project,
 // the server.
 func (c *Client) CreateReport(ctx context.Context, req model.ReportRequest) (model.Report, error) {
 	var out model.Report
-	err := c.api.PostJSON(ctx, "/api/v1/reports", req, &out)
+	err := c.api.PostJSON(ctx, "/api/v1/client/reports", req, &out)
 	return out, err
 }
 
 // ListReports returns report entries for a project in chronological order.
 func (c *Client) ListReports(ctx context.Context, project string) ([]model.Report, error) {
 	var out []model.Report
-	err := c.api.GetJSON(ctx, "/api/v1/projects/"+url.PathEscape(project)+"/reports", &out)
+	err := c.api.GetJSON(ctx, "/api/v1/client/projects/"+url.PathEscape(project)+"/reports", &out)
 	return out, err
 }

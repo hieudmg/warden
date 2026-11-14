@@ -110,6 +110,13 @@ func TestRecoveryCannotReadManagementDataAndReplacementRemovesAllOldPasskeys(t *
 	p, _, original, key, signer := runtimeFixture(t)
 	owner, ownerCSRF := sessionFor(t, p)
 	p.vault.Unlock(key, p.vault.Generation())
+	clientSecret, _, _ := pairedFixture(t, p, func(id, commitment string) {
+		body := `{"id":"` + id + `","commitment":"` + commitment + `"}`
+		g := requestGrant(t, p, signer, owner, ownerCSRF, "client_approve", "POST", "/api/v1/auth/clients/approve", body)
+		if w := callGranted(p, "POST", "/api/v1/auth/clients/approve", body, owner, ownerCSRF, g); w.Code != 200 {
+			t.Fatal(w.Code, w.Body)
+		}
+	}, 90)
 	additional, additionalID, additionalSigner := prepareEnrollmentSigned(t, p, owner, ownerCSRF, signer, false)
 	commitEnrollment(t, p, owner, ownerCSRF, additional, additionalID, key, signer, false)
 	additionalBrowser, additionalCSRF := loginSigner(t, p, additionalSigner, additionalID)
@@ -119,6 +126,9 @@ func TestRecoveryCannotReadManagementDataAndReplacementRemovesAllOldPasskeys(t *
 	recovery, csrf, g := startRecovery(t, p, proof)
 	if w := call(p, "POST", "/api/v1/auth/recovery/unlock", map[string]string{"grant": g, "dek": crypto.Encode(key)}, recovery, csrf); w.Code != 200 {
 		t.Fatal(w.Code, w.Body)
+	}
+	if w := clientCall(p, "GET", "/api/v1/client/ssh-connections", "", clientSecret); w.Code != 423 {
+		t.Fatal("valid API credential entered restricted recovery", w.Code)
 	}
 	for _, route := range []string{"/api/v1/ssh-connections", "/api/v1/key-pairs", "/api/v1/data/export", "/api/v1/auth/passkeys/list", "/api/v1/auth/fresh/begin"} {
 		if w := call(p, "GET", route, nil, recovery, csrf); w.Code == 200 {
@@ -154,6 +164,9 @@ func TestRecoveryCannotReadManagementDataAndReplacementRemovesAllOldPasskeys(t *
 	i, err := p.current(context.Background())
 	if err != nil || len(i.Passkeys) != 1 || i.Passkeys[0].CredentialID == original.Passkey.CredentialID || i.AuthorizationGeneration != 1 {
 		t.Fatal("old identity retained", err)
+	}
+	if w := clientCall(p, "GET", "/api/v1/client/status", "", clientSecret); w.Code != 401 {
+		t.Fatal("actual recovery replacement retained client authorization", w.Code)
 	}
 	if i.KeyCheck != original.KeyCheck || i.Recovery != oldRecovery {
 		t.Fatal("DEK/recovery changed")

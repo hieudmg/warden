@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, useSyncExternalStore } from 'react'
 import { authClient, type AuthClient } from './auth'
+import { DevicesView } from './devices-view'
 
 export function SecurityView({ client = authClient }: { client?: AuthClient }) {
  const state = useSyncExternalStore(client.subscribe, client.getSnapshot)
@@ -26,6 +27,7 @@ export function SecurityView({ client = authClient }: { client?: AuthClient }) {
  const cancel = () => { generation.current++; client.cancel(); setSaved(''); setConfirm(false); setReentry(''); setBusy(false); setError('') }
  return <section aria-label="Passkeys and recovery" className="p-4 border-b space-y-3">
   <h2>Passkeys and recovery</h2>
+  <DevicesView client={client} />
   <p>Recovery replaces ALL old passkeys only after the new PRF passkey is verified. Old credentials remain intact on failure. Old backups and already retrieved secrets cannot be revoked.</p>
   {state.recovering ? <>
    <p>Restricted recovery: no management, read or export access. Register a new PRF-capable passkey to replace all previous passkeys, revoke sessions and client authorizations, and return to ordinary login.</p>

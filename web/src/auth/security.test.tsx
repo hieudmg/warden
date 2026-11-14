@@ -19,6 +19,7 @@ async function harness(){
   let data:unknown={}
   if(route.endsWith('/status'))data={authenticated:true,unlocked:true,csrf:'csrf',credential_id:'Bw'}
   else if(route.endsWith('/passkeys/list'))data={credentials:['Bw']}
+  else if(route.endsWith('/clients/list'))data={pending:[{id:'device-id',label:'fixture device',fingerprint:'public-fingerprint',status:'pending',expires:'2099-01-01T00:00:00Z'}],clients:[]}
   else if(route.endsWith('/recovery/begin'))data={id:'nonce',kdf_salt:recovery.kdf_salt}
   else if(route.endsWith('/recovery/proof'))data={csrf:'recovery-csrf',grant:'recovery-grant',wrapper:recovery}
   else if(route.endsWith('/begin'))data={id:'pending',options,credential_id:'Bw',prf_input:input}
@@ -30,6 +31,27 @@ async function harness(){
  const credentials={create:vi.fn(async()=>credential(undefined,9)),get:vi.fn(async()=>credential(new Uint8Array(prf),9))}
  return {client:new AuthClient(fetcher,credentials),fetcher,credentials,sent,root,recovery,dek,prf}
 }
+test('device approval UI compares fingerprint and requires a fresh exact request grant',async()=>{
+ const h=await harness();await h.client.status();render(<SecurityView client={h.client}/>)
+ expect(await screen.findByText('fixture device')).toBeInTheDocument()
+ expect(screen.getByText('public-fingerprint')).toBeInTheDocument()
+ fireEvent.click(screen.getByRole('button',{name:'Approve fixture device'}))
+ await vi.waitFor(()=>expect(h.sent.some(x=>x.path.endsWith('/clients/approve'))).toBe(true))
+ const sent=h.sent.find(x=>x.path.endsWith('/clients/approve'))!
+ expect(sent.body).toEqual({id:'device-id',commitment:'public-fingerprint'})
+ expect(sent.headers['X-Warden-Action']).toBe('bound-grant')
+ expect(h.sent.find(x=>x.path.endsWith('/fresh/begin'))?.body).toMatchObject({action:'client_approve',method:'POST',path:'/api/v1/auth/clients/approve'})
+})
+test('device status errors clear on repeated security epochs without stale UI restoration',async()=>{
+ const h=await harness();await h.client.status();render(<SecurityView client={h.client}/>)
+ await screen.findByText('fixture device')
+ fireEvent.click(screen.getByRole('button',{name:'Cancel security operation'}))
+ h.fetcher.mockRejectedValue(new Error('synthetic device status failure'))
+ fireEvent.click(screen.getByRole('button',{name:'Refresh devices'}))
+ expect(await screen.findByText('synthetic device status failure')).toBeInTheDocument()
+ fireEvent.click(screen.getByRole('button',{name:'Cancel security operation'}))
+ expect(screen.queryByText('synthetic device status failure')).not.toBeInTheDocument()
+})
 test('fresh grant binds exact method path and SHA256 bytes and never sends PRF extension results',async()=>{
  const h=await harness();await h.client.status();const body='{"private_key":"synthetic"}'
  const grant=await h.client.grantFor('PUT','/api/v1/key-pairs/3',body)

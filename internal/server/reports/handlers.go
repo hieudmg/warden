@@ -44,6 +44,14 @@ func (h *Handler) Register(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/v1/projects/{name}/reports", h.listReports)
 }
 
+// RegisterClient mounts only existing CLI project/report capabilities.
+func (h *Handler) RegisterClient(mux *http.ServeMux) {
+	mux.HandleFunc("POST /api/v1/client/projects", h.createProject)
+	mux.HandleFunc("GET /api/v1/client/projects", h.listProjects)
+	mux.HandleFunc("POST /api/v1/client/reports", h.createReport)
+	mux.HandleFunc("GET /api/v1/client/projects/{name}/reports", h.listReports)
+}
+
 // record writes an audit event and surfaces recorder failures as a server
 // warning so audit loss is never silent. It never includes report contents
 // (title/summary) in metadata.

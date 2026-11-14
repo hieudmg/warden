@@ -8,6 +8,8 @@ export function sensitiveAction(method: string, path: string): string | undefine
   if (method === 'PUT' || method === 'DELETE') return 'key_mutation'
  }
  if (method === 'POST') {
+  if (path === '/api/v1/auth/clients/approve') return 'client_approve'
+  if (path === '/api/v1/auth/clients/revoke') return 'client_revoke'
   if (path === '/api/v1/auth/passkeys/begin' || path === '/api/v1/auth/passkeys/key') return 'passkey_add'
   if (path === '/api/v1/auth/passkeys/remove') return 'passkey_remove'
   if (path === '/api/v1/auth/recovery/rotation/key') return 'recovery_rotate'

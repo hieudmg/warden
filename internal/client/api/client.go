@@ -18,6 +18,8 @@ import (
 	"strings"
 	"time"
 
+	"warden/internal/client/agent"
+	"warden/internal/client/clienthttp"
 	"warden/internal/model"
 )
 
@@ -50,28 +52,39 @@ func (e *APIError) Error() string {
 type Client struct {
 	baseURL string
 	http    *http.Client
+	invalid error
 }
 
 // New returns a client rooted at baseURL. A nil http client gets a default
-// 30s timeout.
+// 30s timeout. Injected network clients must use a standard *http.Transport
+// (or the default); arbitrary RoundTrippers cannot establish verified HTTPS.
+// Use NewAgent for the owned local IPC transport.
 func New(baseURL string, hc *http.Client) *Client {
-	if hc == nil {
-		hc = &http.Client{Timeout: 30 * time.Second}
-	}
-	return &Client{baseURL: strings.TrimRight(baseURL, "/"), http: hc}
+	origin, err := clienthttp.Origin(baseURL)
+	return &Client{baseURL: origin, http: clienthttp.Client(hc, 30*time.Second), invalid: err}
+}
+
+// NewAgent routes every request through the same per-user agent; this CLI
+// process never receives the API credential. CA is an optional public PEM path.
+func NewAgent(origin, ca string, timeout time.Duration) *Client {
+	client := New(origin, &http.Client{Timeout: timeout})
+	// This owned IPC transport enforces origin/capability policy in the agent;
+	// general network injection accepts only guarded standard HTTP transports.
+	client.http.Transport = agent.Transport{Origin: origin, CA: ca, Timeout: timeout}
+	return client
 }
 
 // ListSSH returns redacted SSH connection metadata.
 func (c *Client) ListSSH(ctx context.Context) ([]model.SSHConnection, error) {
 	var out []model.SSHConnection
-	err := c.getJSON(ctx, "/api/v1/ssh-connections", &out)
+	err := c.getJSON(ctx, "/api/v1/client/ssh-connections", &out)
 	return out, err
 }
 
 // GetSSH returns one redacted SSH connection.
 func (c *Client) GetSSH(ctx context.Context, id int64) (model.SSHConnection, error) {
 	var out model.SSHConnection
-	err := c.getJSON(ctx, "/api/v1/ssh-connections/"+strconv.FormatInt(id, 10), &out)
+	err := c.getJSON(ctx, "/api/v1/client/ssh-connections/"+strconv.FormatInt(id, 10), &out)
 	return out, err
 }
 
@@ -80,21 +93,21 @@ func (c *Client) GetSSH(ctx context.Context, id int64) (model.SSHConnection, err
 // execution only.
 func (c *Client) GetSSHBundle(ctx context.Context, id int64) (model.SSHBundle, error) {
 	var out model.SSHBundle
-	err := c.getJSON(ctx, "/api/v1/transport/ssh/"+strconv.FormatInt(id, 10), &out)
+	err := c.getJSON(ctx, "/api/v1/client/transport/ssh/"+strconv.FormatInt(id, 10), &out)
 	return out, err
 }
 
 // ListDB returns redacted DB connection metadata.
 func (c *Client) ListDB(ctx context.Context) ([]model.DBConnection, error) {
 	var out []model.DBConnection
-	err := c.getJSON(ctx, "/api/v1/db-connections", &out)
+	err := c.getJSON(ctx, "/api/v1/client/db-connections", &out)
 	return out, err
 }
 
 // GetDB returns one redacted DB connection.
 func (c *Client) GetDB(ctx context.Context, id int64) (model.DBConnection, error) {
 	var out model.DBConnection
-	err := c.getJSON(ctx, "/api/v1/db-connections/"+strconv.FormatInt(id, 10), &out)
+	err := c.getJSON(ctx, "/api/v1/client/db-connections/"+strconv.FormatInt(id, 10), &out)
 	return out, err
 }
 
@@ -102,7 +115,7 @@ func (c *Client) GetDB(ctx context.Context, id int64) (model.DBConnection, error
 // database selector chooses a named database; when omitted, the server uses
 // the profile's default.
 func (c *Client) GetDBBundle(ctx context.Context, id int64, databaseName ...string) (model.DBBundle, error) {
-	path := "/api/v1/transport/db/" + strconv.FormatInt(id, 10)
+	path := "/api/v1/client/transport/db/" + strconv.FormatInt(id, 10)
 	if len(databaseName) > 0 && databaseName[0] != "" {
 		path += "?" + url.Values{"database": {databaseName[0]}}.Encode()
 	}
@@ -114,7 +127,7 @@ func (c *Client) GetDBBundle(ctx context.Context, id int64, databaseName ...stri
 // SSHDependents returns profiles referencing an SSH connection id.
 func (c *Client) SSHDependents(ctx context.Context, id int64) (model.DependentsResponse, error) {
 	var out model.DependentsResponse
-	err := c.getJSON(ctx, "/api/v1/ssh-connections/"+strconv.FormatInt(id, 10)+"/dependents", &out)
+	err := c.getJSON(ctx, "/api/v1/client/ssh-connections/"+strconv.FormatInt(id, 10)+"/dependents", &out)
 	return out, err
 }
 
@@ -122,7 +135,7 @@ func (c *Client) SSHDependents(ctx context.Context, id int64) (model.DependentsR
 // empty in the current schema; kept for API surface parity).
 func (c *Client) DBDependents(ctx context.Context, id int64) (model.DependentsResponse, error) {
 	var out model.DependentsResponse
-	err := c.getJSON(ctx, "/api/v1/db-connections/"+strconv.FormatInt(id, 10)+"/dependents", &out)
+	err := c.getJSON(ctx, "/api/v1/client/db-connections/"+strconv.FormatInt(id, 10)+"/dependents", &out)
 	return out, err
 }
 
@@ -131,7 +144,7 @@ func (c *Client) SetSSHArchived(ctx context.Context, id int64, archived bool) er
 	var out struct {
 		Archived bool `json:"archived"`
 	}
-	return c.requestJSON(ctx, http.MethodPut, "/api/v1/ssh-connections/"+strconv.FormatInt(id, 10)+"/archive", map[string]bool{"archived": archived}, &out, http.StatusOK)
+	return c.requestJSON(ctx, http.MethodPut, "/api/v1/client/ssh-connections/"+strconv.FormatInt(id, 10)+"/archive", map[string]bool{"archived": archived}, &out, http.StatusOK)
 }
 
 // SetDBArchived sets or clears the archive state for a DB profile.
@@ -139,7 +152,7 @@ func (c *Client) SetDBArchived(ctx context.Context, id int64, archived bool) err
 	var out struct {
 		Archived bool `json:"archived"`
 	}
-	return c.requestJSON(ctx, http.MethodPut, "/api/v1/db-connections/"+strconv.FormatInt(id, 10)+"/archive", map[string]bool{"archived": archived}, &out, http.StatusOK)
+	return c.requestJSON(ctx, http.MethodPut, "/api/v1/client/db-connections/"+strconv.FormatInt(id, 10)+"/archive", map[string]bool{"archived": archived}, &out, http.StatusOK)
 }
 
 // GetJSON performs a GET and strictly decodes a successful JSON response.
@@ -167,6 +180,12 @@ func (c *Client) PostJSON(ctx context.Context, path string, body any, dst any) e
 // dst. Accepting several success statuses is required by endpoints that
 // create resources (201) and those that idempotently retrieve (200).
 func (c *Client) requestJSON(ctx context.Context, method, path string, body any, dst any, successCodes ...int) error {
+	if c.invalid != nil {
+		return c.invalid
+	}
+	if !clienthttp.Allowed(method, path) {
+		return errors.New("API capability not permitted")
+	}
 	var reader io.Reader
 	if body != nil {
 		payload, err := json.Marshal(body)

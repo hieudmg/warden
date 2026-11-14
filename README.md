@@ -8,11 +8,17 @@ run development operations through them, and records agent change reports.
 > as experimental software, review its behavior, and do not assume it is
 > production-hardened.
 
-Warden is designed for a private tailnet. The server has no application
-authentication; anyone who can reach it can manage profiles and retrieve
-transport credentials. Read [Security](docs/security.md) before exposing it.
+Warden is designed for a private tailnet. The previous release had no
+application authentication; this security-hardening branch instead requires
+passkey-authenticated management and individually web-approved CLI credentials.
+It is not yet an accepted security release. Read [Security](docs/security.md)
+before exposing it.
 
 ## Install
+
+Installer/service examples below describe the previous release. On this branch
+use [explicit HTTPS initialization](docs/initialization.md) and verified-HTTPS
+client enrollment; installer/release acceptance is still pending.
 
 Installers download and SHA-256-verify assets from the latest GitHub release.
 They ask for configuration and can be rerun to update an existing installation.
@@ -90,16 +96,27 @@ user-scope and system-scope systemd restart commands, which are also listed in
 
 ## Configuration
 
-Client only needs server endpoint:
+On the security-hardening branch the client requires a verified HTTPS origin:
 
 ```json
 {
-  "api_base_url": "http://127.0.0.1:8080",
+  "api_base_url": "https://warden.example",
   "timeout": "30s"
 }
 ```
 
-Server installer creates:
+Run `warden login`, compare its fingerprint in the web **CLI devices** view,
+and approve with a fresh passkey assertion. The existing agent owns the API
+credential only in memory; restart requires reapproval, while server restart
+preserves authorization and starts locked. Use `warden logout` for attempted
+revocation and unconditional local clearing. Private CA trust is configurable;
+see [configuration](docs/configuration.md) and [CLI enrollment](docs/cli.md).
+Native Windows and genuine PRF/browser acceptance remain pending; this is not a
+completed security release.
+
+The following installer layout describes the previous release (installer work
+remains separately scoped); current server initialization is documented in
+[initialization](docs/initialization.md). Server installer previously created:
 
 ```text
 ~/.warden/

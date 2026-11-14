@@ -6,7 +6,6 @@ import (
 	"flag"
 	"fmt"
 	"io"
-	"net/http"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -94,6 +93,8 @@ func run(args []string, stdout, stderr io.Writer, lookupEnv func(string) (string
 	}
 
 	switch rest[0] {
+	case "login", "logout", "status":
+		return runAuthorization(rest, *configPath, configPathSet, stdout, stderr, lookupEnv, mode)
 	case "agent":
 		return runAgent(rest[1:], stderr)
 	case "ssh":
@@ -135,7 +136,7 @@ func runSSH(args []string, configPath string, configPathSet bool, stdout, stderr
 		return 1
 	}
 
-	cl := api.New(cfg.APIBaseURL, &http.Client{Timeout: cfg.Timeout})
+	cl := newAPIClient(cfg)
 	ctx := context.Background()
 
 	conns, err := cl.ListSSH(ctx)
@@ -212,7 +213,7 @@ func runDB(args []string, configPath string, configPathSet bool, stdout, stderr 
 		return 1
 	}
 
-	cl := api.New(cfg.APIBaseURL, &http.Client{Timeout: cfg.Timeout})
+	cl := newAPIClient(cfg)
 	// context.Background() is deliberate and mirrors runSSH: both CLI
 	// commands are one-shot processes, the default SIGINT behavior
 	// terminates them, and API calls are bounded by cfg.Timeout. A hung
@@ -289,7 +290,7 @@ func runXSSH(args []string, configPath string, configPathSet bool, stdout, stder
 		return 1
 	}
 
-	cl := api.New(cfg.APIBaseURL, &http.Client{Timeout: cfg.Timeout})
+	cl := newAPIClient(cfg)
 	ctx := context.Background()
 
 	conns, err := cl.ListSSH(ctx)
@@ -420,7 +421,7 @@ func runReportCreate(args []string, configPath string, configPathSet bool, stdou
 		return 1
 	}
 
-	cl := api.New(cfg.APIBaseURL, &http.Client{Timeout: cfg.Timeout})
+	cl := newAPIClient(cfg)
 	reportClient := clientreport.New(cl)
 	ctx := context.Background()
 
@@ -466,7 +467,7 @@ func runConfig(args []string, configPath string, configPathSet bool, stdout, std
 		return 1
 	}
 
-	cl := api.New(cfg.APIBaseURL, &http.Client{Timeout: cfg.Timeout})
+	cl := newAPIClient(cfg)
 	ctx := context.Background()
 	sshConns, err := cl.ListSSH(ctx)
 	if err != nil {
@@ -857,7 +858,7 @@ func runCP(args []string, configPath string, configPathSet bool, stdout, stderr 
 		return 1
 	}
 
-	cl := api.New(cfg.APIBaseURL, &http.Client{Timeout: cfg.Timeout})
+	cl := newAPIClient(cfg)
 	ctx := context.Background()
 
 	conns, err := cl.ListSSH(ctx)
@@ -954,7 +955,7 @@ func runPortWatchCommand(args []string, configPath string, configPathSet bool, s
 		fmt.Fprintf(stderr, "invalid client config: %v\n", err)
 		return 1
 	}
-	cl := api.New(cfg.APIBaseURL, &http.Client{Timeout: cfg.Timeout})
+	cl := newAPIClient(cfg)
 	ctx := context.Background()
 	connections, err := cl.ListSSH(ctx)
 	if err != nil {
@@ -1127,6 +1128,9 @@ Usage:
   warden <command> --help
 
 Commands:
+  login                      Fresh web approval (warden login; -n never waits for a human)
+  logout                     Attempt revocation and clear memory-only agent authorization
+  status                     Check authorization without unlocking the server
   config search <query>       Discover SSH and database connection targets
   ssh <connection> <command>  Run one remote command over SSH
   db <connection> <sql>       Execute one MySQL/MariaDB statement
@@ -1165,13 +1169,22 @@ Configuration:
   Default file: client.json in the OS user config directory under warden
   (usually ~/.config/warden/client.json on Linux, %APPDATA%\warden\client.json
   on Windows). A missing default file is optional; an explicit path must exist.
-  JSON fields: {"api_base_url":"http://127.0.0.1:8080","timeout":"30s"}
+  JSON fields: {"api_base_url":"https://warden.example","timeout":"30s"}
+  Optional ca_certificate is a public PEM path for private-CA certificate trust.
+  HTTPS with certificate/hostname verification is mandatory, including loopback.
+  First use prints a configured-origin URL and fingerprint for fresh web approval.
+  API and polling secrets stay memory-only in the same per-user agent, never in
+  this config, IPC discovery, CLI output, argv or environment. Agent restart needs
+  reapproval; server restart preserves authorization but starts the vault locked.
+  Logout/revocation/outage/lock never terminates the daemon. Remote credentials
+  already retrieved cannot be recalled. Stolen API credentials remain usable until
+  revocation or recovery invalidation; there is no expiry, rotation or refresh.
   --config takes precedence over WARDEN_CLIENT_CONFIG for file selection.
   Environment values override JSON fields; otherwise built-in defaults apply.
 
 Environment overrides:
   WARDEN_CLIENT_CONFIG        Client config path (when --config is not supplied)
-  WARDEN_CLIENT_API_BASE_URL  Hub API URL (default http://127.0.0.1:8080)
+  WARDEN_CLIENT_API_BASE_URL  Hub HTTPS origin (default https://127.0.0.1:8080)
   WARDEN_CLIENT_TIMEOUT       Hub HTTP timeout as a duration (default 30s, e.g. 1m);
                              not a remote command or SQL execution deadline
   WARDEN_REPO                Upgrade release repository (owner/repo)

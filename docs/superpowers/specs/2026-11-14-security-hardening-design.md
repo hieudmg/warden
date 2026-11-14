@@ -6,12 +6,18 @@ Approved direction, documented on 2026-11-14 against `c104353` (`origin/main` an
 
 The owner approves a breaking `0.22.1 -> 0.23.0` release, mandatory passkey-authenticated management, PRF-wrapped vault keys, explicit initialization, individually revocable CLI credentials, and the in-scope audit remediation below. The owner's clarification, “tls encryption is warden internal only, it should not require tls on external db connection”, supersedes the proposed external DB/CONNECT-proxy TLS mandate and plaintext-exception decision. Mandatory HTTPS for Warden setup/web/client APIs and distribution, and protected local IPC, remain in scope; existing external DB and HTTP CONNECT proxy transport behavior is preserved. Recheck the latest base version before publishing; synchronize all three version fields specified in `AGENTS.md`. Initial preparation of this specification did not bump versions, change dependencies/application code, migrate real data, commit, publish, or deploy. The original T1 execution was initialization-only. Subsequent bounded T2 is reviewed at `99bcbeb`, and the owner has now authorized resumed T3 with the atomic recovery-replacement clarification below; no T4/later implementation or release publication is authorized by this checkpoint. Preserve the protected untracked `mise.toml` without reading it.
 
-Current bounded authorization at reviewed T1–T3 `77203cc`: the owner resequences
-T10 local-agent TLS/native IPC protection BEFORE T4 credential transport, including
-permanent-until-external-termination daemon lifetime now (independent ten-minute
-SSH graph eviction). This does not authorize T4 API credentials/pairing, T11/T12
-or release/deployment. Measured T10 evidence and native Windows requirements are
-tracked in the [T10 report](../reports/2026-11-14-t10-agent-ipc.md).
+Current bounded authorization at reviewed T10 plus corrections `852eed9`: the
+owner authorizes **T4** after the resequenced T10 prerequisite. T4 reuses the same
+TLS-authenticated IPC daemon for memory-only credential ownership/API requests,
+HTTPS commitment pairing and fresh exact-request web approval/revocation, with
+an explicit client capability allowlist and durable generation-bound verifiers.
+T10's permanent-until-external-termination lifetime and independent ten-minute
+SSH graph eviction remain binding. No T5/later outcome, dependency/version change,
+publication or deployment is authorized. Measured evidence is tracked in the
+[T4 report](../reports/2026-11-14-t4-client-enrollment.md); the
+[T10 report](../reports/2026-11-14-t10-agent-ipc.md) remains the IPC prerequisite
+record. Native Windows, genuine PRF-positive/browser and CSP evidence are still
+separate pending acceptance requirements, not inferred from these checkpoints.
 
 Standards, not vendors, define support: WebAuthn PRF, ECMAScript and standardized Web APIs, and HTTPS. Software passkeys are acceptable. There is one personal owner with multiple registered passkeys, not a multi-user/role framework. No browser/provider/OS compatibility research gate, vendor sniffing, Tailscale requirement, plaintext persisted-key fallback, OAuth claim, legacy encrypted-storage compatibility, or automatic data deletion.
 

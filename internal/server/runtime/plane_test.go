@@ -98,7 +98,7 @@ func sessionFor(t *testing.T, p *Plane) (*http.Cookie, string) {
 func TestManagementRoutesRequireSessionAndUnlock(t *testing.T) {
 	p, _, _, key, _ := runtimeFixture(t)
 	cookie, csrf := sessionFor(t, p)
-	routes := []string{"/api/v1/ssh-connections", "/api/v1/ssh-connections/1", "/api/v1/ssh-connections/1/archive", "/api/v1/ssh-connections/1/dependents", "/api/v1/db-connections", "/api/v1/db-connections/1", "/api/v1/db-connections/1/archive", "/api/v1/db-connections/1/dependents", "/api/v1/groups", "/api/v1/groups/1", "/api/v1/groups/1/dependents", "/api/v1/key-pairs", "/api/v1/key-pairs/1", "/api/v1/key-pairs/1/dependents", "/api/v1/data/export", "/api/v1/data/import", "/api/v1/transport/ssh/1", "/api/v1/transport/db/1", "/api/v1/projects", "/api/v1/projects/name/reports", "/api/v1/reports", "/api/v1/unknown", "/api/v1/client/ssh-connections"}
+	routes := []string{"/api/v1/ssh-connections", "/api/v1/ssh-connections/1", "/api/v1/ssh-connections/1/archive", "/api/v1/ssh-connections/1/dependents", "/api/v1/db-connections", "/api/v1/db-connections/1", "/api/v1/db-connections/1/archive", "/api/v1/db-connections/1/dependents", "/api/v1/groups", "/api/v1/groups/1", "/api/v1/groups/1/dependents", "/api/v1/key-pairs", "/api/v1/key-pairs/1", "/api/v1/key-pairs/1/dependents", "/api/v1/data/export", "/api/v1/data/import", "/api/v1/transport/ssh/1", "/api/v1/transport/db/1", "/api/v1/projects", "/api/v1/projects/name/reports", "/api/v1/reports", "/api/v1/unknown"}
 	for _, method := range []string{"GET", "HEAD", "POST", "PUT", "DELETE", "PATCH"} {
 		for _, path := range routes {
 			for _, alias := range []string{path, path + "/"} {

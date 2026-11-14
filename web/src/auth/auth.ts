@@ -10,6 +10,9 @@ interface State { ready: boolean, authenticated: boolean, unlocked: boolean, rec
 type WireCreation = Omit<PublicKeyCredentialCreationOptions, 'challenge' | 'user' | 'excludeCredentials'> & { challenge: string, user: Omit<PublicKeyCredentialUserEntity, 'id'> & { id: string }, excludeCredentials?: { id: string, type: 'public-key' }[] }
 interface Login { authenticated: boolean, unlocked: boolean, csrf: string, credential_id: string }
 
+export interface ClientDevice { id: string, label: string, fingerprint: string, revoked?: boolean, status?: string, expires?: string }
+export interface ClientDevices { pending: ClientDevice[], clients: ClientDevice[] }
+
 export class AuthClient {
   private csrf = ''
   private credential = ''
@@ -93,7 +96,7 @@ export class AuthClient {
   async grantFor(method: string, path: string, body = ''): Promise<string | undefined> {
     const action = sensitiveAction(method, path)
     if (!action) return undefined
-    if (!this.state.authenticated || !this.state.unlocked || this.state.recovering) throw Error('Log in and unlock before a sensitive action')
+    if (!this.state.authenticated || (!this.state.unlocked && action !== 'client_approve' && action !== 'client_revoke') || this.state.recovering) throw Error('Log in and unlock before a sensitive action')
     const epoch = this.epoch
     const digest = encode(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(body)))
     this.check(epoch)
@@ -102,6 +105,23 @@ export class AuthClient {
     this.check(epoch)
     if (!credential) throw Error('Fresh passkey verification cancelled')
     return (await this.request<{ grant: string }>('fresh/finish', { id: b.id, credential: signedCredential(credential, false) })).grant
+  }
+  async listDevices(): Promise<ClientDevices> {
+    const devices = await this.request<ClientDevices>('clients/list')
+    if (!Array.isArray(devices.pending) || !Array.isArray(devices.clients)) throw Error('Invalid device list response')
+    return devices
+  }
+  async approveDevice(id: string, commitment: string, deny = false) {
+    const body = { id, commitment, ...(deny ? { deny: true } : {}) }, epoch = this.epoch
+    const grant = await this.grantFor('POST', '/api/v1/auth/clients/approve', JSON.stringify(body))
+    this.check(epoch)
+    await this.request('clients/approve', body, grant)
+  }
+  async revokeDevice(id: string) {
+    const body = { id }, epoch = this.epoch
+    const grant = await this.grantFor('POST', '/api/v1/auth/clients/revoke', JSON.stringify(body))
+    this.check(epoch)
+    await this.request('clients/revoke', body, grant)
   }
   async listPasskeys(): Promise<string[]> { return (await this.request<{ credentials: string[] }>('passkeys/list')).credentials }
   async removePasskey(id: string) {

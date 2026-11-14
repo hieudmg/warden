@@ -32,8 +32,8 @@ func TestAuthAgentLivesUntilExternalCancellation(t *testing.T) {
 		t.Fatal(err)
 	}
 	for i := 0; i < 3; i++ {
-		// Zero API credentials is the current implementation, not a fake future
-		// logout/revocation API. Outage/lock handling belongs to T4, not this test.
+		// This fixture intentionally has zero API credentials. T4's separate
+		// API lifecycle fixture exercises logout/revocation/outage/lock states.
 		clock.Advance(365 * 24 * time.Hour)
 		pool.Expire()
 		requestCtx, stop := context.WithTimeout(context.Background(), time.Second)

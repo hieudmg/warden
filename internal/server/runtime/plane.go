@@ -1,5 +1,5 @@
-// Package runtime owns the authenticated management audience. Setup and future
-// client pairing are separate audiences, never aliases to this mux.
+// Package runtime owns the authenticated management and explicit client
+// audiences. Setup is separate; client capabilities never alias management.
 package runtime
 
 import (
@@ -21,7 +21,10 @@ import (
 	"warden/internal/config"
 	"warden/internal/crypto"
 	"warden/internal/server"
+	"warden/internal/server/audit"
 	"warden/internal/server/auth"
+	"warden/internal/server/profiles"
+	"warden/internal/server/reports"
 	"warden/internal/server/setup"
 	"warden/internal/store"
 
@@ -55,6 +58,10 @@ type Plane struct {
 	vault          *crypto.Vault
 	verifier       assertionVerifier
 	managed        http.Handler
+	clientManaged  http.Handler
+	pairings       map[string]pairing
+	pairTokens     float64
+	pairRefill     time.Time
 	now            func() time.Time
 	challenges     map[string]ceremony
 	grants         map[string]grant
@@ -124,7 +131,10 @@ func newPlane(cfg config.Setup, s *store.Store, i setup.Installation, v *crypto.
 	if err != nil {
 		return nil, err
 	}
-	return &Plane{cfg: cfg, store: s, install: i, vault: v, verifier: verifier, managed: managed, now: time.Now, challenges: make(map[string]ceremony), grants: make(map[string]grant), tokens: 10, refill: time.Now(), requests: make(chan struct{}, 16), pending: make(map[string]enrollment), recoveryNonces: make(map[string]recoveryNonce), recoveries: make(map[string]recoveryState), recoveryTokens: 5, recoveryRefill: time.Now(), rotations: make(map[string]recoveryRotation)}, nil
+	clientMux := http.NewServeMux()
+	profiles.New(s, audit.New(s)).RegisterClient(clientMux)
+	reports.New(s, audit.New(s)).RegisterClient(clientMux)
+	return &Plane{clientManaged: clientMux, pairings: make(map[string]pairing), pairTokens: 5, pairRefill: time.Now(), cfg: cfg, store: s, install: i, vault: v, verifier: verifier, managed: managed, now: time.Now, challenges: make(map[string]ceremony), grants: make(map[string]grant), tokens: 10, refill: time.Now(), requests: make(chan struct{}, 16), pending: make(map[string]enrollment), recoveryNonces: make(map[string]recoveryNonce), recoveries: make(map[string]recoveryState), recoveryTokens: 5, recoveryRefill: time.Now(), rotations: make(map[string]recoveryRotation)}, nil
 }
 func hash(s string) string          { h := sha256.Sum256([]byte(s)); return crypto.Encode(h[:]) }
 func csrfToken(token string) string { return hash("warden/v1/web-csrf/" + token) }
@@ -214,6 +224,15 @@ func (p *Plane) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	p.expireRecovery()
+	if strings.HasPrefix(r.URL.Path, "/api/v1/client/") {
+		p.clientHTTP(w, r)
+		return
+	}
+	// A bearer is never a management credential, even alongside a cookie.
+	if r.Header.Get("Authorization") != "" {
+		fail(w, 401, "unauthorized")
+		return
+	}
 	x, authenticated := p.session(r)
 	restricted, recovering := p.recoverySession(r)
 	if recovering {
@@ -277,10 +296,6 @@ func (p *Plane) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		fail(w, 404, "not_found")
 		return
 	}
-	if strings.HasPrefix(r.URL.Path, "/api/v1/client/") {
-		fail(w, 404, "not_found")
-		return
-	}
 	// Transport remains denied: T4 owns its separate client allowlist.
 	if strings.HasPrefix(r.URL.Path, "/api/v1/transport/") {
 		fail(w, 403, "fresh_action_required")
@@ -322,6 +337,10 @@ func (b *responseBuffer) WriteHeader(code int) {
 func (b *responseBuffer) Write(p []byte) (int, error) { b.WriteHeader(200); return b.body.Write(p) }
 
 func (p *Plane) authHTTP(w http.ResponseWriter, r *http.Request, x store.Session) {
+	if strings.HasPrefix(r.URL.Path, "/api/v1/auth/clients/") {
+		p.clientsManagement(w, r, x)
+		return
+	}
 	if strings.HasPrefix(r.URL.Path, "/api/v1/auth/recovery/") {
 		if strings.HasPrefix(r.URL.Path, "/api/v1/auth/recovery/rotation/") {
 			if r.Method != "POST" {
@@ -400,7 +419,7 @@ func (p *Plane) authHTTP(w http.ResponseWriter, r *http.Request, x store.Session
 			}
 			p.begin(w, r, "unlock", x.Hash)
 		} else {
-			if b.Action == "" || actionFor(b.Method, b.Path) != b.Action || !p.vault.Unlocked() {
+			if b.Action == "" || actionFor(b.Method, b.Path) != b.Action || (!p.vault.Unlocked() && b.Action != "client_approve" && b.Action != "client_revoke") {
 				fail(w, 403, "forbidden")
 				return
 			}

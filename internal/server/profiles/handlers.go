@@ -89,6 +89,20 @@ func (h *Handler) Register(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/v1/transport/db/{id}", h.transportDB)
 }
 
+// RegisterClient is the complete CLI capability allowlist, not a mux alias.
+func (h *Handler) RegisterClient(mux *http.ServeMux) {
+	mux.HandleFunc("GET /api/v1/client/ssh-connections", h.listSSH)
+	mux.HandleFunc("GET /api/v1/client/ssh-connections/{id}", h.getSSH)
+	mux.HandleFunc("GET /api/v1/client/ssh-connections/{id}/dependents", h.sshDependents)
+	mux.HandleFunc("PUT /api/v1/client/ssh-connections/{id}/archive", h.archiveSSH)
+	mux.HandleFunc("GET /api/v1/client/db-connections", h.listDB)
+	mux.HandleFunc("GET /api/v1/client/db-connections/{id}", h.getDB)
+	mux.HandleFunc("GET /api/v1/client/db-connections/{id}/dependents", h.dbDependents)
+	mux.HandleFunc("PUT /api/v1/client/db-connections/{id}/archive", h.archiveDB)
+	mux.HandleFunc("GET /api/v1/client/transport/ssh/{id}", h.transportSSH)
+	mux.HandleFunc("GET /api/v1/client/transport/db/{id}", h.transportDB)
+}
+
 type archiveRequest struct {
 	Archived *bool `json:"archived"`
 }

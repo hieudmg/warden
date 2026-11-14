@@ -1,17 +1,19 @@
 # Local agent IPC (security-hardening branch)
 
-This describes the **implemented T10 boundary**, not T4 API-token enrollment,
-OS-service packaging, or a completed security release. See the
+This describes the **implemented T10 IPC boundary**, preserved by T4's
+same-agent API enrollment/transport. It is not OS-service packaging or a completed
+security release. See [CLI enrollment](cli.md#login-logout-and-status), the
+[T4 report](superpowers/reports/2026-11-14-t4-client-enrollment.md), the
 [T10 evidence report](superpowers/reports/2026-11-14-t10-agent-ipc.md) and
 [security plan](superpowers/plans/2026-11-14-security-hardening.md).
 Native Windows execution remains required and **pending**.
 
 ## Runtime and trust
 
-Noninteractive SSH-backed commands start the existing client executable as
-`warden agent serve` when necessary. This remains an internal command, not a new
-service or public configuration surface. Interactive SSH and direct DB paths are
-unchanged. Commands never use a plaintext local-agent fallback.
+Login and all CLI API retrieval (including interactive SSH/direct DB commands)
+start the existing client executable as `warden agent serve` when necessary.
+This remains an internal command, not a new service or public configuration
+surface. Interactive SSH/console and direct DB execution remain local. Commands never use a plaintext local-agent fallback.
 
 The runtime lives under `os.UserCacheDir()/warden/agent`:
 
@@ -89,6 +91,9 @@ is covered by the automatic validated-stale restart test.
 
 The private IPC format intentionally breaks compatibility with older agents.
 Stop an identified old agent externally and retry using the new executable.
+This also applies to an already-running T10 version2 agent that lacks T4 API
+operations; upgrading the executable does not automatically replace its daemon.
+An enrolled T4 agent restart loses authorization and requires web approval again.
 Do not send requests to it in plaintext, delete live endpoint/lock files, or
 chmod/chown an unknown credential/certificate path to make an error disappear.
 If a startup error persists after **verified** process termination, inspect only
@@ -117,13 +122,16 @@ prove cancellation of graph acquisition. Forced process termination/crash may
 leave stale files and is handled by the startup rules above, not a promise of
 crash-time cleanup.
 
-No API credential, pairing, logout or server revocation implementation is added
-by T10. T4 must add memory-only API-token ownership and prove logout/revocation/
-outage/server restart/vault lock do not terminate this same daemon. Those future
-states are not simulated here as if their APIs already existed. Current zero-API-
-token and post-pool-expiry liveness are tested now. Browser session lifetimes,
+T4 now adds memory-only API/poll-secret ownership and tests logout, revocation,
+outage, server restart and vault lock against this same daemon, including fake
+clock advancement beyond graph TTL and then years. None is an exit condition.
+Logout clears local authorization even offline but cannot establish remote
+revocation while unreachable. Server restart retains verifiers but locks the
+vault; agent exit loses its copy and requires approval again. A stolen token
+remains valid until server revocation/recovery invalidation; previously retrieved
+remote credentials/sessions cannot be recalled. Browser session lifetimes,
 recovery policy, external DB/proxy transports, SFTP validation and SSH forwarding
-behavior are not changed by T10.
+behavior are unchanged by T4.
 
 ## Disposable checks (not against a running user agent)
 
@@ -138,7 +146,7 @@ OS cache/home configuration, never the default live user agent. Required native
 Windows execution (run on Windows, capture OS/Go versions, all failures/skips):
 
 ```powershell
-go test ./internal/client/agent -run 'TestPipeSquatter|TestRuntimeACL|TestRuntimeWindows|TestRuntimeCrashStartup|TestRuntimeConcurrentStartup|TestRuntimeBindBeforeDiscovery|TestRuntimeInterruptedPublication|TestRuntimePublicationUnlinkFailureIsNotReady|TestRelayRequestClosesRawTLSBeforeCloseNotifyOnEveryExit|TestAgentTLS|TestAgentAuthenticates|TestServerInitialAuthenticationDeadline|TestConnectOrStartOverallDeadline|TestAuthAgentLives|TestSSHPoolIdle|TestServerExternalCancellation' -count=1 -v
+go test ./internal/client/agent -run 'TestPipeSquatter|TestRuntimeACL|TestRuntimeWindows|TestRuntimeCrashStartup|TestRuntimeConcurrentStartup|TestRuntimeBindBeforeDiscovery|TestRuntimeInterruptedPublication|TestRuntimePublicationUnlinkFailureIsNotReady|TestRelayRequestClosesRawTLSBeforeCloseNotifyOnEveryExit|TestAgentTLS|TestAgentAuthenticates|TestServerInitialAuthenticationDeadline|TestConnectOrStartOverallDeadline|TestAuthAgentLives|TestSSHPoolIdle|TestServerExternalCancellation|TestAgentOwnsAPIToken|TestAgentAPIMemoryLifetime|TestConcurrentLoginRequests|TestAPIRequestAndSecretResponse' -count=1 -v
 ```
 
 Reparse/symlink privilege skips and wrong-owner fixture limitations must remain

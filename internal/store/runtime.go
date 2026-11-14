@@ -178,11 +178,26 @@ func validateRuntimeSchema(ctx context.Context, db *sql.DB) error {
 		return err
 	}
 	if !reflect.DeepEqual(got, expected) {
-		return ErrExistingInstallation
+		// Only the exact reviewed v7 schema may evolve, never unknown storage.
+		old := make(map[string]string, len(expected))
+		for k, v := range expected {
+			if k != "table:client_credentials" {
+				old[k] = v
+			}
+		}
+		if !reflect.DeepEqual(got, old) {
+			return ErrExistingInstallation
+		}
+		var version int
+		var dirty bool
+		if err := db.QueryRowContext(ctx, `SELECT version,dirty FROM schema_migrations`).Scan(&version, &dirty); err != nil || version != 7 || dirty {
+			return ErrExistingInstallation
+		}
+		return nil
 	}
 	var version int
 	var dirty bool
-	if err := db.QueryRowContext(ctx, `SELECT version,dirty FROM schema_migrations`).Scan(&version, &dirty); err != nil || version != 7 || dirty {
+	if err := db.QueryRowContext(ctx, `SELECT version,dirty FROM schema_migrations`).Scan(&version, &dirty); err != nil || version != 8 || dirty {
 		return ErrExistingInstallation
 	}
 	return nil
@@ -229,7 +244,26 @@ func initializeManagedSchema(ctx context.Context, db *sql.DB, beforeCommit func(
 		return err
 	}
 	if len(schema) != 1 || schema["table:installation"] != installationSchema {
-		return nil
+		if _, present := schema["table:client_credentials"]; present {
+			return nil
+		}
+		// OpenInitialized already validated the complete exact v7 snapshot.
+		tx, err := db.BeginTx(ctx, nil)
+		if err != nil {
+			return err
+		}
+		defer tx.Rollback()
+		definition, err := migrations.FS.ReadFile("008_client_credentials.up.sql")
+		if err != nil {
+			return err
+		}
+		if _, err = tx.ExecContext(ctx, string(definition)); err != nil {
+			return err
+		}
+		if _, err = tx.ExecContext(ctx, `UPDATE schema_migrations SET version=8 WHERE version=7 AND dirty=0`); err != nil {
+			return err
+		}
+		return tx.Commit()
 	}
 	expected, err := runtimeSchema()
 	if err != nil {
@@ -262,7 +296,7 @@ func initializeManagedSchema(ctx context.Context, db *sql.DB, beforeCommit func(
 	if _, err = tx.ExecContext(ctx, expected["index:version_unique"]); err != nil {
 		return err
 	}
-	if _, err = tx.ExecContext(ctx, `INSERT INTO schema_migrations(version,dirty) VALUES (7,0)`); err != nil {
+	if _, err = tx.ExecContext(ctx, `INSERT INTO schema_migrations(version,dirty) VALUES (8,0)`); err != nil {
 		return err
 	}
 	if _, err = tx.ExecContext(ctx, sessionSchema); err != nil {

@@ -39,6 +39,10 @@ func actionFor(method, target string) string {
 	}
 	if method == "POST" {
 		switch target {
+		case "/api/v1/auth/clients/approve":
+			return "client_approve"
+		case "/api/v1/auth/clients/revoke":
+			return "client_revoke"
 		case "/api/v1/auth/passkeys/begin", "/api/v1/auth/passkeys/key":
 			return "passkey_add"
 		case "/api/v1/auth/passkeys/remove":

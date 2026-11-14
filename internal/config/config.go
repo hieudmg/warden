@@ -7,19 +7,19 @@ import (
 	"fmt"
 	"io"
 	"net"
-	"net/url"
 	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
+	"warden/internal/client/clienthttp"
 )
 
 const (
 	defaultListenAddr    = "127.0.0.1:8080"
 	defaultDBPath        = "/var/lib/warden/warden.db"
 	defaultMasterKey     = "/etc/warden/master.key"
-	defaultAPIBaseURL    = "http://127.0.0.1:8080"
+	defaultAPIBaseURL    = "https://127.0.0.1:8080"
 	defaultClientTimeout = 30 * time.Second
 )
 
@@ -44,8 +44,9 @@ type Server struct {
 }
 
 type Client struct {
-	APIBaseURL string
-	Timeout    time.Duration
+	APIBaseURL    string
+	Timeout       time.Duration
+	CACertificate string
 }
 
 type ServerOptions struct {
@@ -75,8 +76,9 @@ type serverFileConfig struct {
 }
 
 type clientFileConfig struct {
-	APIBaseURL *string `json:"api_base_url"`
-	Timeout    *string `json:"timeout"`
+	APIBaseURL    *string `json:"api_base_url"`
+	Timeout       *string `json:"timeout"`
+	CACertificate *string `json:"ca_certificate"`
 }
 
 func DefaultServer() Server {
@@ -150,6 +152,13 @@ func LoadClient(opts ClientOptions) (Client, error) {
 	}
 	if err := validateClient(&cfg); err != nil {
 		return Client{}, err
+	}
+	if cfg.CACertificate != "" {
+		// Anchor in the invoking CLI, never in an older detached agent's cwd.
+		cfg.CACertificate, err = filepath.Abs(cfg.CACertificate)
+		if err != nil {
+			return Client{}, errors.New("resolve public CA certificate path")
+		}
 	}
 
 	return cfg, nil
@@ -225,6 +234,9 @@ func mergeClientFile(cfg *Client, path string, required bool, readFile func(stri
 
 	if fileCfg.APIBaseURL != nil {
 		cfg.APIBaseURL = *fileCfg.APIBaseURL
+	}
+	if fileCfg.CACertificate != nil {
+		cfg.CACertificate = *fileCfg.CACertificate
 	}
 	if fileCfg.Timeout != nil {
 		timeout, err := parseDuration(*fileCfg.Timeout)
@@ -379,26 +391,7 @@ func isAllowedListenHost(host string) bool {
 }
 
 func validateAPIBaseURL(value string) (string, error) {
-	trimmed := strings.TrimSpace(value)
-	if trimmed == "" {
-		return "", errors.New("api base url must not be empty")
-	}
-
-	u, err := url.Parse(trimmed)
-	if err != nil {
-		return "", fmt.Errorf("invalid api base url %q: %w", value, err)
-	}
-	if u.Scheme != "http" && u.Scheme != "https" {
-		return "", fmt.Errorf("invalid api base url %q: scheme must be http or https", value)
-	}
-	if u.Host == "" {
-		return "", fmt.Errorf("invalid api base url %q: host must not be empty", value)
-	}
-	if u.RawQuery != "" || u.Fragment != "" {
-		return "", fmt.Errorf("invalid api base url %q: query and fragment are not supported", value)
-	}
-
-	return strings.TrimRight(trimmed, "/"), nil
+	return clienthttp.Origin(strings.TrimSpace(value))
 }
 
 func parseDuration(value string) (time.Duration, error) {

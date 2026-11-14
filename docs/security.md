@@ -15,9 +15,33 @@ See the [IPC runbook](agent-ipc.md) and
 adversarial pipe/ACL execution is required and remains pending, not established by
 a Windows cross-build. The daemon no longer exits when SSH graphs expire.
 
-This is not API-token enrollment: T4's memory-only API credentials and client
-route audience remain planned. T11/T12 file-transfer/SSH forwarding and broader
-cancellation remediation remain separate; external DB/proxy behavior is unchanged.
+## Current client enrollment boundary (T4)
+
+The same agent now owns memory-only API and polling secrets and performs HTTPS
+requests for every current CLI data command. First use submits only a commitment;
+the owner compares the displayed fingerprint in the web CLI-device view and
+approves that exact pending commitment with a fresh passkey assertion. The
+explicit `/api/v1/client/` capability allowlist cannot administer authentication,
+unlock, export/import or read key vaults directly. Browser cookies and API bearers
+are distinct audiences. Durable server hashes/revocation and recovery generation
+are checked per request, again after acquiring a managed-data lease.
+
+Credentials survive server restart (the vault remains locked), not agent exit.
+Logout attempts revocation and clears agent memory even offline, without stopping
+the daemon; offline failure does not establish remote revocation. No API secret
+is persisted in config/keychain/IPC discovery or returned to CLI processes.
+There is deliberately no token expiry, refresh credential or rotation: a stolen
+copy remains usable until explicit revocation/recovery invalidation, including
+after the legitimate agent exits. Already retrieved remote credentials/sessions
+cannot be recalled. Go/JS reference clearing is best effort, not zeroization.
+
+See [CLI enrollment](cli.md#login-logout-and-status) and the
+[T4 report](superpowers/reports/2026-11-14-t4-client-enrollment.md). Synthetic signed
+fixtures and TLS subprocess tests are not genuine PRF-positive/browser or native
+Windows acceptance. T11/T12 file-transfer/SSH forwarding and broader cancellation
+remediation remain separate; external DB/proxy behavior is unchanged. In-flight
+context-insensitive SSH dialing can still delay shutdown until T12; no all-states
+bounded-shutdown claim is made.
 
 ## Historical pre-0.23 server notes
 

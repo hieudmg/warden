@@ -72,6 +72,7 @@ type Server struct {
 	pool     *Pool
 	runtime  *Runtime
 
+	api       apiOwner
 	closeOnce sync.Once
 	stop      chan struct{}
 }
@@ -138,6 +139,14 @@ func (s *Server) Serve(ctx context.Context) error {
 		s.closeListener(listener)
 		pool.shutdown()
 		handlers.Wait()
+		s.api.mu.Lock()
+		for origin, auth := range s.api.authorizations {
+			auth.secret = ""
+			auth.poll = ""
+			auth.client.CloseIdleConnections()
+			delete(s.api.authorizations, origin)
+		}
+		s.api.mu.Unlock()
 		if runtime := s.serverRuntime(); runtime != nil {
 			_ = runtime.Cleanup()
 		}
@@ -308,6 +317,8 @@ func (s *Server) handleConn(ctx context.Context, conn net.Conn, token []byte) {
 	requestCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	switch request.Operation {
+	case operationAPI:
+		s.handleAPI(requestCtx, conn, request)
 	case operationSSH:
 		s.handleSSH(requestCtx, conn, request)
 	case operationCopy, operationCP:
