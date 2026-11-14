@@ -118,6 +118,11 @@ func (p *Plane) clientHTTP(w http.ResponseWriter, r *http.Request) {
 		server.WriteJSON(w, 200, map[string]any{"authenticated": true, "unlocked": p.vault.Unlocked()})
 		return
 	}
+	releaseExpensive, admitted := p.admitExpensive(w, r)
+	if !admitted {
+		return
+	}
+	defer releaseExpensive()
 	if p.beforeVaultAcquire != nil {
 		p.beforeVaultAcquire(r)
 	}

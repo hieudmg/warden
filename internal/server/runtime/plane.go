@@ -68,6 +68,8 @@ type Plane struct {
 	tokens         float64
 	refill         time.Time
 	requests       chan struct{}
+	transfers      chan struct{}
+	keyOperations  chan struct{}
 	pending        map[string]enrollment
 	recoveryNonces map[string]recoveryNonce
 	recoveries     map[string]recoveryState
@@ -134,7 +136,7 @@ func newPlane(cfg config.Setup, s *store.Store, i setup.Installation, v *crypto.
 	clientMux := http.NewServeMux()
 	profiles.New(s, audit.New(s)).RegisterClient(clientMux)
 	reports.New(s, audit.New(s)).RegisterClient(clientMux)
-	return &Plane{clientManaged: clientMux, pairings: make(map[string]pairing), pairTokens: 5, pairRefill: time.Now(), cfg: cfg, store: s, install: i, vault: v, verifier: verifier, managed: managed, now: time.Now, challenges: make(map[string]ceremony), grants: make(map[string]grant), tokens: 10, refill: time.Now(), requests: make(chan struct{}, 16), pending: make(map[string]enrollment), recoveryNonces: make(map[string]recoveryNonce), recoveries: make(map[string]recoveryState), recoveryTokens: 5, recoveryRefill: time.Now(), rotations: make(map[string]recoveryRotation)}, nil
+	return &Plane{clientManaged: clientMux, pairings: make(map[string]pairing), pairTokens: 5, pairRefill: time.Now(), cfg: cfg, store: s, install: i, vault: v, verifier: verifier, managed: managed, now: time.Now, challenges: make(map[string]ceremony), grants: make(map[string]grant), tokens: 10, refill: time.Now(), requests: make(chan struct{}, 16), transfers: make(chan struct{}, 2), keyOperations: make(chan struct{}, 4), pending: make(map[string]enrollment), recoveryNonces: make(map[string]recoveryNonce), recoveries: make(map[string]recoveryState), recoveryTokens: 5, recoveryRefill: time.Now(), rotations: make(map[string]recoveryRotation)}, nil
 }
 func hash(s string) string          { h := sha256.Sum256([]byte(s)); return crypto.Encode(h[:]) }
 func csrfToken(token string) string { return hash("warden/v1/web-csrf/" + token) }
@@ -269,6 +271,11 @@ func (p *Plane) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	releaseExpensive, admitted := p.admitExpensive(w, r)
+	if !admitted {
+		return
+	}
+	defer releaseExpensive()
 	if strings.HasPrefix(r.URL.Path, "/api/v1/auth/") {
 		select {
 		case p.requests <- struct{}{}:

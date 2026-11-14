@@ -136,6 +136,12 @@ func (p *Plane) ready(now time.Time, password string) {
 	p.tokens = 5
 	p.passwordHash = hashToken([]byte(password))
 }
+
+// Called with p.mu held; repeat after body reading before any state change.
+func (p *Plane) authorized(r *http.Request) bool {
+	cookie, err := r.Cookie("__Host-warden-setup")
+	return err == nil && p.cookieHash != "" && equalHash(hashToken([]byte(cookie.Value)), p.cookieHash) && equalHash(hashToken([]byte(r.Header.Get("X-CSRF-Token"))), p.csrfHash)
+}
 func (p *Plane) Done() <-chan struct{} { return p.done }
 func (p *Plane) stop() {
 	if !p.stopped {
@@ -205,6 +211,10 @@ func (p *Plane) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		reject(w, 403)
 		return
 	}
+	if origins := r.Header.Values("Origin"); len(origins) > 0 && (len(origins) != 1 || origins[0] != p.cfg.PublicOrigin) {
+		reject(w, 403)
+		return
+	}
 	select {
 	case p.requests <- struct{}{}:
 		defer func() { <-p.requests }()
@@ -213,21 +223,29 @@ func (p *Plane) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		reject(w, 429)
 		return
 	}
+	if r.Method != "GET" && r.Method != "HEAD" {
+		med, _, err := mime.ParseMediaType(r.Header.Get("Content-Type"))
+		if len(r.Header.Values("Origin")) != 1 || r.Header.Get("Origin") != p.cfg.PublicOrigin || err != nil || med != "application/json" || len(r.Header.Values("Content-Type")) != 1 {
+			reject(w, 403)
+			return
+		}
+		if r.URL.Path != "/api/v1/setup/password" {
+			p.mu.Lock()
+			allowed := p.authorized(r)
+			p.mu.Unlock()
+			if !allowed {
+				reject(w, 403)
+				return
+			}
+		}
+	}
 	var body []byte
 	if strings.HasPrefix(r.URL.Path, "/api/v1/setup/") {
 		if r.Method != "POST" {
 			reject(w, 405)
 			return
 		}
-		if len(r.Header.Values("Origin")) != 1 || r.Header.Get("Origin") != p.cfg.PublicOrigin {
-			reject(w, 403)
-			return
-		}
-		med, _, err := mime.ParseMediaType(r.Header.Get("Content-Type"))
-		if err != nil || med != "application/json" || len(r.Header.Values("Content-Type")) != 1 {
-			reject(w, 403)
-			return
-		}
+		var err error
 		body, err = io.ReadAll(http.MaxBytesReader(w, r.Body, 64<<10))
 		if err != nil {
 			reject(w, 413)
@@ -275,8 +293,7 @@ func (p *Plane) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		p.password(w, body)
 		return
 	}
-	cookie, err := r.Cookie("__Host-warden-setup")
-	if err != nil || p.cookieHash == "" || !equalHash(hashToken([]byte(cookie.Value)), p.cookieHash) || !equalHash(hashToken([]byte(r.Header.Get("X-CSRF-Token"))), p.csrfHash) {
+	if !p.authorized(r) {
 		reject(w, 403)
 		return
 	}

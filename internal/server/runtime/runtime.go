@@ -7,7 +7,6 @@ import (
 	"io/fs"
 	"net"
 	"net/http"
-	"time"
 
 	"warden/internal/config"
 	"warden/internal/crypto"
@@ -76,9 +75,9 @@ func Run(ctx context.Context, o Options) error {
 	}
 	defer listener.Close()
 	if o.Config.Mode == "tls" {
-		listener = tls.NewListener(listener, &tls.Config{MinVersion: tls.VersionTLS13, Certificates: []tls.Certificate{certificate}})
+		listener = server.TLSListener(listener, certificate)
 	}
-	httpServer := &http.Server{DisableGeneralOptionsHandler: true, Handler: server.New(o.Bind, handler).Handler(), ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 120 * time.Second, WriteTimeout: 120 * time.Second, IdleTimeout: 60 * time.Second, MaxHeaderBytes: 16 << 10}
+	httpServer := server.NewHTTPServer(server.New(o.Bind, handler).Handler())
 	defer httpServer.Close()
 	result := make(chan error, 1)
 	go func() { result <- httpServer.Serve(listener) }()

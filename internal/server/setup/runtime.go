@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"warden/internal/config"
+	"warden/internal/server"
 	"warden/internal/server/auth"
 	"warden/internal/store"
 
@@ -74,7 +75,7 @@ func run(ctx context.Context, o Options, terminal io.Writer, d runtimeDeps) erro
 	}
 	defer listener.Close()
 	if o.Config.Mode == "tls" {
-		listener = tls.NewListener(listener, &tls.Config{MinVersion: tls.VersionTLS13, Certificates: []tls.Certificate{certificate}})
+		listener = server.TLSListener(listener, certificate)
 	}
 	readyTime := d.now()
 	timer := time.NewTimer(time.Until(readyTime.Add(15 * time.Minute)))
@@ -102,7 +103,7 @@ func run(ctx context.Context, o Options, terminal io.Writer, d runtimeDeps) erro
 	}
 	p.now = d.now
 	p.ready(readyTime, password)
-	server := &http.Server{Handler: p, ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 120 * time.Second, WriteTimeout: 120 * time.Second, IdleTimeout: 60 * time.Second, MaxHeaderBytes: 16 << 10}
+	server := server.NewHTTPServer(p)
 	result := make(chan error, 1)
 	go func() { result <- server.Serve(listener) }()
 	// Even a flow-controlled terminal must not extend the ready-time deadline.
