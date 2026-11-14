@@ -237,7 +237,9 @@ func TestSessionCookieRotationRevokesPreviousAndSyncedZeroCountersWork(t *testin
 		t.Fatal(err)
 	}
 	owner.Credentials = append(owner.Credentials, *credential)
-	p.install.Owner = owner
+	if err := p.updateIdentity(context.Background(), func(current *setup.Installation) error { current.Owner = owner; return nil }, "", false); err != nil {
+		t.Fatal(err)
+	}
 	old, _ := sessionFor(t, p)
 	for range 2 {
 		start := call(p, "POST", "/api/v1/auth/login/begin", struct{}{}, old, "")
@@ -278,7 +280,11 @@ func TestSessionCookieRotationRevokesPreviousAndSyncedZeroCountersWork(t *testin
 		}
 		old = next
 	}
-	if !p.install.Owner.Credentials[0].Flags.BackupEligible || !p.install.Owner.Credentials[0].Flags.BackupState {
+	current, err := p.current(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !current.Owner.Credentials[0].Flags.BackupEligible || !current.Owner.Credentials[0].Flags.BackupState {
 		t.Fatal("library backup state not retained")
 	}
 }

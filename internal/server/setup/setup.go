@@ -59,14 +59,20 @@ type ceremonyVerifier interface {
 }
 
 type Installation struct {
-	Format           int             `json:"format"`
-	PublicOrigin     string          `json:"public_origin"`
-	RPID             string          `json:"rp_id"`
-	Owner            auth.Owner      `json:"owner"`
-	Passkey          crypto.Wrapper  `json:"passkey_wrapper"`
-	Recovery         crypto.Wrapper  `json:"recovery_wrapper"`
-	RecoveryVerifier string          `json:"recovery_verifier"`
-	KeyCheck         crypto.KeyCheck `json:"key_check"`
+	Format       int        `json:"format"`
+	PublicOrigin string     `json:"public_origin"`
+	RPID         string     `json:"rp_id"`
+	Owner        auth.Owner `json:"owner"`
+	// Passkey is a source compatibility alias for the first wrapper only.
+	// Runtime authorization uses the complete Passkeys collection.
+	Passkey  crypto.Wrapper   `json:"-"`
+	Passkeys []crypto.Wrapper `json:"passkey_wrappers,omitempty"`
+	// AuthorizationGeneration invalidates future T4 client verifiers on recovery.
+	// T4 must bind every durable verifier to this value and check it per request.
+	AuthorizationGeneration uint64          `json:"authorization_generation,omitempty"`
+	Recovery                crypto.Wrapper  `json:"recovery_wrapper"`
+	RecoveryVerifier        string          `json:"recovery_verifier"`
+	KeyCheck                crypto.KeyCheck `json:"key_check"`
 }
 type Preparation struct {
 	Passkey          crypto.Wrapper `json:"passkey_wrapper"`

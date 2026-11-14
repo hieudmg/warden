@@ -58,6 +58,22 @@ func (v *Vault) Acquire(parent context.Context) (context.Context, func(), error)
 
 type leaseContext struct{ ctx context.Context }
 
+// KeyForLease returns a transient same-DEK copy only to its exact live lease.
+// Fresh authorization belongs to the caller; retain the lease through delivery.
+func (v *Vault) KeyForLease(ctx context.Context) ([]byte, error) {
+	v.mu.Lock()
+	defer v.mu.Unlock()
+	if v.key == nil || v.locking || ctx.Err() != nil {
+		return nil, ErrVaultLocked
+	}
+	for lease := range v.active {
+		if lease.ctx == ctx {
+			return append([]byte(nil), v.key[:]...), nil
+		}
+	}
+	return nil, ErrVaultLocked
+}
+
 func (v *Vault) Lock() {
 	v.mu.Lock()
 	defer v.mu.Unlock()

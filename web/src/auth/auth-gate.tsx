@@ -1,41 +1,54 @@
 import { useEffect, useState, useSyncExternalStore } from 'react'
 import type { ReactNode } from 'react'
 import { authClient, AuthClient } from './auth'
+import { SecurityView } from './security-view'
+import { securitySignal } from './session'
 
 export function AuthGate({ children, client = authClient }: { children: ReactNode, client?: AuthClient }) {
   const state = useSyncExternalStore(client.subscribe, client.getSnapshot)
   const [error, setError] = useState('')
   const [pending, setPending] = useState(false)
+  const [recovery, setRecovery] = useState('')
+  const resetSignal = securitySignal()
+  useEffect(() => { setRecovery('') }, [client, state.ready, state.authenticated, state.unlocked, state.recovering])
+  useEffect(() => {
+    const clearRecovery = () => setRecovery('')
+    resetSignal.addEventListener('abort', clearRecovery)
+    return () => { resetSignal.removeEventListener('abort', clearRecovery) }
+  }, [resetSignal])
   useEffect(() => {
     const unwatch = client.watch()
     void client.status().catch(() => {})
     // Poll security metadata only: another browser can globally lock this vault.
     const timer = setInterval(() => { void client.status().catch(() => {}) }, 15000)
-    return () => { clearInterval(timer); unwatch(); client.cancel() }
+    return () => { setRecovery(''); clearInterval(timer); unwatch(); client.cancel() }
   }, [client])
   const run = async (action: () => Promise<void>) => {
-    setError(''); setPending(true)
+    // Drop unsubmitted recovery input before a competing flow can await.
+    setRecovery(''); setError(''); setPending(true)
     try { await action() } catch (e) { setError(e instanceof Error ? e.message : 'Authentication failed') }
     finally { setPending(false) }
   }
   return <>
     <section aria-label="Warden security" className="flex flex-wrap items-center gap-3 p-4 border-b">
       <strong>Warden</strong>
-      {!state.ready ? <p>Checking session…</p> : !state.authenticated ?
+      {!state.ready ? <p>Checking session…</p> : state.recovering ? <p>Restricted recovery</p> : !state.authenticated ?
         <button disabled={pending} onClick={() => void run(() => client.login())}>Log in with passkey</button> : <>
           <p>{state.unlocked ? 'Vault unlocked' : 'Vault locked'}</p>
           {!state.unlocked && <button disabled={pending} onClick={() => void run(() => client.unlock())}>Unlock with passkey PRF</button>}
           {state.unlocked && <button onClick={() => void run(() => client.lock())}>Lock vault</button>}
           <button onClick={() => void run(() => client.logout())}>Log out</button>
         </>}
-      {state.authenticated && <p>Key reveal/mutation, transport extraction and export/import are fail-closed until fresh sensitive-action support is delivered.</p>}
+      {state.authenticated && <p>Key reveal/mutation and export/import require a new passkey assertion for the exact request. Legacy management transport stays blocked.</p>}
+      {state.ready && !state.authenticated && !state.recovering && <form onSubmit={e => { e.preventDefault(); const saved = recovery; setRecovery(''); void run(() => client.recover(saved)) }}><label>Offline recovery key<input type="password" autoComplete="off" aria-label="Offline recovery key" value={recovery} onChange={e => setRecovery(e.target.value)} /></label><button disabled={pending}>Recover and replace all passkeys</button></form>}
       {error && <p role="alert">{error}</p>}
     </section>
-    {state.authenticated && state.unlocked ? children : <main className="p-6">
+    {(state.authenticated || state.recovering) && <SecurityView client={client} />}
+    {state.authenticated && state.unlocked && !state.recovering ? children : <main className="p-6">
       <h1>{state.authenticated ? 'Vault locked' : 'Passkey authentication required'}</h1>
       <p>Login does not require vault key material. Unlock requires a new verified passkey assertion and working PRF. Restart always starts locked.</p>
       <p>Lock closes global server key access. Logout ends only this browser session.</p>
-      <p>Passkey/recovery management, key-vault changes and data transfer are unavailable until the next security milestone.</p>
+      <p>Recovery grants only replacement-passkey enrollment, never normal management. Save offline recovery material privately; historical backups cannot be revoked.</p>
     </main>}
   </>
 }

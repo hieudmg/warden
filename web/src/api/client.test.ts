@@ -2,6 +2,8 @@ import { afterEach, describe, expect, test, vi } from "vitest"
 import { api, ApiError } from "./client"
 import { invalidateSecurity, setCSRF } from "../auth/session"
 import type { KeyPairRequest, SSHConnectionRequest } from "./types"
+const fresh = vi.hoisted(() => vi.fn(async () => 'exact-request-grant'))
+vi.mock('../auth/auth', () => ({ authClient: { grantFor: fresh } }))
 
 afterEach(() => {
   vi.unstubAllGlobals()
@@ -15,6 +17,15 @@ function jsonResponse(body: unknown, status = 200) {
 }
 
 describe("api client", () => {
+ test('sensitive GET mutation export and import carry grants for exact serialized requests',async()=>{
+  const fetcher=vi.fn<typeof fetch>(async()=>jsonResponse({}));vi.stubGlobal('fetch',fetcher)
+  await api.getKeyPair(3);await api.deleteKeyPair(3);await api.exportData();await api.importData({text:async()=>'{"format":"warden-data","version":1}'} as File)
+  expect(fresh).toHaveBeenCalledWith('GET','/api/v1/key-pairs/3','')
+  expect(fresh).toHaveBeenCalledWith('DELETE','/api/v1/key-pairs/3','')
+  expect(fresh).toHaveBeenCalledWith('GET','/api/v1/data/export','')
+  expect(fresh).toHaveBeenCalledWith('POST','/api/v1/data/import','{"format":"warden-data","version":1}')
+  for(const [,options]of fetcher.mock.calls)expect(new Headers(options?.headers).get('X-Warden-Action')).toBe('exact-request-grant')
+ })
  test('auth/data fetches are no-store and same-origin with CSRF on mutations', async () => {
   const fetcher=vi.fn().mockImplementation(async()=>jsonResponse([]));vi.stubGlobal('fetch',fetcher);setCSRF('memory-csrf')
   await api.listSSH();await api.deleteSSH(1);await api.exportData()

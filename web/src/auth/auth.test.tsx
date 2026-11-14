@@ -1,9 +1,9 @@
 import { webcrypto } from 'node:crypto'
 import { afterEach, beforeEach, expect, test, vi } from 'vitest'
-import { render, screen, fireEvent, cleanup } from '@testing-library/react'
+import { render, screen, fireEvent, cleanup, act } from '@testing-library/react'
 import { AuthClient } from './auth'
 import { AuthGate } from './auth-gate'
-import { securityEpoch } from './session'
+import { securityEpoch, invalidateSecurity } from './session'
 import { encode, wrap } from '../setup/vault-wrap'
 
 beforeEach(()=>vi.stubGlobal('crypto',webcrypto))
@@ -16,7 +16,7 @@ async function harness(prf=true){
  const fetcher=vi.fn(async(path:RequestInfo|URL,options?:RequestInit)=>{
   expect(options?.cache).toBe('no-store');expect(options?.credentials).toBe('same-origin')
   const route=String(path);sent.push({path:route,body:options?.body?JSON.parse(String(options.body)):{}})
-  const data=route.endsWith('/status')?{}:route.endsWith('/begin')?{id:'challenge',credential_id:'Bw',prf_input:input,options:{publicKey:{challenge:encode(new Uint8Array(32)),userVerification:'required',allowCredentials:[{type:'public-key',id:'Bw'}]}}}:route.endsWith('/fresh/finish')?{grant:'one-use-grant',wrapper}:route.endsWith('/login/finish')?{authenticated:true,unlocked:false,csrf:'csrf',credential_id:'Bw'}:{}
+  const data=route.endsWith('/passkeys/list')?{credentials:['Bw']}:route.endsWith('/status')?{}:route.endsWith('/begin')?{id:'challenge',credential_id:'Bw',prf_input:input,options:{publicKey:{challenge:encode(new Uint8Array(32)),userVerification:'required',allowCredentials:[{type:'public-key',id:'Bw'}]}}}:route.endsWith('/fresh/finish')?{grant:'one-use-grant',wrapper}:route.endsWith('/login/finish')?{authenticated:true,unlocked:false,csrf:'csrf',credential_id:'Bw'}:{}
   return new Response(JSON.stringify(data),{status:route.endsWith('/status')?401:200,headers:{'Content-Type':'application/json'}})
  })
  const credentials={get:vi.fn(async(_options:CredentialRequestOptions)=>assertion(prf?new Uint8Array(material):undefined))}
@@ -51,6 +51,46 @@ test('late browser credential after lock/logout cannot finish or restore managem
  expect(h.client.getSnapshot().unlocked).toBe(false)
  expect(h.sent.some(x=>x.path.endsWith('/fresh/finish'))).toBe(false)
  await h.client.logout();expect(h.client.getSnapshot().authenticated).toBe(false)
+})
+test('unsubmitted recovery entry does not return after passkey login and logout',async()=>{
+ const h=await harness();render(<AuthGate client={h.client}><div>Managed secret forms</div></AuthGate>)
+ fireEvent.change(await screen.findByLabelText('Offline recovery key'),{target:{value:'synthetic-unsubmitted-offline-root'}})
+ fireEvent.click(screen.getByRole('button',{name:'Log in with passkey'}))
+ fireEvent.click(await screen.findByRole('button',{name:'Log out'}))
+ expect(await screen.findByLabelText('Offline recovery key')).toHaveValue('')
+})
+test('starting competing passkey login clears recovery entry before awaiting the authenticator',async()=>{
+ const h=await harness();render(<AuthGate client={h.client}><div>Managed secret forms</div></AuthGate>)
+ fireEvent.change(await screen.findByLabelText('Offline recovery key'),{target:{value:'synthetic-unsubmitted-offline-root'}})
+ let reject!:(reason:Error)=>void
+ h.credentials.get.mockImplementationOnce(()=>new Promise((_resolve,r)=>{reject=r}))
+ fireEvent.click(screen.getByRole('button',{name:'Log in with passkey'}))
+ await vi.waitFor(()=>expect(reject).toBeDefined())
+ expect(screen.getByLabelText('Offline recovery key')).toHaveValue('')
+ await act(async()=>{reject(Error('Synthetic cancellation'))})
+ expect(screen.getByLabelText('Offline recovery key')).toHaveValue('')
+})
+test('security epoch reset and external authentication transitions clear typed recovery entry',async()=>{
+ const h=await harness();render(<AuthGate client={h.client}><div>Managed secret forms</div></AuthGate>)
+ fireEvent.change(await screen.findByLabelText('Offline recovery key'),{target:{value:'synthetic-unsubmitted-offline-root'}})
+ act(()=>invalidateSecurity())
+ expect(screen.getByLabelText('Offline recovery key')).toHaveValue('')
+ fireEvent.change(screen.getByLabelText('Offline recovery key'),{target:{value:'another-synthetic-root'}})
+ await act(async()=>{await h.client.login()})
+ // SecurityView unmount cancels outstanding client work; retain that guard.
+ await act(async()=>{await h.client.logout().catch(e=>expect(e.message).toMatch(/cancelled/))})
+ expect(screen.getByLabelText('Offline recovery key')).toHaveValue('')
+})
+test('client reset and gate unmount do not retain unsubmitted recovery entry',async()=>{
+ const h=await harness(), next=await harness()
+ const view=render(<AuthGate client={h.client}><div>Managed secret forms</div></AuthGate>)
+ fireEvent.change(await screen.findByLabelText('Offline recovery key'),{target:{value:'synthetic-unsubmitted-offline-root'}})
+ view.rerender(<AuthGate client={next.client}><div>Managed secret forms</div></AuthGate>)
+ expect(await screen.findByLabelText('Offline recovery key')).toHaveValue('')
+ fireEvent.change(screen.getByLabelText('Offline recovery key'),{target:{value:'another-synthetic-root'}})
+ view.unmount()
+ render(<AuthGate client={next.client}><div>Managed secret forms</div></AuthGate>)
+ expect(await screen.findByLabelText('Offline recovery key')).toHaveValue('')
 })
 test('usable gate shows login, locked controls, management, and resets secret children on lock',async()=>{
  const h=await harness();render(<AuthGate client={h.client}><div>Managed secret forms</div></AuthGate>)

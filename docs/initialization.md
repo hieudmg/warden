@@ -1,15 +1,23 @@
-# Explicit initialization and authenticated runtime (T1/T2 checkpoint)
+# Explicit initialization and authenticated runtime (T1–T3 checkpoint)
 
 Initialization remains a separate setup-only process. After it exits, normal
 `warden-server serve --config /your/fresh/private-directory/server.json` now
 starts the authenticated HTTPS runtime **locked**, without loading a disk key.
 Log in with the registered passkey, then use a new required-UV assertion and PRF
 unwrap to unlock management. Logout revokes only that browser session; Lock vault
-cancels/drains global key access. Key reveal/mutation, transport extraction and
-export/import are fail-closed until fresh sensitive-action support is delivered.
-Multiple passkeys and recovery replacement remain T3 work. See the
-[T2 implementation/evidence report](superpowers/reports/2026-11-14-t2-authenticated-runtime.md).
-This is not M1 or a release-ready security upgrade.
+cancels/drains global key access. Key reveal/mutation and documented v1
+export/import now require a new passkey assertion bound to the exact request.
+Legacy management transport remains blocked; the future client audience is not
+implemented. Security controls add/revoke passkeys (never the last active one),
+rotate recovery with saved re-entry, and offer restricted offline-key recovery.
+Recovery MUST verify a new PRF passkey before atomically replacing ALL old
+passkeys/wrappers, revoking sessions/client authorizations, and returning locked
+to ordinary passkey login. Abort leaves the old identity intact. Recovery alone
+never permits management/read/export and does not rotate the recovery root.
+See the [T3 implementation/evidence report](superpowers/reports/2026-11-14-t3-passkeys-recovery.md)
+for disposable journeys and the T4 generation contract. Genuine PRF-positive
+HTTPS/browser, native Windows and production-browser CSP acceptance are pending;
+this is not verified M1 or a release-ready security upgrade.
 
 ## Build and run against fresh disposable storage
 

@@ -1,3 +1,5 @@
+import { authClient } from '../auth/auth'
+import { sensitiveAction } from '../auth/actions'
 import { csrfHeader, rejectStale, securityDenied, securityEpoch, securitySignal } from '../auth/session'
 import type {
   DBConnection,
@@ -80,6 +82,12 @@ async function request<T>(path: string, options: RequestOptions = {}): Promise<T
     body = options.body
   }
 
+  if (sensitiveAction(options.method ?? 'GET', path)) {
+    const grant = await authClient.grantFor(options.method ?? 'GET', path, body ?? '')
+    rejectStale(epoch)
+    if (!grant) throw new ApiError('fresh_action_required', 'Fresh passkey verification required', 403)
+    headers.set('X-Warden-Action', grant)
+  }
   let response: Response
   try {
     response = await fetch(path, {
@@ -197,9 +205,12 @@ export const api = {
   // contains secrets, so callers must warn before requesting or submitting it.
   exportData: async (): Promise<Blob> => {
     const epoch = securityEpoch()
+    const grant = await authClient.grantFor('GET', '/api/v1/data/export', '')
+    rejectStale(epoch)
+    if (!grant) throw new ApiError('fresh_action_required', 'Fresh passkey verification required', 403)
     let response: Response
     try {
-      response = await fetch("/api/v1/data/export", {cache:'no-store',credentials:'same-origin',signal:securitySignal()})
+      response = await fetch("/api/v1/data/export", {cache:'no-store',credentials:'same-origin',signal:securitySignal(),headers:{'X-Warden-Action':grant}})
     } catch (error) {
       if (error instanceof DOMException && error.name === "AbortError") {
         throw error
