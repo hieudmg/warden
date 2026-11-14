@@ -36,6 +36,7 @@ const (
 )
 
 type Server struct {
+	Security      *Setup
 	ListenAddr    string
 	DBPath        string
 	MasterKeyPath string
@@ -66,6 +67,7 @@ type ClientOptions struct {
 }
 
 type serverFileConfig struct {
+	Security      *Setup  `json:"security"`
 	ListenAddr    *string `json:"listen_addr"`
 	DBPath        *string `json:"db_path"`
 	MasterKeyPath *string `json:"master_key_path"`
@@ -191,6 +193,9 @@ func mergeServerFile(cfg *Server, path string, required bool, readFile func(stri
 		return fmt.Errorf("decode server config %q: %w", path, err)
 	}
 
+	if fileCfg.Security != nil {
+		cfg.Security = fileCfg.Security
+	}
 	if fileCfg.ListenAddr != nil {
 		cfg.ListenAddr = *fileCfg.ListenAddr
 	}

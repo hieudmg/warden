@@ -1,0 +1,17 @@
+{
+  "material": "AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE",
+  "dek": "AgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgI",
+  "kek": "1AUBCDdDf1TtKlbfXeotTi_rr_pahP4_qlanFHdYtNE",
+  "recovery_auth": "lSoJt3GaaBW2Bd4NH49ONksHI-JxNVUZrw8rzc2DR6Q",
+  "recovery_verifier": "wCHatFXOxYGuI2RxQ8JckxAaQDKtJ1xBAaFrMsl81pY",
+  "aad": "[\"warden\",1,\"recovery\",\"AwMDAwMDAwMDAwMDAwMDAw\",\"\"]",
+  "wrapper": {
+    "version": 1,
+    "kind": "recovery",
+    "vault_id": "AwMDAwMDAwMDAwMDAwMDAw",
+    "credential_id": "",
+    "kdf_salt": "BAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQ",
+    "iv": "BAQEBAQEBAQEBAQE",
+    "ciphertext": "UnKlqx49Veuez2zJOrH4WIRhlHHQHQevC7BhvxNTgWacfv4rmY-N9xMIVu892UT6"
+  }
+}
