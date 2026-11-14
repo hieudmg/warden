@@ -61,6 +61,7 @@ type Pool struct {
 	ttl  time.Duration
 
 	entries       map[[sha256.Size]byte]*entry
+	retired       map[*entry]struct{} // active retired graphs still owned until release/shutdown
 	emptyCh       chan struct{}
 	retiredActive int
 	used          bool
@@ -165,6 +166,7 @@ func (p *Pool) Acquire(ctx context.Context, bundle model.SSHBundle) (*Lease, err
 			e.dialing = false
 			e.dialErr = err
 			e.closed = true
+			delete(p.retired, e)
 			if p.entries[key] == e {
 				delete(p.entries, key)
 				p.signalEmptyLocked()
@@ -278,6 +280,9 @@ func (p *Pool) release(e *entry) {
 				p.retiredActive--
 			}
 		}
+		if e.retired {
+			delete(p.retired, e)
+		}
 		if e.retired && !e.closed {
 			e.closed = true
 			graph = e.graph
@@ -350,6 +355,7 @@ func (p *Pool) retireLocked(key [sha256.Size]byte, e *entry) {
 		e.retired = true
 		if e.active > 0 {
 			p.retiredActive++
+			p.retired[e] = struct{}{}
 		}
 	}
 	if p.entries[key] == e {
@@ -365,6 +371,7 @@ func (p *Pool) closeRetired(e *entry) {
 	var graph *clientssh.Graph
 	p.mu.Lock()
 	if e.active == 0 && !e.dialing && !e.closed {
+		delete(p.retired, e)
 		e.closed = true
 		graph = e.graph
 		e.graph = nil
@@ -426,7 +433,7 @@ func (p *Pool) TTL() time.Duration {
 
 // EmptySignal returns a notification channel that receives a signal whenever
 // the pool becomes empty. The channel remains usable across later
-// acquisitions, and is intended for the agent server's shutdown watcher.
+// acquisitions. An empty pool never determines the daemon's lifetime.
 func (p *Pool) EmptySignal() <-chan struct{} {
 	if p == nil {
 		ch := make(chan struct{}, 1)
@@ -439,9 +446,8 @@ func (p *Pool) EmptySignal() <-chan struct{} {
 	return p.emptyCh
 }
 
-// Used reports whether at least one graph acquisition has completed. A server
-// uses this to distinguish a freshly started empty pool from an idle pool that
-// should terminate.
+// Used reports whether at least one graph acquisition has completed. It is
+// diagnostic only: pool state never determines the daemon's lifetime.
 func (p *Pool) Used() bool {
 	if p == nil {
 		return false
@@ -471,6 +477,7 @@ func (p *Pool) Close() error {
 			e.retired = true
 			if e.active > 0 {
 				p.retiredActive++
+				p.retired[e] = struct{}{}
 			}
 		}
 		if e.active == 0 && !e.dialing && !e.closed {
@@ -487,12 +494,59 @@ func (p *Pool) Close() error {
 	return nil
 }
 
+// shutdown is only for daemon termination, after request cancellation. Unlike
+// ordinary Close/retirement it must close active graphs BEFORE joining borrowers
+// so blocked channels cannot keep the daemon alive. Graph ownership stays here;
+// Graph.Close is idempotent and Lease.Release remains valid after termination.
+func (p *Pool) shutdown() {
+	if p == nil {
+		return
+	}
+	var graphs []*clientssh.Graph
+	p.mu.Lock()
+	p.ensureLocked()
+	p.closed = true
+	all := make(map[*entry]struct{}, len(p.entries)+len(p.retired))
+	for _, e := range p.entries {
+		all[e] = struct{}{}
+	}
+	for e := range p.retired {
+		all[e] = struct{}{}
+	}
+	clear(p.entries)
+	clear(p.retired)
+	for e := range all {
+		if !e.retired {
+			e.retired = true
+			if e.active > 0 {
+				p.retiredActive++
+			}
+		}
+		if !e.closed && !e.dialing {
+			e.closed = true
+			graphs = append(graphs, e.graph)
+			// Active borrowers can still read their immutable graph pointer.
+			if e.active == 0 {
+				e.graph = nil
+			}
+		}
+	}
+	p.signalEmptyLocked()
+	p.mu.Unlock()
+	for _, graph := range graphs {
+		closeGraph(graph)
+	}
+}
+
 func (p *Pool) ensureLocked() {
 	if p.entries == nil {
 		p.entries = make(map[[sha256.Size]byte]*entry)
 	}
 	if p.emptyCh == nil {
 		p.emptyCh = make(chan struct{}, 1)
+	}
+	if p.retired == nil {
+		p.retired = make(map[*entry]struct{})
 	}
 	if p.now == nil {
 		p.now = time.Now

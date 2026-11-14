@@ -25,7 +25,11 @@ non-interactive presentation. Use `-n`/`--non-interactive` or
 Exit status mirrors the remote command or query. SSH-backed operations reuse a
 local connection agent; cached connections close ten minutes after their last
 operation. Interactive `xssh` and direct database connections bypass the
-cache.
+cache. Graph eviction never exits the daemon: it remains alive until external
+termination, including when the pool is empty. Local-agent connections use pinned
+TLS1.3 before request/token bytes; see the [IPC runtime runbook](agent-ipc.md) for
+private discovery, old-agent handling and the pending native Windows checks.
+T4 web-approved API credentials are not implemented by this IPC change.
 
 In non-interactive database mode, query results are written as TSV with a
 header row. Values are written one record per line without table borders or

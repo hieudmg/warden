@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"syscall"
 	"time"
 	"unicode"
 
@@ -1050,7 +1051,9 @@ func runAgent(args []string, stderr io.Writer) int {
 		return 1
 	}
 	pool := agent.NewDefaultPool(time.Now, 10*time.Minute)
-	if err := runAgentServe(context.Background(), listener, token, pool); err != nil {
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	if err := runAgentServe(ctx, listener, token, pool); err != nil && !errors.Is(err, context.Canceled) {
 		fmt.Fprintf(stderr, "agent: %v\n", err)
 		return 1
 	}

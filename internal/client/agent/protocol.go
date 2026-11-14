@@ -1,6 +1,6 @@
 // Package agent contains the private local transport used by the client-side
 // connection agent. The transport is deliberately small: each message is a
-// bounded, versioned JSON frame carried over one local connection.
+// bounded, versioned JSON frame carried over an authenticated TLS 1.3 channel.
 package agent
 
 import (
@@ -14,7 +14,7 @@ import (
 
 const (
 	// Version is the current wire-protocol version.
-	Version uint8 = 1
+	Version uint8 = 2
 
 	// MaxFrameBytes bounds the encoded JSON body of one frame. The size prefix
 	// is not included in this limit.

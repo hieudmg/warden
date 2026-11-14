@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"crypto/tls"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -166,6 +167,8 @@ func connectOrStart(ctx context.Context, runtime *Runtime) (io.ReadWriteCloser, 
 	if ctx == nil {
 		return nil, nil, errors.New("agent client context is nil")
 	}
+	ctx, cancel := context.WithTimeout(ctx, agentStartupTimeout)
+	defer cancel()
 
 	// First attach to an already-running agent. A token may be present while
 	// the listener is still coming up, so both reads and dials are retried.
@@ -179,19 +182,12 @@ func connectOrStart(ctx context.Context, runtime *Runtime) (io.ReadWriteCloser, 
 		return nil, nil, err
 	}
 
-	deadline := time.Now().Add(agentStartupTimeout)
-	if ctxDeadline, ok := ctx.Deadline(); ok && ctxDeadline.Before(deadline) {
-		deadline = ctxDeadline
-	}
 	for {
 		if conn, token, err := tryRuntime(ctx, runtime); err == nil {
 			return conn, token, nil
 		}
 		if err := ctx.Err(); err != nil {
-			return nil, nil, err
-		}
-		if time.Now().After(deadline) {
-			return nil, nil, errors.New("agent did not become ready within 5 seconds")
+			return nil, nil, fmt.Errorf("agent did not authenticate within startup bound; stop old agent and inspect private runtime: %w", err)
 		}
 		timer := time.NewTimer(agentRetryInterval)
 		select {
@@ -204,18 +200,7 @@ func connectOrStart(ctx context.Context, runtime *Runtime) (io.ReadWriteCloser, 
 }
 
 func tryRuntime(ctx context.Context, runtime *Runtime) (io.ReadWriteCloser, []byte, error) {
-	token, err := runtime.ReadToken()
-	if err != nil {
-		return nil, nil, err
-	}
-	if len(token) != TokenBytes {
-		return nil, nil, errors.New("agent token has invalid length")
-	}
-	conn, err := runtime.Dial(ctx)
-	if err != nil {
-		return nil, nil, err
-	}
-	return conn, token, nil
+	return runtime.connect(ctx)
 }
 
 func startDetachedAgent() error {
@@ -240,7 +225,33 @@ func relayRequest(ctx context.Context, conn io.ReadWriteCloser, token []byte, re
 	if conn == nil {
 		return errors.New("agent connection is nil")
 	}
-	defer conn.Close()
+	defer func() {
+		// Every exit, including pre-cancelled entry and local encoding errors,
+		// must abort the raw transport before TLS Close can send close_notify.
+		if secured, ok := conn.(*tls.Conn); ok {
+			_ = secured.NetConn().Close()
+		}
+		_ = conn.Close()
+	}()
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	cancelDone := make(chan struct{})
+	stopCancel := context.AfterFunc(ctx, func() {
+		// Abort TLS's underlying transport: cancellation must not wait for
+		// close_notify delivery to an unresponsive peer.
+		if secured, ok := conn.(*tls.Conn); ok {
+			_ = secured.NetConn().Close()
+		} else {
+			_ = conn.Close()
+		}
+		close(cancelDone)
+	})
+	defer func() {
+		if !stopCancel() {
+			<-cancelDone
+		}
+	}()
 	request.Token = append([]byte(nil), token...)
 
 	writeMu := sync.Mutex{}
@@ -250,6 +261,9 @@ func relayRequest(ctx context.Context, conn io.ReadWriteCloser, token []byte, re
 		return WriteFrame(conn, frame)
 	}
 	if err := writeRequest(Frame{Version: Version, Kind: FrameRequest, Token: token, Request: &request}); err != nil {
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
 		return err
 	}
 
@@ -263,30 +277,29 @@ func relayRequest(ctx context.Context, conn io.ReadWriteCloser, token []byte, re
 	}
 
 	frames := make(chan readFrameResult, 1)
+	readDone := make(chan struct{})
+	defer close(readDone)
 	go func() {
 		for {
 			frame, err := ReadFrame(conn)
-			if err != nil {
-				frames <- readFrameResult{err: err}
+			select {
+			case frames <- readFrameResult{frame: frame, err: err}:
+			case <-readDone:
 				return
 			}
-			if frame.Kind == FrameFinal {
-				frames <- readFrameResult{frame: frame}
+			if err != nil || frame.Kind == FrameFinal {
 				return
 			}
-			frames <- readFrameResult{frame: frame}
 		}
 	}()
 
 	for {
 		select {
 		case <-ctx.Done():
-			_ = conn.Close()
 			return ctx.Err()
 		case err := <-stdinErr:
 			stdinErr = nil
 			if err != nil {
-				_ = conn.Close()
 				return err
 			}
 		case result := <-frames:

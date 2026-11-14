@@ -558,6 +558,7 @@ func TestAgentServeHidden(t *testing.T) {
 	cacheDir := t.TempDir()
 	t.Setenv("HOME", cacheDir)
 	t.Setenv("XDG_CACHE_HOME", cacheDir)
+	t.Setenv("LocalAppData", cacheDir)
 
 	var calls int
 	oldRunAgentServe := runAgentServe
@@ -1255,7 +1256,11 @@ func TestRunXSSHWithoutNameRequiresInteractiveTerminal(t *testing.T) {
 // runtime directory is isolated per test to avoid cross-test clients.
 func startCLITestAgent(t *testing.T) func() {
 	t.Helper()
-	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+	cacheDir := t.TempDir()
+	t.Setenv("XDG_CACHE_HOME", cacheDir)
+	t.Setenv("LocalAppData", cacheDir)
+	// Callers already installed known_hosts under their private HOME.
+	t.Setenv("USERPROFILE", os.Getenv("HOME"))
 
 	runtime, err := clientagent.NewRuntime()
 	if err != nil {
