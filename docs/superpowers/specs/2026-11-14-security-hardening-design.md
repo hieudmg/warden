@@ -6,7 +6,18 @@ Approved direction, documented on 2026-11-14 against `c104353` (`origin/main` an
 
 The owner approves a breaking `0.22.1 -> 0.23.0` release, mandatory passkey-authenticated management, PRF-wrapped vault keys, explicit initialization, individually revocable CLI credentials, and the in-scope audit remediation below. The owner's clarification, “tls encryption is warden internal only, it should not require tls on external db connection”, supersedes the proposed external DB/CONNECT-proxy TLS mandate and plaintext-exception decision. Mandatory HTTPS for Warden setup/web/client APIs and distribution, and protected local IPC, remain in scope; existing external DB and HTTP CONNECT proxy transport behavior is preserved. Recheck the latest base version before publishing; synchronize all three version fields specified in `AGENTS.md`. Initial preparation of this specification did not bump versions, change dependencies/application code, migrate real data, commit, publish, or deploy. The original T1 execution was initialization-only. Subsequent bounded T2 is reviewed at `99bcbeb`, and the owner has now authorized resumed T3 with the atomic recovery-replacement clarification below; no T4/later implementation or release publication is authorized by this checkpoint. Preserve the protected untracked `mise.toml` without reading it.
 
-Current bounded authorization at reviewed T11 HEAD `8541e6f` is **T12** only:
+Current bounded authorization at reviewed T12 HEAD `7c3adc0` is **T13** only:
+characterize the existing T4 no-redirect/owned HTTPS policy with actual verified
+origin and hostile target peers; escape and bound diagnostic terminal text and
+sanitize DB headers without filtering SSH/file streams or rewriting structured
+machine interfaces. The owner reports T12 review closed and fresh parent full
+Go/race PASS. T13 implementation/self-check evidence and independent-review
+boundary are in the [T13 report](../reports/2026-11-14-t13-client-output.md).
+No T14/T15, external TLS/profile, dependency/version or publication authority is
+implied. Native Windows/genuine PRF/production-trust/browser acceptance remain
+separate. Ordinary reversible T13 implementation choices are approved.
+
+Historical bounded authorization at reviewed T11 HEAD `8541e6f` was **T12** only:
 retain SSH_AUTH_SOCK authentication without forwarding, graph-owned agent/socket
 lifetime, bounded cancellable SSH/proxy/DB establishment with explicit pooled
 invalidation where connection-level abort is required, and pending-dial daemon

@@ -8,6 +8,7 @@ import (
 
 	"warden/internal/client/agent"
 	"warden/internal/client/api"
+	"warden/internal/client/terminal"
 	"warden/internal/config"
 )
 
@@ -27,7 +28,7 @@ func runAuthorization(args []string, configPath string, configPathSet bool, stdo
 	}
 	cfg, err := loadClient(configPath, configPathSet, lookupEnv)
 	if err != nil {
-		fmt.Fprintf(stderr, "invalid client config: %v\n", err)
+		fmt.Fprintf(stderr, "invalid client config: %v\n", terminal.ErrorText(err))
 		return 1
 	}
 	action := args[0]
@@ -38,7 +39,7 @@ func runAuthorization(args []string, configPath string, configPathSet bool, stdo
 	defer cancel()
 	e, err := agentAuthorization(ctx, cfg.APIBaseURL, cfg.CACertificate, cfg.Timeout, action, "")
 	if err != nil {
-		fmt.Fprintf(stderr, "%s: %v\n", args[0], err)
+		fmt.Fprintf(stderr, "%s: %v\n", args[0], terminal.ErrorText(err))
 		return 1
 	}
 	if args[0] != "login" {
@@ -64,7 +65,7 @@ func runAuthorization(args []string, configPath string, configPathSet bool, stdo
 		case <-ticker.C:
 			e, err = agentAuthorization(ctx, cfg.APIBaseURL, cfg.CACertificate, cfg.Timeout, "poll", "")
 			if err != nil {
-				fmt.Fprintln(stderr, err)
+				fmt.Fprintln(stderr, terminal.ErrorText(err))
 				return 1
 			}
 			if e.Status == "approved" {

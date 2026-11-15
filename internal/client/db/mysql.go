@@ -238,6 +238,13 @@ func writeTSVRow(b *strings.Builder, cells []string) {
 
 // writeTable renders columns and rows as a fixed ASCII table.
 func writeTable(out io.Writer, cols []string, rows [][]string) error {
+	// Keep caller/protocol names unchanged; sanitize only their presentation,
+	// before measuring widths, just as TSV does at its output boundary.
+	headers := make([]string, len(cols))
+	for i, col := range cols {
+		headers[i] = sanitizeCell(col)
+	}
+	cols = headers
 	widths := make([]int, len(cols))
 	for i, c := range cols {
 		widths[i] = len(c)

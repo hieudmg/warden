@@ -17,9 +17,11 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"warden/internal/client/agent"
 	"warden/internal/client/clienthttp"
+	"warden/internal/client/terminal"
 	"warden/internal/model"
 )
 
@@ -31,10 +33,11 @@ const maxResponseBytes = 4 << 20 // 4 MiB
 // maxErrorMessageBytes bounds server-provided error message text. The CLI
 // prints APIError messages to stderr, so a compromised or buggy server
 // must not be able to push unbounded body text into process output.
-const maxErrorMessageBytes = 1024
+const maxErrorMessageBytes = terminal.MaxErrorBytes
 
 // APIError is the client-side representation of a non-2xx API response.
-// Code is the stable machine-readable error code from the server.
+// Code is the stable machine-readable error code from the server. Fields retain
+// their data meaning (e.g. for JSON); Error escapes and bounds terminal text.
 type APIError struct {
 	StatusCode int
 	Code       string
@@ -43,9 +46,9 @@ type APIError struct {
 
 func (e *APIError) Error() string {
 	if e.Code != "" {
-		return fmt.Sprintf("api: %s (%s): %s", e.Code, http.StatusText(e.StatusCode), e.Message)
+		return terminal.EscapeErrorText(fmt.Sprintf("api: %s (%s): %s", e.Code, http.StatusText(e.StatusCode), e.Message))
 	}
-	return fmt.Sprintf("api: %s: %s", http.StatusText(e.StatusCode), e.Message)
+	return terminal.EscapeErrorText(fmt.Sprintf("api: %s: %s", http.StatusText(e.StatusCode), e.Message))
 }
 
 // Client is a minimal HTTP client for the warden API.
@@ -266,6 +269,9 @@ func parseErrError(resp *http.Response) error {
 		msg := strings.TrimSpace(envelope.Message)
 		if len(msg) > maxErrorMessageBytes {
 			msg = msg[:maxErrorMessageBytes]
+			for !utf8.ValidString(msg) {
+				msg = msg[:len(msg)-1]
+			}
 		}
 		return &APIError{StatusCode: resp.StatusCode, Code: envelope.Code, Message: msg}
 	}

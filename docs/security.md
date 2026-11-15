@@ -43,6 +43,32 @@ recorded separately; external DB/proxy behavior is unchanged. The T12 boundary
 below replaces the previously context-insensitive network establishment path;
 it is not a preemption guarantee for arbitrary callbacks or console readers.
 
+## API redirects and diagnostic output (T13)
+
+The existing T4 owned HTTPS transports refuse **all** API redirects before a
+second request, including same-origin redirects and 301/302/303/307/308 POST
+rewrites/replays. Caller-injected network clients are copied, use owned guarded
+standard transports, retain ordinary TCP routing/trusted roots and cannot replace
+origin verification with arbitrary RoundTrippers or TLS protocol delegates.
+The explicit agent IPC constructor remains separate. T13 adds verified two-peer
+HTTPS characterizations, not a new post-response URL check or a transport-policy
+change. Actual agent-produced bearer/body requests reach the trusted origin;
+redirect targets receive zero requests, authorization bytes and body bytes.
+
+API `Error()` and CLI diagnostic rendering now visibly escape terminal controls,
+nonprintables and invalid UTF-8, preserving printable Unicode, with a **1,024
+encoded UTF-8 byte** limit including escape expansion and safe truncation. The
+CLI's fixed command prefix/newline is additional. Structured API fields keep
+their data meaning and normal JSON encoding; this is not secret redaction or
+an audit-policy change. Table column headers now use the existing DB cell
+sanitizer, like TSV headers already did: control characters become spaces and
+TSV delimiters remain intact. No arbitrary header-length truncation was added.
+SSH interactive/exec byte streams and binary/file transfers are not filtered.
+See [CLI diagnostic details](cli.md#diagnostic-text) and the
+[T13 implementation report](superpowers/reports/2026-11-14-t13-client-output.md).
+Independent review/native execution remain separate; no T14 distribution or T15
+dependency remediation is claimed.
+
 ## SSH authentication and graph lifecycle (T12)
 
 SSH_AUTH_SOCK can authenticate a connection, but never implicitly enables agent

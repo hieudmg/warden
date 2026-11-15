@@ -85,6 +85,28 @@ In non-interactive database mode, query results are written as TSV with a
 header row. Values are written one record per line without table borders or
 padding; statements without a result set produce no output. In interactive
 mode, results retain the fixed-width CLI table and `Query OK` status.
+Column headers and cells replace control characters (including ESC, C0/C1,
+DEL, tabs and newlines) with spaces in **both** tables and TSV. Printable Unicode
+is retained; TSV's separator tabs and record newlines are unchanged. This is not
+a lossless database export.
+
+### Diagnostic text
+
+CLI diagnostics visibly escape terminal controls and nonprintables, including
+ESC/OSC initiators, C0/C1, DEL, CR/LF and invalid UTF-8. For example ESC becomes
+`\x1b`, CR/LF become `\r`/`\n`, C1 CSI becomes `\u009b`, and invalid bytes become
+`\ufffd`. Printable Unicode is preserved. Diagnostic text is truncated without a
+suffix to **1,024 encoded UTF-8 bytes**, counting escape expansion but excluding
+the CLI's fixed command prefix and final newline. Truncation never splits a
+Unicode rune or a generated escape token. API error formatting includes its
+`api: ...` prefix within that limit; parsed message fields retain their existing
+1,024-byte limit, now without splitting UTF-8. Error codes/status and typed exit
+classification remain available; formatting does not rewrite structured fields.
+
+This applies in interactive and non-interactive modes. It is terminal-control
+protection, **not secret redaction**. Interactive/exec SSH stdout and stderr,
+stdin, and binary/file transfers remain byte-for-byte streams and are **not
+filtered**. No JSON/CSV output format or whole-stream sanitizer was introduced.
 
 ## Configuration search
 
