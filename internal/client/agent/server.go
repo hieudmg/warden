@@ -520,7 +520,7 @@ func (s *Server) handleDB(ctx context.Context, conn net.Conn, request Request) {
 	}
 
 	dbAddr := net.JoinHostPort(bundle.Host, strconv.Itoa(bundle.Port))
-	tunnel := clientdb.NewBorrowedTunnelDialer(lease.Target(), dbAddr)
+	tunnel := clientdb.NewBorrowedTunnelDialer(lease, dbAddr)
 	dbWriter := (&frameWriter{w: conn}).stream(FrameStdout)
 	err = runQueryWithDialContext(ctx, bundle, request.SQL, dbWriter, tunnel.DialContext, clientdb.QueryOptions{
 		NonInteractive: request.DBNonInteractive,

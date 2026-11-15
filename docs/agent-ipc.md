@@ -111,16 +111,24 @@ empty SSH pool. Ten-minute idle eviction applies only to SSH graphs, after the
 last lease releases; all graphs expiring does not end the daemon. External
 context cancellation closes the listener/active IPC connections, closes owned
 cached and retired-active graphs, joins handlers and cleans runtime discovery.
-Ordinary pool retirement/Close still lets active leases finish; forced closure
-is specific to daemon termination. Unix SIGTERM/interrupt is wired to that clean
-cancellation path. This is **not an all-states bounded-shutdown guarantee**:
-`Pool.shutdown` skips still-dialing entries, and chained `via.Dial` / SSH handshake
-work does not promptly obey context cancellation in every state. Handler joins
-and runtime-discovery cleanup can therefore wait on an in-progress graph dial.
-Those known limitations remain T12 work; the acquired-graph shutdown tests do not
-prove cancellation of graph acquisition. Forced process termination/crash may
-leave stale files and is handled by the startup rules above, not a promise of
-crash-time cleanup.
+Ordinary pool retirement/Close still lets active leases finish. T12 additionally
+cancels pending dial owners even before they have Graph values, rejects late
+publication after cancellation/shutdown, and context-aborts network establishment
+without depending on SSH-channel deadline support. Unix SIGTERM/interrupt uses
+that clean cancellation path. Real IPC fixtures join pending direct handshake,
+second-hop open/handshake and CONNECT handlers on external cancellation.
+
+A canceled unconfirmed DB channel open is a separate forced-close case: SSH has
+no exposed per-open cancellation handle, so the borrowed dialer explicitly asks
+its pool lease to invalidate/abort THAT graph with a fixed reason. Other users of
+that SAME connection fail too; independent healthy graphs remain usable. Normal
+borrowed Close and completed opens do not invalidate healthy transports. The
+[T12 report](superpowers/reports/2026-11-14-t12-ssh-lifecycle.md) records this
+constraint, callback joining, fixture leak proof and validation limits, including
+an unexplained intermediate PTY Ctrl-D timeout. This is not arbitrary-callback
+or blocked-console-reader preemption, native Windows proof, or unconditional
+security acceptance. Forced process termination/crash may leave stale files;
+startup rules handle them, not a promise of crash-time cleanup.
 
 T4 now adds memory-only API/poll-secret ownership and tests logout, revocation,
 outage, server restart and vault lock against this same daemon, including fake

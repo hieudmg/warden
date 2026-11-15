@@ -6,13 +6,19 @@ Approved direction, documented on 2026-11-14 against `c104353` (`origin/main` an
 
 The owner approves a breaking `0.22.1 -> 0.23.0` release, mandatory passkey-authenticated management, PRF-wrapped vault keys, explicit initialization, individually revocable CLI credentials, and the in-scope audit remediation below. The owner's clarification, “tls encryption is warden internal only, it should not require tls on external db connection”, supersedes the proposed external DB/CONNECT-proxy TLS mandate and plaintext-exception decision. Mandatory HTTPS for Warden setup/web/client APIs and distribution, and protected local IPC, remain in scope; existing external DB and HTTP CONNECT proxy transport behavior is preserved. Recheck the latest base version before publishing; synchronize all three version fields specified in `AGENTS.md`. Initial preparation of this specification did not bump versions, change dependencies/application code, migrate real data, commit, publish, or deploy. The original T1 execution was initialization-only. Subsequent bounded T2 is reviewed at `99bcbeb`, and the owner has now authorized resumed T3 with the atomic recovery-replacement clarification below; no T4/later implementation or release publication is authorized by this checkpoint. Preserve the protected untracked `mise.toml` without reading it.
 
-Current bounded authorization at reviewed HEAD `78f8090` is revised **T11** only:
-portable pre-join validation/native containment, exclusive staging, remote handle
-chmod0600 before writes with the explicitly accepted initial creation window,
-and preservation/cleanup. The revised remote clause below supersedes the original
-private-at-creation requirement; no dependency/fork/library/custom-frame/rsync or
-T12 work is authorized. Native Windows/genuine PRF acceptance remains separate.
-See the [T11 report](../reports/2026-11-14-t11-sftp-boundaries.md).
+Current bounded authorization at reviewed T11 HEAD `8541e6f` is **T12** only:
+retain SSH_AUTH_SOCK authentication without forwarding, graph-owned agent/socket
+lifetime, bounded cancellable SSH/proxy/DB establishment with explicit pooled
+invalidation where connection-level abort is required, and pending-dial daemon
+shutdown/publication ownership. The revised T11 creation-window decision below
+remains binding and is not expanded. No dependency/fork/library/rsync, external
+TLS/profile, version, T13 or publication work is authorized. Native Windows and
+genuine PRF/production-trust/browser acceptance remain separate. See the
+[T12 report](../reports/2026-11-14-t12-ssh-lifecycle.md) for measured implementation,
+the verified DB fixture leak correction and the still-unexplained intermediate
+PTY timeout; later passing tests do not establish that timeout's cause or fix.
+The [T11 report](../reports/2026-11-14-t11-sftp-boundaries.md) remains its historical
+transfer-boundary evidence, not native Windows acceptance.
 
 Earlier bounded authorization at reviewed T10 plus corrections `852eed9`: the
 owner authorizes **T4** after the resequenced T10 prerequisite. T4 reuses the same

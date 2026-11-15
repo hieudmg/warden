@@ -40,14 +40,16 @@ var (
 )
 
 type entry struct {
-	graph    *clientssh.Graph
-	active   int
-	lastUsed time.Time
-	retired  bool
-	ready    chan struct{}
-	dialErr  error
-	dialing  bool
-	closed   bool
+	graph         *clientssh.Graph
+	active        int
+	lastUsed      time.Time
+	retired       bool
+	ready         chan struct{}
+	dialErr       error
+	dialing       bool
+	closed        bool
+	cancelDial    context.CancelFunc
+	invalidReason string
 }
 
 // Pool caches SSH graphs by the complete resolved bundle. A graph remains
@@ -119,6 +121,8 @@ func (p *Pool) Acquire(ctx context.Context, bundle model.SSHBundle) (*Lease, err
 				ready:    make(chan struct{}),
 				dialing:  true,
 			}
+			dialCtx, cancelDial := context.WithCancel(ctx)
+			e.cancelDial = cancelDial
 			p.entries[key] = e
 			dial := p.dial
 			p.mu.Unlock()
@@ -127,13 +131,18 @@ func (p *Pool) Acquire(ctx context.Context, bundle model.SSHBundle) (*Lease, err
 			if dial == nil {
 				err = errors.New("agent graph dialer is nil")
 			} else {
-				graph, err = dial(ctx, bundle)
+				graph, err = dial(dialCtx, bundle)
 			}
 			if err == nil && graph == nil {
 				err = errors.New("agent graph dialer returned nil graph")
 			}
 
 			p.mu.Lock()
+			if err == nil {
+				err = dialCtx.Err()
+			}
+			cancelDial()
+			e.cancelDial = nil
 			// Retire, Close, or a replacement cannot reuse this entry. In
 			// those cases the newly dialed graph is still owned by this
 			// acquisition attempt and must be closed outside the lock.
@@ -183,6 +192,10 @@ func (p *Pool) Acquire(ctx context.Context, bundle model.SSHBundle) (*Lease, err
 			select {
 			case <-ready:
 				p.mu.Lock()
+				if err := ctx.Err(); err != nil {
+					p.mu.Unlock()
+					return nil, err
+				}
 				if e.dialErr != nil {
 					err := e.dialErr
 					p.mu.Unlock()
@@ -201,6 +214,10 @@ func (p *Pool) Acquire(ctx context.Context, bundle model.SSHBundle) (*Lease, err
 		}
 
 		if e.graph != nil && !e.retired {
+			if err := ctx.Err(); err != nil {
+				p.mu.Unlock()
+				return nil, err
+			}
 			e.active++
 			p.mu.Unlock()
 			return &Lease{pool: p, entry: e}, nil
@@ -262,6 +279,33 @@ func (l *Lease) Retire() {
 		return
 	}
 	l.pool.retireEntry(l.entry)
+}
+
+// Invalidate deliberately aborts this graph when a pending SSH channel request
+// cannot be canceled independently. Concurrent leases on this SAME connection
+// fail; independent healthy graphs and future replacement acquisitions survive.
+// Ordinary operation errors should use Retire, not this force-close path.
+func (l *Lease) Invalidate(reason string) {
+	if l == nil || l.pool == nil || l.entry == nil {
+		return
+	}
+	p, e := l.pool, l.entry
+	p.mu.Lock()
+	for key, current := range p.entries {
+		if current == e {
+			p.retireLocked(key, e)
+			break
+		}
+	}
+	if e.invalidReason == "" {
+		e.invalidReason = reason
+	}
+	graph := e.graph
+	e.closed = true
+	p.mu.Unlock()
+	if graph != nil {
+		graph.Abort()
+	}
 }
 
 func (p *Pool) release(e *entry) {
@@ -350,6 +394,9 @@ func (p *Pool) retireEntry(e *entry) {
 func (p *Pool) retireLocked(key [sha256.Size]byte, e *entry) {
 	if e == nil {
 		return
+	}
+	if e.cancelDial != nil {
+		e.cancelDial()
 	}
 	if !e.retired {
 		e.retired = true
@@ -473,6 +520,9 @@ func (p *Pool) Close() error {
 	p.closed = true
 	for key, e := range p.entries {
 		delete(p.entries, key)
+		if e.cancelDial != nil {
+			e.cancelDial()
+		}
 		if !e.retired {
 			e.retired = true
 			if e.active > 0 {
@@ -516,6 +566,9 @@ func (p *Pool) shutdown() {
 	clear(p.entries)
 	clear(p.retired)
 	for e := range all {
+		if e.cancelDial != nil {
+			e.cancelDial()
+		}
 		if !e.retired {
 			e.retired = true
 			if e.active > 0 {
@@ -534,7 +587,9 @@ func (p *Pool) shutdown() {
 	p.signalEmptyLocked()
 	p.mu.Unlock()
 	for _, graph := range graphs {
-		closeGraph(graph)
+		if graph != nil {
+			graph.Abort()
+		}
 	}
 }
 

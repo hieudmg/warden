@@ -38,10 +38,61 @@ cannot be recalled. Go/JS reference clearing is best effort, not zeroization.
 See [CLI enrollment](cli.md#login-logout-and-status) and the
 [T4 report](superpowers/reports/2026-11-14-t4-client-enrollment.md). Synthetic signed
 fixtures and TLS subprocess tests are not genuine PRF-positive/browser or native
-Windows acceptance. T11/T12 file-transfer/SSH forwarding and broader cancellation
-remediation remain separate; external DB/proxy behavior is unchanged. In-flight
-context-insensitive SSH dialing can still delay shutdown until T12; no all-states
-bounded-shutdown claim is made.
+Windows acceptance. T11 transfer boundaries and T12 SSH lifecycle evidence are
+recorded separately; external DB/proxy behavior is unchanged. The T12 boundary
+below replaces the previously context-insensitive network establishment path;
+it is not a preemption guarantee for arbitrary callbacks or console readers.
+
+## SSH authentication and graph lifecycle (T12)
+
+SSH_AUTH_SOCK can authenticate a connection, but never implicitly enables agent
+forwarding. Exec, interactive and reused graph sessions send no forwarding
+request. Each graph owns its raw transports and authentication sockets, closes
+logical clients in reverse order and closes sockets once. Authentication uses
+the pinned agent library's synchronous RPC path, not an idle pipeline reader.
+
+Node network establishment is bounded by 15 seconds or the earlier caller context.
+TCP dial, SSH handshake, second-hop direct-tcpip opens, raw/through-hop CONNECT
+and DB channel opens have context-driven owned-transport abort protection even
+when SetDeadline returns unsupported/error. Successful negotiation stops and
+joins its cancellation callback before clearing a supported deadline and
+publishing a reusable connection. Reset failure rejects the transport. DB Close
+joins pending opens. Cancellation can abort the root socket before reverse
+logical teardown because an SSH channel Close itself may block on a write.
+
+An unconfirmed SSH OpenChannel has no per-request cancellation handle in pinned
+x/crypto v0.55.0. A borrowed DB dialer therefore holds an explicit pool owner,
+not just a target pointer. Canceling such an open invalidates and aborts **that
+same graph**, including concurrent leases on that connection; it is removed from
+reuse with reason `SSH channel open canceled; connection-level abort required`.
+Independent healthy pool graphs remain usable, and later acquisition can create
+a replacement. Healthy completed opens/ordinary borrowed Close do not force
+invalidation. Ordinary operation failures still use lease-safe retirement.
+
+Pool entries own cancelable dial contexts before they have Graph values.
+External termination cancels those owners, aborts acquired graphs and joins IPC
+handlers; canceled/shutdown publication reclaims late graphs without leases.
+Graph TTL remains independent of the permanent-until-external-stop daemon and
+approved memory-only API-token custody. No token expiry/timer/rotation or auth
+policy change was added. Arbitrary injected dialers/host-key callbacks that do
+not return, and blocked local console readers, are not made preemptible.
+
+The previously intermittent DB whole-chain test was reproduced and traced to an
+actual upstream TCP/worker leak in its test relay, not assumed counter timing.
+A deterministic EOF regression, endpoint closure before joining, balanced
+accepted/completed counters and joined drains fix that fixture while retaining
+the 5-second whole-chain bound and checking graph Close errors. This is separate
+from the production cancellation fixes.
+
+See the [T12 evidence report](superpowers/reports/2026-11-14-t12-ssh-lifecycle.md)
+for exact RED/GREEN, real handler/drain completion, final focused normal/race,
+boundary race25 and full-Go PASS. **One intermediate interactive PTY Ctrl-D
+timeout remains unexplained**; later repeated passes are not its fix or waiver.
+Native Windows and independent acceptance remain pending. Known x/crypto
+advisories remain T15 work; the dependency is not upgraded here. External DB and
+CONNECT proxy transport is unchanged: Basic credentials and onward traffic may
+still traverse plaintext beyond SSH's encrypted segment. No end-to-end external
+TLS, genuine PRF or production-browser trust claim follows from these tests.
 
 ## Legacy transfer and rollback (T5)
 
