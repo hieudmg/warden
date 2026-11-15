@@ -2,7 +2,7 @@
 
 ## Requirements
 
-- Go toolchain from `go.mod`
+- Go **1.26.11 or newer**, enforced by the minimum in `go.mod`
 - Node `^20.19.0 || >=22.12.0`
 - npm `>=10`
 - Linux end-to-end tests also require Bash 4+, `curl`, `openssl`, and `jq`
@@ -11,6 +11,17 @@ The server embeds the generated Vite distribution. Clean-checkout server
 builds and tests therefore build the frontend first through Make targets.
 
 ## Local development
+
+The validated build/test toolchain is Go 1.26.11. Select it explicitly without
+changing your installed default (the standard Go launcher can download it):
+
+```bash
+export GOTOOLCHAIN=go1.26.11
+go version
+```
+
+This is a source-build requirement, not a Go installation requirement for binary
+runtime hosts. CI reads the exact patch from `go.mod`.
 
 ```bash
 make build
@@ -25,6 +36,29 @@ bash scripts/test.sh
 CLI without using real credentials or persistent state.
 
 The generated frontend distribution at `internal/web/dist/` is gitignored.
+
+## UI component authoring and retained CSS
+
+The project does not install or bundle the shadcn CLI/MCP server. Existing
+components, Base UI/Radix runtime dependencies, aliases and `web/components.json`
+authoring metadata remain in place; metadata is not an installed generator.
+Future component-authoring tools are a separate owner choice, not an implicit
+package download or a requirement for building this repository. This removal
+does not uninstall shared/global MCP, Pi, or tools used by other repositories.
+
+The app imports the unmodified shadcn **4.19.0** stylesheet from
+`web/vendor/shadcn-4.19.0/tailwind.css`, with its full upstream MIT notice and
+[source hashes/provenance](../web/vendor/shadcn-4.19.0/README.md). This is a retained
+static asset, not a maintained library fork. Keep that notice with the CSS.
+The vendor directory is excluded from Tailwind class-source discovery so its
+license/provenance prose does not generate utilities.
+
+For a clean source-build installation including build/test dependencies:
+
+```bash
+npm --prefix web ci --include=dev
+npm --prefix web audit --include=dev
+```
 
 ## Release artifacts
 

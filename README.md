@@ -210,6 +210,11 @@ targets, copy semantics, and host-key handling.
 
 ## Development
 
+Source builds require **Go 1.26.11 or newer**, enforced by `go.mod`. To use the
+validated patch without changing the host default, set
+`GOTOOLCHAIN=go1.26.11` for build/test commands. Installed Warden binaries do not
+require Go on runtime hosts. Release builds select the exact patch in `go.mod`.
+
 ```bash
 make build
 make test

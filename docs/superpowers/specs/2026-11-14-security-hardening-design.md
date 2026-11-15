@@ -6,7 +6,17 @@ Approved direction, documented on 2026-11-14 against `c104353` (`origin/main` an
 
 The owner approves a breaking `0.22.1 -> 0.23.0` release, mandatory passkey-authenticated management, PRF-wrapped vault keys, explicit initialization, individually revocable CLI credentials, and the in-scope audit remediation below. The owner's clarification, “tls encryption is warden internal only, it should not require tls on external db connection”, supersedes the proposed external DB/CONNECT-proxy TLS mandate and plaintext-exception decision. Mandatory HTTPS for Warden setup/web/client APIs and distribution, and protected local IPC, remain in scope; existing external DB and HTTP CONNECT proxy transport behavior is preserved. Recheck the latest base version before publishing; synchronize all three version fields specified in `AGENTS.md`. Initial preparation of this specification did not bump versions, change dependencies/application code, migrate real data, commit, publish, or deploy. The original T1 execution was initialization-only. Subsequent bounded T2 is reviewed at `99bcbeb`, and the owner has now authorized resumed T3 with the atomic recovery-replacement clarification below; no T4/later implementation or release publication is authorized by this checkpoint. Preserve the protected untracked `mise.toml` without reading it.
 
-Current bounded authorization at reviewed T12 HEAD `7c3adc0` is **T13** only:
+**Latest bounded authorization (T15 at HEAD `c0e77b7`, 2026-11-15):** owner
+approves minimum source-build **Go1.26.11**, enforced by `go.mod`; every T15
+build/test/scan selects that exact patch. Binary runtime hosts need no Go.
+This supersedes the prior Go1.25 contract and earlier task-scope checkpoints
+below only for dependency remediation and necessary compatibility/build docs.
+It does not authorize removing shadcn CLI/MCP capability or relocating its CSS,
+SFTP forks/rsync, T16, deployment/publication, or the T17 release bump. Measured
+partial remediation, residual advisories, baseline-reproduced SSH stress failure
+and required acceptance limits are in [the T15 report](../reports/2026-11-14-t15-dependencies.md).
+
+Historical bounded authorization at reviewed T12 HEAD `7c3adc0` was **T13** only:
 characterize the existing T4 no-redirect/owned HTTPS policy with actual verified
 origin and hostile target peers; escape and bound diagnostic terminal text and
 sanitize DB headers without filtering SSH/file streams or rewriting structured
@@ -190,7 +200,7 @@ These remain in release scope after the early runnable authentication/vault mile
 - Release assets/checksums/installers use HTTPS for original URLs and every redirect, with verified TLS. HTTPS cross-host CDN redirects may be needed for releases; this is different from the no-cross-origin API policy. Injected updater transports must not bypass HTTPS redirect enforcement. Current `Options.HTTPClient Doer` permits arbitrary redirecting `Do`; replace that seam with a controlled `*http.Client` copy/owned redirect loop and transport-level test injection, not an unconstrained production Doer. Check each Location before the next request; tests must exercise injected clients as well as defaults.
 - Bound binary download to 256 MiB, checksum file to 1 MiB, connect/header time to 10 s and total transfer to five minutes (including retries). Enforce streaming limit even without/misleading Content-Length. Test all installers/updater for bad redirects, TLS, oversized/slow/truncated data/checksum mismatch and leave old binary/config/DB intact. Preserve Windows scheduled replacement reporting and manual server restart guidance. Do not change service self-upgrade semantics without the separate decision below.
 - Assess dependencies by reachable code and release/build exposure; no `npm audit fix --force`. Parent supplied `govulncheck@latest` evidence with automatic Go 1.26.11: GO-2026-6354/6355 in x/crypto v0.55.0, fixed v0.56.0, reachable through `graph.go` NewClientConn. Reproduce before choosing the minimal compatible update, including its Go/toolchain impact.
-- Parent npm report: 23 affected packages (1 critical, 11 high, 10 moderate, 1 low). This document's fresh `npm --prefix web audit --json` reports 20 (1 critical, 10 high, 8 moderate, 1 low); registry evidence changes. `npm ls` confirms `shadcn -> @modelcontextprotocol/sdk -> express -> proxy-addr`, and `shadcn -> @dotenvx/dotenvx -> systeminformation/undici`; separate jsdom/undici tooling path exists. `web/src/index.css` imports `shadcn/tailwind.css`, so removing shadcn blindly is not safe. Determine emitted JS/CSS reachability and install/build privileges, inspect lockfile/advisory paths and verify compatible remediation. Tool-only is not “no exposure.”
+- Historical pre-removal evidence (superseded by the latest checkpoint below): parent npm report had 23 affected packages (1 critical, 11 high, 10 moderate, 1 low). Preserve the initial live `npm --prefix web audit --json` result20 (1 critical, 10 high, 8 moderate, 1 low) as historical. A later original-lock `npm audit --include=dev --json` reports23; the subsequent explicit-include-dev updated-lock audit reports6 affected rows/3 underlying IDs. These are separate live advisory snapshots, not a same-snapshot include/omit control: observed host omit=dev may contribute, but it is not proven the sole cause of20 versus23, nor is registry variation isolated as the sole cause. Use the later23 -> 6 measured comparison without waiving dev/build exposure or claiming a clean audit; see the T15 report. `npm ls` confirms `shadcn -> @modelcontextprotocol/sdk -> express -> proxy-addr`, and `shadcn -> @dotenvx/dotenvx -> systeminformation/undici`; separate jsdom/undici tooling path exists. `web/src/index.css` imports `shadcn/tailwind.css`, so removing shadcn blindly is not safe. Determine emitted JS/CSS reachability and install/build privileges, inspect lockfile/advisory paths and verify compatible remediation. Tool-only is not “no exposure.”
 - Separate unprivileged tests/build/dependency installs from publication; default contents read, SHA-pin actions, explicitly scoped publishing/attestation permissions only in isolated jobs without dependency execution. Verify artifact digest/provenance binds source SHA/build inputs and the actual uploaded bytes. Test before publication; never treat checksum from the same compromised release as independent authenticity proof.
 
 ## Migration, recovery, and limits
@@ -215,3 +225,29 @@ External DB/proxy TLS scope is settled by the owner clarification above; there i
 2. **Service self-upgrade semantics:** server upgrade deliberately replaces only the executable, preserves state/service and prints manual restart guidance. Owner has not authorized prohibiting it for service-managed installs, forcing a stop/restart, or changing upgrade/cutover behavior. Retain safeguards; escalate any finding whose fix requires that change.
 
 Native Windows validation is an external evidence requirement, not a design approval question. No available native Windows environment has been verified. Do not claim its findings resolved until that evidence exists. Any newly discovered consequential security/data/API choice beyond this contract must be raised, not silently decided.
+
+## T15 latest owner-approved project-local tooling checkpoint
+
+The owner later approved removing shadcn CLI/MCP if locally installed; the
+manifest/export/CSS inspection verified that condition. This supersedes earlier
+retain-local-tooling or pending-capability statements, not shared/global tooling
+or generated UI ownership. The implementation removes the local dependency and
+its necessary npm-produced292-node lock subtree, retaining exact published
+shadcn4.19.0 CSS and full MIT2023 shadcn license with archive integrity/hashes in
+`web/vendor/shadcn-4.19.0/README.md`. The direct CSS import plus vendor discovery
+exclusion replaces the former package CSS import without UI asset changes.
+No generated component, Base UI/Radix dependency, alias or components metadata
+change; no fetcher, implicit generator reinstall or maintained-fork claim.
+
+Fresh clean private include-dev install/complete dependency listing/audit pass,
+**audit exits0 with zero findings (prior explicit-include-dev6 -> current0)**.
+This does not rewrite historical20 versus23 causality or waive build exposure.
+All279+13 frontend tests/build/verifier pass, all13 emitted files are
+byte-identical, and a fresh build-matched shared-Chromium HTTPS journey passes.
+Fresh exact Go1.26.11 full normal/race/vet and source/matching CLI/server text
+scan gates pass with **0 symbol/0 package/8 explicit module-only IDs**. Completed
+fixture whole-SSH/DB race25 evidence remains valid against unchanged test-source
+hashes; no PTY/production change or duplicate stress run. The report/ledger bind
+new and reused evidence distinctly. Independent review, residual Go disposition,
+native Windows, genuine PRF and production certificate trust remain open; this
+is not overall acceptance. Release0.22.1 stays unchanged; no T16/publication.

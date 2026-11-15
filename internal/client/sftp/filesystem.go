@@ -243,8 +243,8 @@ func posixRel(basePath, targPath string) (string, error) {
 			buf[n] = '/'
 			copy(buf[n+1:], targ[t0:])
 		}
-		// filepath.Rel retains a terminal dot component ("a" -> "." is
-		// "../."). Cleaning here changes that contract, not containment.
+		// Retain the historical filepath.Rel terminal dot spelling ("a" ->
+		// "." is "../."). Go 1.26 cleans it; the remote contract stays intact.
 		return string(buf), nil
 	}
 	return targ[t0:], nil

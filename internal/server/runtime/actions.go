@@ -179,9 +179,11 @@ func (p *Plane) deliver(w http.ResponseWriter, r *http.Request, ctx context.Cont
 		}
 	}
 	w.WriteHeader(buffered.code)
-	n, err := w.Write(buffered.body.Bytes())
-	if err != nil || n != buffered.body.Len() {
-		panic(http.ErrAbortHandler)
+	if buffered.body.Len() != 0 {
+		n, err := w.Write(buffered.body.Bytes())
+		if err != nil || n != buffered.body.Len() {
+			panic(http.ErrAbortHandler)
+		}
 	}
 	if err := controller.Flush(); err != nil || ctx.Err() != nil {
 		panic(http.ErrAbortHandler)

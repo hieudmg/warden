@@ -1,6 +1,6 @@
 module warden
 
-go 1.25.0
+go 1.26.11
 
 require (
 	github.com/Microsoft/go-winio v0.6.2
@@ -9,7 +9,7 @@ require (
 	github.com/golang-migrate/migrate/v4 v4.19.1
 	github.com/lithammer/fuzzysearch v1.1.8
 	github.com/pkg/sftp v1.13.11
-	golang.org/x/crypto v0.55.0
+	golang.org/x/crypto v0.56.0
 	golang.org/x/net v0.57.0
 	golang.org/x/sys v0.47.0
 	golang.org/x/term v0.45.0

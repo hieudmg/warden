@@ -60,6 +60,8 @@ func TestDialGraph(t *testing.T) {
 	for i, client := range clients {
 		waitForClientClosed(t, i, client)
 	}
+	jump.listener.waitClosed(t)
+	target.listener.waitClosed(t)
 }
 
 type graphCloseRecorder struct {

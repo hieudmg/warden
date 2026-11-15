@@ -101,6 +101,37 @@ func TestSensitiveGETRequiresGrantAndIsNeverCached(t *testing.T) {
 		})
 	}
 }
+
+type emptyBodyWriteObserver struct {
+	*httptest.ResponseRecorder
+	writes int
+}
+
+func (w *emptyBodyWriteObserver) Write(b []byte) (int, error) {
+	w.writes++
+	return w.ResponseRecorder.Write(b)
+}
+
+func TestManagedResponseEmptyBodyFlushesWithoutWrite(t *testing.T) {
+	for _, status := range []int{http.StatusOK, http.StatusNoContent, http.StatusNotModified} {
+		t.Run(http.StatusText(status), func(t *testing.T) {
+			w := &emptyBodyWriteObserver{ResponseRecorder: httptest.NewRecorder()}
+			r := httptest.NewRequest("GET", "https://warden.example/", nil)
+			defer func() {
+				if recovered := recover(); recovered != nil {
+					t.Fatalf("empty response aborted: %v", recovered)
+				}
+			}()
+			new(Plane).deliver(w, r, r.Context(), http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.WriteHeader(status)
+			}))
+			if w.Code != status || w.writes != 0 || !w.Flushed || w.Body.Len() != 0 {
+				t.Fatalf("status=%d writes=%d flushed=%v bytes=%d", w.Code, w.writes, w.Flushed, w.Body.Len())
+			}
+		})
+	}
+}
+
 func TestFreshActionRejectsTransportEvenWithAssertion(t *testing.T) {
 	p, _, _, key, _ := runtimeFixture(t)
 	browser, csrf := sessionFor(t, p)
