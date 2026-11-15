@@ -2,6 +2,7 @@ package sftp
 
 import (
 	"crypto/rand"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -16,11 +17,23 @@ import (
 // directory copy is also rejected when source and destination share an
 // identity and the final target is the source or a descendant of it.
 func Copy(source, destination Endpoint) error {
+	if source.Path == "" || destination.Path == "" {
+		return errors.New("copy: source and destination paths are required")
+	}
+	// Check original operands before any lexical normalization. In particular,
+	// link/../file must not silently select a different file after Clean.
+	if err := source.FS.CheckPath(source.Path); err != nil {
+		return fmt.Errorf("copy: source path component validation: %w", err)
+	}
+	if err := destination.FS.CheckPath(destination.Path); err != nil {
+		return fmt.Errorf("copy: destination path component validation: %w", err)
+	}
+	sourceBase := source.FS.Base(source.Path)
 	sourceInfo, err := validateSource(source.FS, source.Path)
 	if err != nil {
 		return err
 	}
-	target, err := destinationPath(source, destination, sourceInfo)
+	target, err := destinationPath(source, destination, sourceInfo, sourceBase)
 	if err != nil {
 		return err
 	}
@@ -30,7 +43,17 @@ func Copy(source, destination Endpoint) error {
 		// before the same-host rule so the more specific self-copy safeguard
 		// remains in effect for two dials of one profile.
 		if source.Identity == destination.Identity {
-			if rel, relErr := source.FS.Rel(source.Path, target); relErr == nil &&
+			// Comparison paths are separate from the operational source spelling.
+			// Local absolute paths still close the mixed relative/absolute bypass.
+			sourceComparison, err := source.FS.Clean(source.Path)
+			if err != nil {
+				return err
+			}
+			targetComparison, err := destination.FS.Clean(target)
+			if err != nil {
+				return err
+			}
+			if rel, relErr := source.FS.Rel(sourceComparison, targetComparison); relErr == nil &&
 				(rel == "." || !isOutsideRelative(source.FS, rel)) {
 				return fmt.Errorf("copy: refusing to copy directory %q into itself or a descendant (%q)", source.Path, target)
 			}
@@ -39,13 +62,10 @@ func Copy(source, destination Endpoint) error {
 	if source.HostIdentity != "" && source.HostIdentity == destination.HostIdentity {
 		return fmt.Errorf("copy: refusing to copy between remote endpoints on same host %q", source.HostIdentity)
 	}
+	if err := rejectSymlinkedDestination(destination.FS, target); err != nil {
+		return err
+	}
 	if sourceInfo.IsDir() {
-		// A symlink in the destination path can redirect creation into the
-		// source tree after the lexical self-copy check. Reject it before any
-		// destination directory is created.
-		if err := rejectSymlinkedDestination(destination.FS, target); err != nil {
-			return err
-		}
 		return copyDirectory(source.FS, destination.FS, source.Path, target)
 	}
 	return copyFile(source.FS, destination.FS, source.Path, target, sourceInfo.Mode().Perm())
@@ -55,11 +75,28 @@ func Copy(source, destination Endpoint) error {
 // source is placed under the destination when the destination exists as a
 // directory, using the source's base name; otherwise the destination path is
 // used as the target root (a missing destination becomes the copied root).
-func destinationPath(source, destination Endpoint, sourceInfo os.FileInfo) (string, error) {
-	if destInfo, err := destination.FS.Stat(destination.Path); err == nil && destInfo.IsDir() {
-		return destination.FS.Join(destination.Path, source.FS.Base(source.Path)), nil
+// Explicit dot/root directory sources copy contents into an existing directory,
+// without joining a dot or rooted component. Entry names never use this exception.
+func destinationPath(source, destination Endpoint, sourceInfo os.FileInfo, sourceBase string) (string, error) {
+	if destInfo, err := destination.FS.Stat(destination.Path); err == nil {
+		if destInfo.IsDir() {
+			if sourceInfo.IsDir() {
+				// Root spellings such as C:/ need normalized comparison, but
+				// metadata and reads must keep the validated operational path.
+				sourceComparison, err := source.FS.Clean(source.Path)
+				if err != nil {
+					return "", err
+				}
+				if sourceBase == "." || source.FS.Dir(sourceComparison) == sourceComparison {
+					return destination.Path, nil
+				}
+			}
+			return containedChild(destination.FS, destination.Path, sourceBase)
+		}
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return "", err
 	}
-	return destination.Path, nil
+	return destination.FS.Join(destination.Path), nil
 }
 
 // isOutsideRelative reports whether rel leaves base through a parent path.
@@ -81,8 +118,12 @@ func isOutsideRelative(fs Filesystem, rel string) bool {
 // destination.
 func rejectSymlinkedDestination(fs Filesystem, target string) error {
 	for current := target; ; {
-		if info, err := fs.Lstat(current); err == nil && info.Mode()&os.ModeSymlink != 0 {
-			return fmt.Errorf("copy: destination path component %q is a symlink", current)
+		if info, err := fs.Lstat(current); err == nil {
+			if info.Mode()&os.ModeSymlink != 0 {
+				return fmt.Errorf("copy: destination path component %q is a symlink", current)
+			}
+		} else if !errors.Is(err, os.ErrNotExist) {
+			return err
 		}
 		parent := fs.Dir(current)
 		if parent == current {
@@ -115,6 +156,9 @@ func validateSource(fs Filesystem, name string) (os.FileInfo, error) {
 // the temporary writer, and the mode change have all succeeded. Any error
 // after the temporary file is created removes it before returning.
 func copyFile(source, destination Filesystem, sourcePath, targetPath string, mode os.FileMode) error {
+	if err := rejectSymlinkedDestination(destination, targetPath); err != nil {
+		return err
+	}
 	if err := destination.MkdirAll(destination.Dir(targetPath), 0o755); err != nil {
 		return err
 	}
@@ -125,32 +169,21 @@ func copyFile(source, destination Filesystem, sourcePath, targetPath string, mod
 	temp := temporarySibling(destination, targetPath)
 	writer, err := destination.Create(temp)
 	if err != nil {
-		reader.Close()
-		return err
+		return errors.Join(err, reader.Close())
 	}
 	_, copyErr := io.Copy(writer, reader)
-	closeErr := reader.Close()
-	if copyErr != nil {
-		writer.Close()
-		destination.Remove(temp)
-		return copyErr
-	}
-	if closeErr != nil {
-		writer.Close()
-		destination.Remove(temp)
-		return closeErr
-	}
-	if err := writer.Close(); err != nil {
-		destination.Remove(temp)
-		return err
+	closeErr := errors.Join(reader.Close(), writer.Close())
+	if err := errors.Join(copyErr, closeErr); err != nil {
+		return errors.Join(err, destination.Remove(temp))
 	}
 	if err := destination.Chmod(temp, mode); err != nil {
-		destination.Remove(temp)
-		return err
+		return errors.Join(err, destination.Remove(temp))
+	}
+	if err := rejectSymlinkedDestination(destination, targetPath); err != nil {
+		return errors.Join(err, destination.Remove(temp))
 	}
 	if err := destination.Rename(temp, targetPath); err != nil {
-		destination.Remove(temp)
-		return err
+		return errors.Join(err, destination.Remove(temp))
 	}
 	return nil
 }
@@ -178,8 +211,15 @@ func copyDirectory(source, destination Filesystem, sourceRoot, targetRoot string
 	}
 	for _, entry := range entries {
 		name := entry.Name()
+		// Validate before joining in either namespace, including the source.
+		if err := validateEntryName(name); err != nil {
+			return err
+		}
 		sourcePath := source.Join(sourceRoot, name)
-		targetPath := destination.Join(targetRoot, name)
+		targetPath, err := containedChild(destination, targetRoot, name)
+		if err != nil {
+			return err
+		}
 		info, err := validateSource(source, sourcePath)
 		if err != nil {
 			return err

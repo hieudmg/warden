@@ -190,6 +190,83 @@ recorder. See the [T8 evidence report](superpowers/reports/2026-11-14-t8-audit-b
 Independent review and genuine PRF/browser/CSP/native Windows acceptance remain
 pending; this is not a security-release acceptance claim.
 
+## File-transfer path and staging contract (T11 — revised owner decision)
+
+Recursive entries and source basenames appended to an existing destination
+directory now use a portable single-component contract, checked **before either
+source or destination join**:
+
+| Rejected components | Reason |
+| --- | --- |
+| Empty, `.` or `..`; `/` or `\` anywhere | Parent, rooted/UNC or separator traversal |
+| `:` anywhere | Windows drive-qualified/relative names and alternate data streams |
+| Invalid UTF-8, ASCII controls below U+0020, `< > " ? *` or U+007C (vertical bar) | Unsupported native Windows names or ambiguous encoding |
+| Trailing dot or space | Windows component aliases |
+| Case-insensitive `CON`, `PRN`, `AUX`, `NUL`, `CONIN$`, `CONOUT$`, `COM1`–`COM9`, `LPT1`–`LPT9` (including superscript ¹/²/³ variants), also before an extension | Reserved Windows devices; trailing spaces in the stem are ignored for this check |
+
+Ordinary Unicode, internal spaces, `.hidden`, `..child`, `COM0` and `COM10.txt`
+remain supported. This intentionally rejects some legal POSIX **entry names**,
+including colon names in recursive copies or basenames appended to directories.
+It does not reinterpret caller-supplied full POSIX paths as Windows paths:
+explicit `source:literal` to explicit `target:literal` remains supported on POSIX.
+An explicit caller directory source `.` or filesystem root retains the existing
+“copy contents into this directory” behavior: the destination root is used
+directly, with no dot/root component joined. Untrusted directory entries never
+use this exception; dot/parent entries are still rejected.
+
+Original operands are checked component-by-component with Lstat **before**
+lexical normalization, rejecting existing symlink components even before `..` or
+behind a trailing slash/dot. Source metadata and reads retain the caller's
+operational spelling: `/work/link/../file` is rejected, never silently replaced
+by `/work/file`. Missing/non-directory source components cannot be erased to
+select another file; a missing destination component followed by `..` also fails
+before writing. Local comparison paths use native `filepath.Abs`; remote paths
+stay in the independent POSIX `path` namespace, without Windows volumes or case
+folding. Each derived destination child must have native/adapter Rel equal to
+its validated name. Local relative-source to absolute-descendant self-copy and
+source-ancestor aliases into real descendants are rejected before creating the
+target. Source symlink/special-file denial and same-host/self-copy safeguards
+remain; existing destination symlink components are rejected for single files
+as well as directories. These lexical/Lstat checks are not race-proof rooting
+against concurrent replacement of writable ancestors, nor a case-normalization
+or native Windows execution claim.
+
+The owner's revised contract retains local exclusive private sibling staging
+**at creation**, including native owner/DACL privacy on Windows rather than
+POSIX-mode claims. Remote staging is explicitly permitted to use exclusive OPEN
+followed by **handle-based chmod0600 before any Write**. Failed/unsupported chmod
+must close and clean only the newly owned stage, with no content writes. File
+and symlink collisions must not be truncated or removed. Copy/close/final-mode/
+rename failures must preserve the old target; no delete-target rename fallback.
+
+**Owner-accepted remote residual risk:** OPEN cannot send creation permissions
+through this pinned public client API. The new empty file may initially be
+public. Another user can open it before chmod and retain a descriptor to read
+later contents, or write if initial permissions allow; chmod does not revoke
+that descriptor. This is not private-at-creation or full satisfaction of the
+original T11 staging guarantee. No fork, new SFTP library, dependency update,
+custom frames or rsync implementation is authorized. A possible future
+cp-to-rsync replacement is outside this PR.
+
+The revised flow is implemented without dependency changes: POSIX local stages
+use O_EXCL/0600, Windows stages request and validate a native protected owner-only
+DACL at CREATE_NEW, and remote stages use exclusive OPEN plus handle FSETSTAT0600.
+Real in-process SFTP tests observe initial mode0644, then0600 before any WRITE;
+that initial public mode is the accepted gap, not a failed attempt to meet the
+old guarantee. Unsupported/denied chmod tests observe zero writes, one close and
+owned-stage removal. File/symlink collisions remain intact. Only after content
+and both successful closes does the copy apply source mode and atomically rename;
+there is no delete-old-target fallback. Cleanup failures are returned, not hidden.
+Directory copies are not whole-tree transactions and may leave a partial tree.
+Native Windows ACL/path/replacement tests are supplied and cross-compiled, but
+not executed; Windows behavior remains an external acceptance requirement.
+
+See the [T11 measured implementation and historical API blocker](superpowers/reports/2026-11-14-t11-sftp-boundaries.md).
+The historical API blocker applies to the original stronger contract; the owner
+has now authorized the limited flow above without changing dependencies. Native
+Windows traversal/ACL/replacement tests remain required and unverified. This
+section records authority and remaining evidence, not release acceptance.
+
 ## Historical pre-0.23 server notes
 
 The server/master-key notes below describe the previous release, **not** the

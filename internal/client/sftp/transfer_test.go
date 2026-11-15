@@ -179,6 +179,8 @@ func TestPosixRelMatchesFilepathRel(t *testing.T) {
 	}
 	for _, c := range cases {
 		want, wantErr := filepath.Rel(c[0], c[1])
+		// Compare the POSIX spelling even when this test runs on Windows.
+		want = filepath.ToSlash(want)
 		got, gotErr := posixRel(c[0], c[1])
 		if (wantErr == nil) != (gotErr == nil) || got != want {
 			t.Fatalf("posixRel(%q, %q) = %q, %v; want %q, %v", c[0], c[1], got, gotErr, want, wantErr)
