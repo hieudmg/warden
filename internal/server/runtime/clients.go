@@ -13,6 +13,7 @@ import (
 
 	"warden/internal/crypto"
 	"warden/internal/server"
+	"warden/internal/server/audit"
 	"warden/internal/store"
 )
 
@@ -103,6 +104,7 @@ func (p *Plane) clientHTTP(w http.ResponseWriter, r *http.Request) {
 		fail(w, 401, "unauthorized")
 		return
 	}
+	r = requestActor(r, audit.Actor{ClientCredentialID: c.ID})
 	if r.URL.Path == "/api/v1/client/logout" && r.Method == "POST" {
 		if !readClientJSON(w, r, &struct{}{}) {
 			return

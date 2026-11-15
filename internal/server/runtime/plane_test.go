@@ -22,7 +22,7 @@ import (
 	"warden/internal/store"
 )
 
-func runtimeFixture(t *testing.T) (*Plane, *auth.Verifier, setup.Installation, []byte, *ecdsa.PrivateKey) {
+func runtimeFixture(t *testing.T, paths ...string) (*Plane, *auth.Verifier, setup.Installation, []byte, *ecdsa.PrivateKey) {
 	t.Helper()
 	v, err := auth.NewVerifier("https://warden.example", "warden.example")
 	if err != nil {
@@ -44,6 +44,9 @@ func runtimeFixture(t *testing.T) (*Plane, *auth.Verifier, setup.Installation, [
 	i := setup.Installation{Format: 1, PublicOrigin: "https://warden.example", RPID: "warden.example", Owner: owner, Passkey: w, Recovery: r, RecoveryVerifier: crypto.Encode(bytes.Repeat([]byte{6}, 32)), KeyCheck: check}
 	raw, _ := json.Marshal(i)
 	path := filepath.Join(t.TempDir(), "vault.db")
+	if len(paths) > 0 {
+		path = paths[0]
+	}
 	if err := store.CommitInstallation(context.Background(), path, raw); err != nil {
 		t.Fatal(err)
 	}

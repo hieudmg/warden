@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"log/slog"
 	"net/http"
 	"strconv"
 
@@ -36,17 +35,19 @@ func New(s *store.Store, a *audit.Recorder) *Handler {
 }
 
 // record writes an audit event for an HTTP request and surfaces recorder
-// failures as a server warning so audit loss is never silent. Only
-// operation/resource identifiers and the sanitized recorder error are
-// logged — never secrets, SQL text, or request bodies.
+// failures as a generic server warning so audit loss is never silent.
 func (h *Handler) record(r *http.Request, op, resourceType, resourceID, result string, err error, metadata map[string]any) {
+	var graphErr *GraphError
+	switch {
+	case errors.Is(err, errInvalidJSON):
+		err = audit.InvalidJSON
+	case errors.Is(err, errPayloadTooLarge):
+		err = audit.PayloadTooLarge
+	case errors.As(err, &graphErr):
+		err = audit.InvalidGraph
+	}
 	if aerr := h.audit.RecordRequest(r.Context(), r, op, resourceType, resourceID, result, err, metadata); aerr != nil {
-		slog.Warn("audit write failed",
-			"op", op,
-			"resource_type", resourceType,
-			"resource_id", resourceID,
-			"error", aerr,
-		)
+		audit.WarnFailure(op, resourceType, resourceID)
 	}
 }
 

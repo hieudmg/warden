@@ -202,6 +202,17 @@ func (p *Plane) session(r *http.Request) (store.Session, bool) {
 	return x, true
 }
 func (p *Plane) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	if op := securityAuditOperation(r.Method, r.URL.Path); op != "" {
+		event, request := auditedRequest(w, r)
+		w, r = event, request
+		defer func() {
+			if v := recover(); v != nil {
+				p.recordSecurityRequest(r, event, op, true)
+				panic(v)
+			}
+			p.recordSecurityRequest(r, event, op, false)
+		}()
+	}
 	w.Header().Set("Cache-Control", "no-store")
 	w.Header().Set("X-Content-Type-Options", "nosniff")
 	w.Header().Set("X-Frame-Options", "DENY")
@@ -240,6 +251,9 @@ func (p *Plane) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if recovering {
 		x = restricted
 		authenticated = true
+	}
+	if authenticated && !recovering {
+		r = requestActor(r, audit.Actor{CredentialID: x.CredentialID})
 	}
 	publicRecovery := r.URL.Path == "/api/v1/auth/recovery/begin" || r.URL.Path == "/api/v1/auth/recovery/proof"
 	publicLogin := r.URL.Path == "/api/v1/auth/login/begin" || r.URL.Path == "/api/v1/auth/login/finish" || publicRecovery
@@ -700,6 +714,7 @@ func (p *Plane) finish(w http.ResponseWriter, r *http.Request, body []byte, purp
 				return
 			}
 		}
+		requestActor(r, audit.Actor{CredentialID: c.Credential})
 		cookie(w, sessionCookie, raw, 43200)
 		cookie(w, loginCookie, "", -1)
 		server.WriteJSON(w, 200, map[string]any{"authenticated": true, "unlocked": p.vault.Unlocked(), "csrf": csrf, "credential_id": c.Credential})

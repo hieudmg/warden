@@ -121,6 +121,75 @@ transfer format and exports are unchanged. No external DB/proxy TLS was added.
 Independent review and genuine PRF/browser/CSP/native Windows acceptance remain
 separate pending requirements.
 
+## Audit classifications and metadata boundary (T8)
+
+New profile/report and runtime security audit events retain server-owned operation
+and resource-type names, result, server timestamp, positive numeric resource IDs
+when available, and the socket peer's canonical numeric IP/address-port. Project
+names, report labels/agent models and raw request paths/queries are not audit IDs.
+`Forwarded`, `X-Forwarded-*` and caller identity headers cannot supply source or
+actor identity. Missing/invalid/overlong peer addresses are omitted, not truncated
+into another address.
+
+The audit `error` field is empty for success or one of these fixed classifications:
+`validation`, `invalid_json`, `invalid_graph`, `unauthorized`, `locked`,
+`rate_limited`, `storage`, `internal`, `not_found`, `conflict`, `payload_too_large`,
+`cancelled`, `timeout`. Known sentinels are classified without their messages;
+unknown errors become `internal`. No raw `err.Error()` fallback or truncation of
+validation values is permitted. Runtime security events classify HTTP outcomes
+and include numeric `status`; generic 5xx outcomes are `internal`. This is an
+audit boundary, not a change to existing validation-response envelopes.
+
+Allowed metadata is deliberately small:
+
+- `archived`: a boolean; `groups`, `key_pairs`, `ssh_connections`, `db_connections`,
+  `projects`, `reports`, `connection_notes`: nonnegative built-in integer counts.
+- `status`: a built-in integer HTTP status (100–599).
+- `credential_id`: the validated authenticator's public credential ID (at most
+  1,366 base64url-alphabet bytes, corresponding to the existing 1,024-byte ID cap).
+  `client_credential_id`: a validated nonsecret durable client ID (at most 128
+  base64url-alphabet bytes). HTTP recorder actors come from server-authenticated
+  request context, never caller metadata or headers. Anonymous/restricted-recovery
+  requests have no fabricated credential actor. Sessions currently have only a
+  token hash, not a separately safe session ID: **that hash is not recorded**.
+- `user_agent`: an explicitly permitted untrusted header, capped at **512 bytes**
+  before UTF-8/control filtering. A split final UTF-8 sequence and controls are
+  dropped. The stored value can therefore be shorter (e.g. 510 bytes for a split
+  three-byte character). This field is not a secret detector: callers must not
+  place secrets in User-Agent; the allowance does not extend to error messages.
+
+Metadata is at most **4,096 encoded JSON bytes**, including keys, punctuation and
+escaping, not 4,096 runes. Only fixed known fields with exact built-in primitive
+types are considered. Unknown fields, nested/cyclic containers, channels,
+custom Stringers/JSON marshalers and oversized ID values are omitted without
+walking/marshaling their contents. Counts and actors are prioritized; UA is
+omitted if its escaped encoding would exceed the total cap. Caller maps are not
+mutated. No names, model/device labels, report contents, SQL, passwords, raw
+bearer/session/poll/action tokens, full token verifiers, recovery proofs/roots,
+PRF output or DEKs are allowed in these fields.
+
+Runtime security events cover the exact existing login/fresh, lock/unlock/logout,
+passkey, recovery/rotation, CLI pairing/poll/status/logout and web client-management
+routes on success/failure. They preserve the original response status and existing
+response-controller/lease/abort protections. Setup/auth verifier packages had no
+audit recorder or slog producers; setup has no durable store before finalization
+and does not log raw setup passwords/proofs/errors. Existing profile/report events
+remain enabled. Audit insertion failure returns only `audit persistence failed`
+and emits a generic `audit write failed` warning classified `storage`, never the
+original driver error or SQL parameters. Existing best-effort event-write handling
+is retained; this is not a new transactional fail-closed mutation policy.
+
+The SQLite schema and managed `warden-data` v1 transfer contract are unchanged.
+There is no audit-list API/UI consumer in the current source. These limits apply
+to **new recorder events**, not historical rows: previously stored plaintext audit
+values are not automatically rewritten or deleted. Audit/auth/session/client state
+is still excluded from export/import. Protect retained databases/backups and do
+not infer that this change removes earlier exposure. The low-level store append
+method persists already-vetted events; all current production producers use the
+recorder. See the [T8 evidence report](superpowers/reports/2026-11-14-t8-audit-boundaries.md).
+Independent review and genuine PRF/browser/CSP/native Windows acceptance remain
+pending; this is not a security-release acceptance claim.
+
 ## Historical pre-0.23 server notes
 
 The server/master-key notes below describe the previous release, **not** the
