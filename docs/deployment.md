@@ -2,15 +2,16 @@
 
 Warden's security-hardening branch requires application authentication and a
 configured HTTPS public origin; a private network is optional defense in depth,
-not authentication or permission to trust additional hosts/origins. The release
-installer reference below describes the previous release; the detailed
-traditional systemd reference is
+not authentication or permission to trust additional hosts/origins. The installer
+reference below describes this branch's T14 implementation, not a published or
+accepted security release. The dedicated systemd reference is
 [`deploy/systemd/README.md`](../deploy/systemd/README.md).
 
 ## Breaking-storage cutover on the security-hardening branch
 
-The installer/service examples below describe the previous release; installer
-hardening remains T14. They are **not** an encrypted database migration. Follow
+Installers and executable-only self-upgrades are **not** an encrypted database
+migration. Before replacing an old executable, retain its exact binary and export
+with that old release. Follow
 [the manual v1 transfer and rollback runbook](migration.md): export with the old
 release, retain its binary/config/coherent DB+WAL/SHM/master key, initialize a
 separate fresh destination, authenticate/unlock/import and verify before
@@ -22,7 +23,18 @@ synthetic T5 tests, and no automatic restart/deletion/cleanup is added.
 ## Release installers
 
 Installers download and SHA-256-verify assets from the latest GitHub release.
-They prompt for settings and are safe to rerun:
+Linux installers require Bash, Python 3 and curl; Windows uses Windows PowerShell
+5.1 with .NET Framework 4.7.2+ (not PowerShell Core). Native Windows validation is
+still required/pending. No installer skips certificate/hostname verification.
+Missing Linux prerequisites (including Python 3) fail before downloads or binary/
+unit publication; the installer does not install dependencies for you. Server
+publication prepares both files first, retains private original-binary snapshots
+until commit, and rolls back if absent-unit publication fails. A competing unit
+is never replaced, including directory/symlink collisions. If rollback I/O fails,
+the diagnostic identifies private recovery staging retained for manual recovery.
+These are per-file atomic operations/error rollback, not a power-loss transaction.
+
+They prompt for settings and can be rerun for executable updates:
 
 - Linux client: `scripts/install-client.sh`
 - Windows client: `scripts/install-client.ps1`
@@ -32,15 +44,32 @@ Client installers run in user scope. Linux server installer runs as the target
 service user and stores all server files under `~/.warden` by default:
 
 ```text
-server.json
-warden.db
-master.key
 warden-server
 warden-server.service
+# Created ONLY by later explicit manual init/runtime:
+server.json
+warden.db (plus runtime WAL/SHM)
 ```
 
-The server installer creates the master key if absent, preserves the existing
-key/database during upgrades, and refreshes the service unit.
+The server installer asks only for the directory. It never reads/generates a
+`master.key`, writes/replaces server configuration, initializes a database, or
+executes setup/service commands. Existing config, DB/WAL/SHM, legacy key and
+service unit (including custom hardening) stay untouched; a hardened unit is
+created only when absent. No passphrase or first-visitor fallback exists.
+
+For a **fresh** installation, run explicitly from an interactive terminal:
+
+```sh
+~/.warden/warden-server init --config ~/.warden/server.json
+# Select fresh DB storage, HTTPS origin/RP and TLS or explicit loopback proxy.
+# Complete passkey/PRF registration and save/re-enter recovery; init exits.
+```
+
+Only after successful init should you manually install/enable the service below.
+An initialized installation does not need re-init. Legacy storage needs a separate
+fresh destination and the manual export/import/verification/cutover workflow;
+never overwrite a config, DB, key or identity marker to suppress refusal. See
+[initialization](initialization.md) and [migration/rollback](migration.md).
 
 ## Self-upgrade
 
@@ -52,7 +81,23 @@ warden-server upgrade
 ```
 
 It downloads the latest released server asset, verifies its SHA-256 digest
-against the release `SHA256SUMS` file, and replaces only the executable. It
+against exactly one matching filename in the release `SHA256SUMS` file, and
+atomically replaces only the executable on Unix. Downloads require HTTPS at the
+initial URL and **every** redirect; verified cross-host HTTPS CDN redirects are
+allowed (unlike credential-bearing API redirects). Injected updater clients
+cannot supply TLS dialers, hostname/ALPN delegates or unknown transports.
+
+Updater and installer streams are bounded to **256 MiB binary / 1 MiB checksums**,
+without trusting Content-Length. Connect/TLS/headers have 10-second phase bounds;
+one **5-minute operation budget** covers both downloads, redirects and any
+standard Go transport retry. Shell/PowerShell installers do not automatically
+retry failed transfers: rerun explicitly; no attempt gets a fresh 5-minute
+budget. Linux shell installers supervise real curl with a monotonic deadline and
+stream counting, not only `--retry-max-time` or announced file sizes. Staging is
+exclusive/private before bytes and cleaned on failure/interruption; destination
+publication follows successful complete verification. Windows scheduled updater
+replacement uses an encoded detached helper and reports **scheduled**, not a
+completed replacement; native Windows ACL/helper/installer execution is pending. It
 accepts no arguments and never modifies `server.json`, `warden.db`,
 `master.key`, or `warden-server.service`. Only the target published in the
 latest release is supported; any other OS/architecture fails before the
@@ -63,12 +108,20 @@ restart steps for the scope in use, shown under
 [Generated systemd service](#generated-systemd-service).
 
 Set `WARDEN_REPO` or `WARDEN_RELEASE_BASE_URL` to upgrade from a release source
-other than the default `hieudmg/warden` GitHub releases. The client upgrades
+other than the default `hieudmg/warden` GitHub releases. Overrides must still be
+HTTPS; there is no insecure/file/local-HTTP production bypass. For private CAs,
+configure platform trust (curl fixtures may use `CURL_CA_BUNDLE`, never `-k`).
+Checksums delivered by the same release are integrity checks, not independent
+authenticity/provenance or anti-rollback proof. Intentional mutable same-version
+releases are unchanged. The client upgrades
 itself with `warden upgrade`; see the [CLI guide](cli.md).
 
 ## Generated systemd service
 
-The server installer prints both setup paths after every install or update.
+The server installer prints both setup paths after every install or update,
+explicitly gated on successful manual initialization. It runs none of them.
+The generated unit retains `UMask=0077`, `NoNewPrivileges=yes`,
+`ProtectSystem=strict` and `ReadWritePaths` for the selected storage directory.
 The generated unit has no `User=` field so it works as a user service. For a
 system service, install it and add a drop-in assigning the target user.
 
@@ -215,10 +268,16 @@ plaintext external legs remain scope-excluded risks, not end-to-end TLS claims.
 
 ## Backup and restore
 
-Back up both items separately:
+For this branch, protect the initialized database (including auth metadata and
+wrapped keys), coherent WAL/SHM when present, nonsecret HTTPS config/TLS material,
+and **offline recovery key**. No standalone plaintext vault master key is created
+or loaded. Keep recovery separately protected; losing all usable passkeys and
+recovery has no administrative bypass. Restore only a coherent matching set with
+the service stopped; restart remains locked and requires manual authentication
+and unlock. Do not manipulate database markers to force a restore/upgrade.
 
-1. SQLite database, using SQLite online backup or a WAL-safe checkpoint.
-2. The standalone master key in a separate protected backup.
-
-Restore with the service stopped and preserve key mode `0600`. Losing the key
-makes the database unreadable.
+For **legacy rollback**, separately retain the exact old binary/config/coherent
+DB/WAL/SHM/master key with original permissions. Never start the old release on
+the new initialized DB or the new release on the old DB. Follow
+[the retention and rollback runbook](migration.md), not automatic deletion or an
+in-place migration. No real service or storage operations were run for T14.

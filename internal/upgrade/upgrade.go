@@ -31,21 +31,17 @@ const (
 	Server
 )
 
-// Doer performs an HTTP request. It matches *http.Client.
-type Doer interface {
-	Do(*http.Request) (*http.Response, error)
-}
-
 // Options configures an upgrade. Empty fields use the production defaults
 // described in the design doc.
 type Options struct {
 	Repo           string
 	ReleaseBaseURL string
-	HTTPClient     Doer
+	HTTPClient     *http.Client
 	GOOS           string
 	GOARCH         string
 	ExecutablePath string
 	Replace        func(tempPath, executablePath string, mode fs.FileMode) (scheduled bool, err error)
+	settings       *downloadSettings
 }
 
 // Result reports the asset an upgrade used and whether replacement was
@@ -122,13 +118,13 @@ if ([string]::IsNullOrEmpty($source) -or [string]::IsNullOrEmpty($target)) { exi
 $parent = Get-Process -Id $parentId -ErrorAction SilentlyContinue
 if ($parent) { [void]$parent.WaitForExit(30000) }
 
-# Move the verified download over the target. The destination can stay locked
+# Atomically replace the target with the verified download. It can stay locked
 # briefly while the previous process shuts down, so retry instead of discarding
 # the verified download on the first failure.
 $deadline = (Get-Date).AddSeconds(90)
 while ((Get-Date) -lt $deadline) {
     try {
-        Move-Item -LiteralPath $source -Destination $target -Force -ErrorAction Stop
+        [IO.File]::Replace($source, $target, $null)
         exit 0
     } catch {
         Start-Sleep -Milliseconds 250
@@ -189,9 +185,20 @@ func Upgrade(ctx context.Context, kind Kind, opts Options) (Result, error) {
 		return Result{}, err
 	}
 
-	client := opts.HTTPClient
-	if client == nil {
-		client = http.DefaultClient
+	settings := defaultDownloadSettings
+	if opts.settings != nil {
+		settings = *opts.settings
+	}
+	ctx, cancel := context.WithTimeout(ctx, settings.total)
+	defer cancel()
+	client, err := downloadClient(opts.HTTPClient, settings)
+	if err != nil {
+		return Result{}, err
+	}
+	defer client.CloseIdleConnections()
+	baseURL := releaseBaseURL(repo, opts.ReleaseBaseURL)
+	if err := httpsURL(baseURL); err != nil {
+		return Result{}, err
 	}
 	executablePath := opts.ExecutablePath
 	if executablePath == "" {
@@ -200,17 +207,19 @@ func Upgrade(ctx context.Context, kind Kind, opts Options) (Result, error) {
 			return Result{}, fmt.Errorf("resolve executable path: %w", err)
 		}
 	}
-	info, err := os.Stat(executablePath)
+	info, err := os.Lstat(executablePath)
 	if err != nil {
 		return Result{}, fmt.Errorf("inspect executable %s: %w", executablePath, err)
+	}
+	if !info.Mode().IsRegular() {
+		return Result{}, fmt.Errorf("inspect executable: target must be a regular file, not a symlink")
 	}
 	replace := opts.Replace
 	if replace == nil {
 		replace = replaceExecutable
 	}
 
-	baseURL := releaseBaseURL(repo, opts.ReleaseBaseURL)
-	temp, err := os.CreateTemp(filepath.Dir(executablePath), "."+filepath.Base(executablePath)+".upgrade-*")
+	temp, err := createUpgradeTemp(filepath.Dir(executablePath), "."+filepath.Base(executablePath)+".upgrade-")
 	if err != nil {
 		return Result{}, fmt.Errorf("create temporary file beside %s: %w", executablePath, err)
 	}
@@ -222,7 +231,7 @@ func Upgrade(ctx context.Context, kind Kind, opts Options) (Result, error) {
 		}
 	}()
 
-	if err := download(ctx, client, baseURL+"/"+asset, temp); err != nil {
+	if err := download(ctx, client, baseURL+"/"+asset, temp, settings.binaryBytes); err != nil {
 		_ = temp.Close()
 		return Result{}, err
 	}
@@ -230,10 +239,17 @@ func Upgrade(ctx context.Context, kind Kind, opts Options) (Result, error) {
 		return Result{}, fmt.Errorf("close %s: %w", tempPath, err)
 	}
 
-	if err := verifyChecksum(ctx, client, baseURL+"/"+checksumFile, asset, tempPath); err != nil {
+	if err := verifyChecksum(ctx, client, baseURL+"/"+checksumFile, asset, tempPath, settings.checksumBytes); err != nil {
 		return Result{}, err
 	}
 
+	if err := ctx.Err(); err != nil {
+		return Result{}, err
+	}
+	current, err := os.Lstat(executablePath)
+	if err != nil || !os.SameFile(info, current) {
+		return Result{}, fmt.Errorf("executable changed during download")
+	}
 	scheduled, err := replace(tempPath, executablePath, info.Mode().Perm())
 	if err != nil {
 		return Result{}, fmt.Errorf("replace %s: %w", executablePath, err)
@@ -243,21 +259,25 @@ func Upgrade(ctx context.Context, kind Kind, opts Options) (Result, error) {
 	return Result{Asset: asset, ExecutablePath: executablePath, Scheduled: scheduled}, nil
 }
 
-func download(ctx context.Context, client Doer, url string, dst *os.File) error {
+func download(ctx context.Context, client *http.Client, url string, dst *os.File, limit int64) error {
 	resp, err := get(ctx, client, url)
 	if err != nil {
 		return err
 	}
 	defer resp.Body.Close()
 
-	if _, err := io.Copy(dst, resp.Body); err != nil {
+	n, err := io.Copy(dst, io.LimitReader(resp.Body, limit+1))
+	if err != nil {
 		return fmt.Errorf("download %s: %w", url, err)
 	}
-	return nil
+	if n > limit {
+		return fmt.Errorf("download exceeds %d bytes", limit)
+	}
+	return resp.Body.Close()
 }
 
-func verifyChecksum(ctx context.Context, client Doer, url, asset, path string) error {
-	want, err := fetchChecksum(ctx, client, url, asset)
+func verifyChecksum(ctx context.Context, client *http.Client, url, asset, path string, limit int64) error {
+	want, err := fetchChecksumLimit(ctx, client, url, asset, limit)
 	if err != nil {
 		return err
 	}
@@ -272,30 +292,54 @@ func verifyChecksum(ctx context.Context, client Doer, url, asset, path string) e
 }
 
 // fetchChecksum returns the digest recorded for asset in a SHA256SUMS file.
-// Entries may name the asset as "asset", "./asset", or "*asset", matching
-// the release script and shell installers.
-func fetchChecksum(ctx context.Context, client Doer, url, asset string) (string, error) {
+// Accept exact sha256sum filenames, optionally ./-prefixed or binary-marked.
+// The publisher writes sha256sum ./*; no basename or substring matching.
+func fetchChecksum(ctx context.Context, client *http.Client, url, asset string) (string, error) {
+	return fetchChecksumLimit(ctx, client, url, asset, maxChecksumBytes)
+}
+func fetchChecksumLimit(ctx context.Context, client *http.Client, url, asset string, limit int64) (string, error) {
 	resp, err := get(ctx, client, url)
 	if err != nil {
 		return "", err
 	}
 	defer resp.Body.Close()
 
-	data, err := io.ReadAll(resp.Body)
+	data, err := io.ReadAll(io.LimitReader(resp.Body, limit+1))
 	if err != nil {
 		return "", fmt.Errorf("read %s: %w", url, err)
 	}
+
+	if err := resp.Body.Close(); err != nil {
+		return "", err
+	}
+	if int64(len(data)) > limit {
+		return "", fmt.Errorf("checksum exceeds %d bytes", limit)
+	}
+	var digest string
 	for _, line := range strings.Split(string(data), "\n") {
-		fields := strings.Fields(line)
-		if len(fields) != 2 {
+		if line == "" {
 			continue
 		}
-		name := strings.TrimPrefix(strings.TrimPrefix(fields[1], "./"), "*")
+		// sha256sum uses a space and a text-space/binary-star marker.
+		if len(line) < 67 || line[64] != ' ' || (line[65] != ' ' && line[65] != '*') {
+			return "", fmt.Errorf("invalid SHA256SUMS entry")
+		}
+		raw, err := hex.DecodeString(line[:64])
+		if err != nil || len(raw) != sha256.Size {
+			return "", fmt.Errorf("invalid SHA256SUMS digest")
+		}
+		name := strings.TrimPrefix(line[66:], "./")
 		if name == asset {
-			return strings.ToLower(fields[0]), nil
+			if digest != "" {
+				return "", fmt.Errorf("multiple checksum entries for %s", asset)
+			}
+			digest = strings.ToLower(line[:64])
 		}
 	}
-	return "", fmt.Errorf("checksum for %s not found in %s", asset, url)
+	if digest == "" {
+		return "", fmt.Errorf("checksum for %s not found in %s", asset, url)
+	}
+	return digest, nil
 }
 
 func fileSHA256(path string) (string, error) {
@@ -312,7 +356,10 @@ func fileSHA256(path string) (string, error) {
 	return hex.EncodeToString(hash.Sum(nil)), nil
 }
 
-func get(ctx context.Context, client Doer, url string) (*http.Response, error) {
+func get(ctx context.Context, client *http.Client, url string) (*http.Response, error) {
+	if err := httpsURL(url); err != nil {
+		return nil, err
+	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return nil, fmt.Errorf("request %s: %w", url, err)

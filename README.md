@@ -26,60 +26,68 @@ old binary/config/coherent DB+WAL/SHM/key for rollback and manually verify impor
 data before cutover. Export files contain plaintext secrets.
 
 Installers download and SHA-256-verify assets from the latest GitHub release.
-They ask for configuration and can be rerun to update an existing installation.
-Client timeout, server database, and master key are preserved on update; client
-endpoint is updated from the prompt.
+This branch's installers enforce verified HTTPS on every release hop, bounded
+streams (binary 256 MiB/checksums 1 MiB) and one 5-minute download budget. Linux
+requires Python 3 and curl; Windows requires Windows PowerShell 5.1/.NET Framework
+4.7.2+ (native Windows acceptance pending). Client timeout/trust settings and server config,
+DB/WAL/SHM, legacy key and existing service unit are preserved on update; the
+client HTTPS endpoint is updated from the prompt. These changes are not yet a
+published/accepted security release. The bootstrap examples fetch `main` and
+latest published assets, not this unpublished branch. Review the script at a
+trusted revision before execution; release checksums do not independently
+authenticate the bootstrap script.
 
 ### Linux client
 
 User-scope install; no `sudo` required:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/hieudmg/warden/main/scripts/install-client.sh \
-  | bash
+curl --disable --proto '=https' --proto-redir '=https' --connect-timeout 10 --max-time 300 \
+  --max-filesize 1048576 -fsSL \
+  https://raw.githubusercontent.com/hieudmg/warden/main/scripts/install-client.sh | bash
 ```
 
-Prompts for server endpoint. Defaults:
+Prompts for the server's HTTPS origin (no guessed new-install endpoint):
 
 - Binary: `~/.local/bin/warden`
 - Config: `~/.config/warden/client.json`
-- Endpoint: `http://127.0.0.1:8080`
+- Endpoint: existing configured origin, or explicit entry on a fresh install.
 
 ### Windows client
 
 User-scope install; no administrator rights required:
 
 ```powershell
-Invoke-WebRequest `
-  -Uri https://raw.githubusercontent.com/hieudmg/warden/main/scripts/install-client.ps1 `
-  -OutFile "$env:TEMP\warden-install-client.ps1"
-powershell -ExecutionPolicy Bypass -File "$env:TEMP\warden-install-client.ps1"
+# Retrieve/review scripts/install-client.ps1 over trusted HTTPS and save it
+# in a private local directory. Then, in Windows PowerShell 5.1:
+powershell.exe -NoProfile -File .\install-client.ps1
 ```
 
-Prompts for server endpoint. Defaults:
+Prompts for the server's HTTPS origin (no guessed new-install endpoint):
 
 - Binary: `%LOCALAPPDATA%\Warden\warden.exe`
 - Config: `%APPDATA%\warden\client.json`
-- Endpoint: `http://127.0.0.1:8080`
+- Endpoint: existing configured origin, or explicit entry on a fresh install.
 
 ### Linux server
 
 Run as target service user; no `sudo` required during installation:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/hieudmg/warden/main/scripts/install-server.sh \
-  | bash
+curl --disable --proto '=https' --proto-redir '=https' --connect-timeout 10 --max-time 300 \
+  --max-filesize 1048576 -fsSL \
+  https://raw.githubusercontent.com/hieudmg/warden/main/scripts/install-server.sh | bash
 ```
 
-Prompts for listen host, port, and Warden directory. Defaults:
-
-- Host: `127.0.0.1`
-- Port: `8080`
-- Directory: `~/.warden`
-
-Server binary, config, database, master key, and generated systemd unit live
-in the selected directory. Installer prints user-scope and system-scope
-systemd setup/restart commands after every install or update.
+Prompts only for the Warden directory (default `~/.warden`). It installs the
+binary and an absent hardened systemd unit, **not** a key/config/database. Run
+`~/.warden/warden-server init --config ~/.warden/server.json` manually from an
+interactive terminal for fresh storage; init owns HTTPS/RP/TLS/storage prompts
+and recovery confirmation. Only after init succeeds, choose the printed manual
+user- or system-scope service setup. Existing initialized storage needs no re-init;
+legacy storage needs retained old artifacts, old-release export and separate
+fresh initialization/import/verification before manual cutover. Nothing is
+automatically started/restarted or reset. See [deployment](docs/deployment.md).
 
 ### Upgrade
 
@@ -93,7 +101,7 @@ warden-server upgrade
 Each command downloads the latest released binary for the current platform,
 verifies it against the release `SHA256SUMS`, and replaces only its own
 executable. Client config, cached credentials, server config, the database,
-the master key, and the service unit are left untouched.
+any retained legacy `master.key`, and the service unit are left untouched.
 
 `warden-server upgrade` does not restart the service. It prints the manual
 user-scope and system-scope systemd restart commands, which are also listed in
