@@ -63,6 +63,64 @@ from a successful import. Tests use only synthetic data/disposable SQLite; this
 is not live-account, native Windows, browser PRF/CSP or release acceptance.
 Existing external DB/proxy transport risks are unchanged.
 
+## Transport graph validation and budget (T7)
+
+A complete SSH or DB transport resolution permits **1,024 expanded profile
+occurrences**, not 1,024 distinct IDs or edges. Charge the root as occurrence 1,
+then each followed reference **before lookup and recursive descent**, even when
+that ID appeared earlier. A tunneled DB root, its SSH target, and every expanded
+SSH hop share one budget. A direct DB consumes one occurrence. Key-pair presence
+checks/loads do not add profile occurrences; each is bounded by an already
+charged SSH occurrence. Existing depth **32 SSH nodes per path**, including the
+SSH target, remains independent; a DB root does not add SSH depth.
+
+Examples (letters stand for synthetic profile IDs, not credentials):
+
+- SSH `R -> [L repeated 1,023 times]`, with no jumps on `L`, uses 1,024
+  occurrences and succeeds. One more `L` is rejected before its lookup.
+- DB `D -> R -> [L repeated 1,022 times]` uses the same 1,024 occurrences;
+  one more `L` fails. The SSH sub-resolution cannot reset the budget.
+- If `R -> [B,A,B]` and `B -> [A]`, the six-occurrence SSH resolution returns
+  jumps `[A,B,A,A,B]`, then the separate target `R`. Nothing is deduplicated.
+
+Validation reads metadata only: all reachable routes, missing/archived targets
+and hops, cycles, depth/budget, and selected key-pair existence/private-key
+presence. Only a fully valid graph can load passwords, proxy passwords or key
+material. Stored route arrays are parsed incrementally, without first allocating
+an unbounded edge slice. Failure returns no partial bundle. Initial missing
+profiles and any archived profile retain generic `404 not_found`; malformed,
+cyclic, missing-hop, missing/cleared-key, depth and budget failures use
+`422 invalid_graph`. New graph errors contain fixed text/numeric IDs/limits,
+never raw stored JSON. Broader audit-value cleanup remains T8, not a T7 claim.
+
+Both phases use **one SQLite read transaction**. Its first metadata read fixes
+which rows are validated and later decrypted; concurrent profile/archive/key
+updates cannot replace the graph or selected secrets between the phases.
+Updates can commit under WAL, and later resolutions see them. This is snapshot
+consistency, not retroactive cancellation of an already admitted resolution
+when a profile is subsequently archived. The transaction is closed on every
+exit and exposes no write operations. The existing runtime vault/response lease
+still independently protects key access and response emission through lock.
+
+Cancellation is checked before opening a snapshot, before each profile lookup
+and recursive descent, during edge traversal/key-presence validation, and before
+secret loads and successful return. SQLite reads use the request context.
+Cancellation rejects without a partial bundle; cancellation during metadata
+validation triggers zero decrypt callbacks. Already started, bounded field-codec
+calls are synchronous, not individually interruptible. This is an operation-count
+bound, not a wall-clock guarantee for arbitrary storage or a new transport/SSH
+network cancellation claim. At most 1,024 profile metadata lookups occur; at most
+one key-presence query per SSH occurrence follows. After validation, each profile
+occurrence loads once and each selected pair at most once per SSH occurrence
+(duplicates preserved), bounding total row queries by 4,096 and field decrypt
+callbacks by 5,120, with fewer when fields/key selections are absent.
+
+See the [T7 evidence report](superpowers/reports/2026-11-14-t7-graph-budget.md).
+Archive persistence, dangling soft-reference import, the `warden-data` v1
+transfer format and exports are unchanged. No external DB/proxy TLS was added.
+Independent review and genuine PRF/browser/CSP/native Windows acceptance remain
+separate pending requirements.
+
 ## Historical pre-0.23 server notes
 
 The server/master-key notes below describe the previous release, **not** the
