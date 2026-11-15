@@ -6,6 +6,7 @@ import { DataTable } from "@/components/data-table"
 import { Button } from "@/components/ui/button"
 import { DialogFooter } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
+import { PasswordInput } from "@/components/password-input"
 import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
 import { SSHProfileCombobox, type SSHProfileOption } from "@/components/ssh-profile-combobox"
@@ -325,7 +326,8 @@ export function DBForm({ connection, sshProfiles, groups, pending, error, onSubm
       </div>
       <div className="grid gap-1.5">
         <Label htmlFor="db-password">Password</Label>
-        <Input
+        <PasswordInput
+          label="Password"
           id="db-password"
           placeholder="Leave blank to keep the stored value"
           value={form.password}

@@ -167,7 +167,17 @@ function ReportContent({ report }: { report: Report | null }) {
         </div>
       </dl>
       <div className="markdown-body">
-        <ReactMarkdown skipHtml>{report.summary}</ReactMarkdown>
+        <ReactMarkdown skipHtml components={{
+          img: ({ src, alt }) => {
+            // No img/src, CSS, preload, or network primitive is created here.
+            // The renderer has already applied its default safe URL transform.
+            let url: URL
+            try { url = new URL(typeof src === 'string' ? src : '', window.location.href) } catch { return <span>Image unavailable</span> }
+            if (!src || !['https:', 'http:'].includes(url.protocol)) return <span>Image unavailable</span>
+            return <span><span>Opening this image contacts the image host and reveals your IP address. </span><button type="button" aria-label={`Open image ${alt || 'without description'} externally; reveals your IP address`} onClick={() => window.open(url.href, '_blank', 'noopener,noreferrer')}>Open image: {alt || 'without description'}</button></span>
+          },
+          a: ({ href, children }) => <a href={href} target="_blank" rel="noopener noreferrer">{children}</a>,
+        }}>{report.summary}</ReactMarkdown>
       </div>
     </article>
   )
@@ -209,7 +219,7 @@ export function ProjectsReportsTab({ resource, notify }: ProjectsReportsTabProps
     setReportsError(null)
     try {
       const data = await api.listReports(project.name, next.signal)
-      if (id === requestID.current) {
+      if (!next.signal.aborted && id === requestID.current) {
         setReports(data)
         setReportsLoading(false)
         return data
@@ -223,7 +233,7 @@ export function ProjectsReportsTab({ resource, notify }: ProjectsReportsTabProps
     return []
   }, [])
 
-  useEffect(() => () => controller.current?.abort(), [])
+  useEffect(() => () => { requestID.current++; controller.current?.abort() }, [])
 
   const selectProject = (project: Project) => {
     setSelectedProject(project)

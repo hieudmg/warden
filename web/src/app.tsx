@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react"
 import { api } from "@/api/client"
+import { securityEpoch, useSecurityEpoch } from './auth/session'
 import { Button } from "@/components/ui/button"
 import {
   Dialog,
@@ -123,48 +124,59 @@ function DataTransferActions({ onImported, notify }: DataTransferActionsProps) {
   const [pending, setPending] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
+  const generation = useRef(0)
+  const controller = useRef(new AbortController())
+  useEffect(() => () => { generation.current++; controller.current.abort() }, [])
+  const current = (id: number, epoch: number) => id === generation.current && epoch === securityEpoch()
+  const reset = () => { generation.current++; controller.current.abort(); controller.current = new AbortController(); setPending(false) }
   const open = (next: TransferMode) => {
+    reset()
     setMode(next)
     setFile(null)
     setError(null)
   }
 
   const close = () => {
-    if (pending) return
+    reset()
     setMode(null)
     setFile(null)
     setError(null)
   }
 
   const confirmExport = async () => {
+    const id = ++generation.current, epoch = securityEpoch()
     setPending(true)
     setError(null)
     try {
-      const blob = await api.exportData()
+      const blob = await api.exportData(controller.current.signal)
+      if (!current(id, epoch)) return
       downloadBlob(blob, exportFilename)
       notify(`Exported data to ${exportFilename}. Delete it after migration.`, "success")
       setMode(null)
     } catch (err) {
-      setError(`Export failed: ${errorMessage(err)}`)
+      if (current(id, epoch)) setError(`Export failed: ${errorMessage(err)}`)
     } finally {
-      setPending(false)
+      if (current(id, epoch)) setPending(false)
     }
   }
 
   const confirmImport = async () => {
     if (!file) return
+    const id = ++generation.current, epoch = securityEpoch()
     setPending(true)
     setError(null)
     try {
-      await api.importData(file)
+      await api.importData(file, controller.current.signal)
+      if (!current(id, epoch)) return
       await onImported()
+      if (!current(id, epoch)) return
       notify("Imported data successfully.", "success")
       setMode(null)
       setFile(null)
     } catch (err) {
-      setError(`Import failed: ${errorMessage(err)}`)
+      if (current(id, epoch)) setError(`Import failed: ${errorMessage(err)}`)
     } finally {
-      setPending(false)
+      if (current(id, epoch)) setPending(false)
     }
   }
 
@@ -253,6 +265,12 @@ function DataTransferActions({ onImported, notify }: DataTransferActionsProps) {
 }
 
 export function App() {
+  const epoch = useSecurityEpoch()
+  // Detach the entire managed tree, not merely its visible DOM, on every reset.
+  return <ManagementApp key={epoch} />
+}
+
+function ManagementApp() {
   const [route, setRoute] = useState<Route>(() => {
     const initialRoute = routeForPath(window.location.pathname)
     normalizePath(initialRoute)

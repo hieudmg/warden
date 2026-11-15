@@ -20,6 +20,11 @@ function harness(prf=true) {
  const credentials={create:vi.fn(async()=>credential(true)),get:vi.fn(async(_options:CredentialRequestOptions)=>credential(false,prf?new Uint8Array(32).fill(5):undefined))}
  return {client:new SetupClient(fetcher,credentials),sent,credentials}
 }
+test('default browser fetch is not invoked with the SetupClient as receiver',async()=>{
+ vi.stubGlobal('fetch', function(this:unknown){ if(this instanceof SetupClient) throw new TypeError('Illegal invocation'); return Promise.resolve(new Response('{"csrf":"csrf"}')) })
+ const client=new SetupClient(undefined,{create:vi.fn(),get:vi.fn()})
+ await expect(client.authorize('23456789')).resolves.toBeUndefined()
+})
 test('create enabled without PRF results uses independent authenticated get then wraps, saved re-entry finalizes',async()=>{
  const {client,sent,credentials}=harness();await client.authorize('23456789');const saved=await client.register()
  expect(credentials.get).toHaveBeenCalledOnce()

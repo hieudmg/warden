@@ -22,6 +22,26 @@ async function harness(prf=true){
  const credentials={get:vi.fn(async(_options:CredentialRequestOptions)=>assertion(prf?new Uint8Array(material):undefined))}
  return {client:new AuthClient(fetcher,credentials),sent,credentials,fetcher,dek}
 }
+test('a stale auth failure cannot restore sensitive text or busy state after global reset',async()=>{
+ const h=await harness();let reject!:(error:Error)=>void
+ vi.spyOn(h.client,'login').mockImplementationOnce(()=>new Promise((_r,f)=>{reject=f}))
+ render(<AuthGate client={h.client}><div>Managed secret forms</div></AuthGate>)
+ fireEvent.click(await screen.findByRole('button',{name:'Log in with passkey'}))
+ act(()=>invalidateSecurity())
+ await act(async()=>reject(new Error('synthetic-late-sensitive-error')))
+ expect(screen.queryByText('synthetic-late-sensitive-error')).not.toBeInTheDocument()
+ expect(screen.getByRole('button',{name:'Log in with passkey'})).not.toBeDisabled()
+})
+test('batched security resets cannot miss clearing a newer pending auth action',async()=>{
+ const h=await harness();let reject!:(error:Error)=>void
+ vi.spyOn(h.client,'login').mockImplementationOnce(()=>new Promise((_r,f)=>{reject=f}))
+ render(<AuthGate client={h.client}><div>Managed secret forms</div></AuthGate>)
+ const login=await screen.findByRole('button',{name:'Log in with passkey'})
+ act(()=>{invalidateSecurity();fireEvent.click(login);invalidateSecurity()})
+ await act(async()=>reject(new Error('synthetic-batched-sensitive-error')))
+ expect(screen.queryByText('synthetic-batched-sensitive-error')).not.toBeInTheDocument()
+ expect(screen.getByRole('button',{name:'Log in with passkey'})).not.toBeDisabled()
+})
 test('login works locked without PRF; fresh signed get locally unwraps and delivers only DEK with grant',async()=>{
  const h=await harness();await h.client.status();await h.client.login()
  expect(h.client.getSnapshot()).toMatchObject({authenticated:true,unlocked:false})

@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, test, vi } from "vitest"
 import { api, ApiError } from "./client"
-import { invalidateSecurity, setCSRF } from "../auth/session"
+import { invalidateSecurity, securityEpoch, setCSRF } from "../auth/session"
 import type { KeyPairRequest, SSHConnectionRequest } from "./types"
 const fresh = vi.hoisted(() => vi.fn(async () => 'exact-request-grant'))
 vi.mock('../auth/auth', () => ({ authClient: { grantFor: fresh } }))
@@ -17,6 +17,49 @@ function jsonResponse(body: unknown, status = 200) {
 }
 
 describe("api client", () => {
+ test.each(['generic','export'])('late %s error bodies are discarded after reset; fetch remains no-store',async kind=>{
+  let resolve!:(text:string)=>void
+  const response=jsonResponse({code:'conflict',message:'synthetic error secret'},409)
+  vi.spyOn(response,'text').mockImplementationOnce(()=>new Promise(r=>{resolve=r}))
+  const fetcher=vi.fn<typeof fetch>(async()=>response);vi.stubGlobal('fetch',fetcher)
+  const pending=kind==='generic'?api.listSSH():api.exportData()
+  await vi.waitFor(()=>expect(resolve).toBeDefined())
+  invalidateSecurity();resolve('{"code":"conflict","message":"synthetic error secret"}')
+  await expect(pending).rejects.toMatchObject({name:'AbortError'})
+  expect(fetcher.mock.calls[0][1]).toMatchObject({cache:'no-store',credentials:'same-origin'})
+ })
+ test.each(['fetch error','fetch success','error body','blob'] as const)('caller-only export cancellation at %s discards the result without retry',async phase=>{
+  const controller=new AbortController(), epoch=securityEpoch(), grantsBefore=fresh.mock.calls.length
+  const response=phase==='fetch error'||phase==='error body'?jsonResponse({code:'conflict',message:'synthetic error secret'},409):new Response('synthetic export')
+  const text=vi.spyOn(response,'text'), blob=vi.spyOn(response,'blob')
+  let finish!:()=>void
+  const fetcher=vi.fn<typeof fetch>()
+  if(phase.startsWith('fetch'))fetcher.mockImplementationOnce(()=>new Promise(resolve=>{finish=()=>resolve(response)}))
+  else{
+   fetcher.mockResolvedValueOnce(response)
+   if(phase==='error body')text.mockImplementationOnce(()=>new Promise(resolve=>{finish=()=>resolve('{"code":"conflict","message":"synthetic error secret"}')}))
+   else blob.mockImplementationOnce(()=>new Promise(resolve=>{finish=()=>resolve(new Blob(['synthetic export']))}))
+  }
+  vi.stubGlobal('fetch',fetcher)
+  const pending=api.exportData(controller.signal)
+  await vi.waitFor(()=>expect(finish).toBeDefined())
+  controller.abort();finish()
+  await expect(pending).rejects.toMatchObject({name:'AbortError'})
+  expect(securityEpoch()).toBe(epoch)
+  expect(fetcher).toHaveBeenCalledTimes(1)
+  expect(fresh.mock.calls.length-grantsBefore).toBe(1)
+  expect(fresh).toHaveBeenLastCalledWith('GET','/api/v1/data/export','')
+  expect(fetcher.mock.calls[0][1]).toMatchObject({cache:'no-store',credentials:'same-origin',headers:{'X-Warden-Action':'exact-request-grant'}})
+  if(phase.startsWith('fetch')){expect(text).not.toHaveBeenCalled();expect(blob).not.toHaveBeenCalled()}
+ })
+ test('a cancelled import dialog file read cannot start a request',async()=>{
+  let resolve!:(text:string)=>void
+  const fetcher=vi.fn();vi.stubGlobal('fetch',fetcher)
+  const controller=new AbortController()
+  const pending=api.importData({text:()=>new Promise<string>(r=>{resolve=r})} as File, controller.signal)
+  controller.abort();resolve('{}')
+  await expect(pending).rejects.toMatchObject({name:'AbortError'});expect(fetcher).not.toHaveBeenCalled()
+ })
  test('sensitive GET mutation export and import carry grants for exact serialized requests',async()=>{
   const fetcher=vi.fn<typeof fetch>(async()=>jsonResponse({}));vi.stubGlobal('fetch',fetcher)
   await api.getKeyPair(3);await api.deleteKeyPair(3);await api.exportData();await api.importData({text:async()=>'{"format":"warden-data","version":1}'} as File)
@@ -125,8 +168,12 @@ describe("api client", () => {
     const fetchMock = vi.fn().mockResolvedValue(jsonResponse([]))
     vi.stubGlobal("fetch", fetchMock)
     const controller = new AbortController()
-    void api.listSSH(controller.signal)
-    expect(fetchMock.mock.calls[0][1]?.signal).toBe(controller.signal)
+    const pending = api.listSSH(controller.signal)
+    const signal = fetchMock.mock.calls[0][1]?.signal
+    expect(signal?.aborted).toBe(false)
+    controller.abort()
+    expect(signal?.aborted).toBe(true)
+    await expect(pending).rejects.toMatchObject({ name: 'AbortError' })
   })
 
   test("encodes the project name in the reports path", async () => {

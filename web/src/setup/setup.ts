@@ -19,7 +19,7 @@ export class SetupClient {
  private controller=new AbortController()
  private generation=0
  private recovery?:Wrapper
- constructor(private fetcher:typeof fetch=fetch,private credentials:Credentials=navigator.credentials){}
+ constructor(private fetcher:typeof fetch=(input,options)=>fetch(input,options),private credentials:Credentials=navigator.credentials){}
  private async post<T>(path:string,body:unknown):Promise<T>{
   const epoch=this.generation
   const response=await this.fetcher('/api/v1/setup/'+path,{method:'POST',cache:'no-store',credentials:'same-origin',headers:{'Content-Type':'application/json',...(this.csrf?{'X-CSRF-Token':this.csrf}:{})},body:JSON.stringify(body),signal:this.controller.signal})

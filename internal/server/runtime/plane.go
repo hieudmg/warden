@@ -217,7 +217,10 @@ func (p *Plane) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("X-Content-Type-Options", "nosniff")
 	w.Header().Set("X-Frame-Options", "DENY")
 	w.Header().Set("Referrer-Policy", "no-referrer")
-	// Existing Radix components set inline style attributes, not executable script.
+	// Radix Dialog/react-remove-scroll insert style tags for scroll locking;
+	// Radix and Base UI positioning also use inline attributes/CSS variables.
+	// Production-browser coverage lives in web/e2e/ui-privacy.cjs. This style-only
+	// allowance does not permit inline/eval scripts; Markdown cannot supply CSS.
 	w.Header().Set("Content-Security-Policy", "default-src 'none'; script-src 'self'; connect-src 'self'; style-src 'self' 'unsafe-inline'; font-src 'self'; img-src 'self' data:; frame-ancestors 'none'; base-uri 'none'; object-src 'none'; form-action 'self'")
 	public, _ := url.Parse(p.cfg.PublicOrigin)
 	if (p.cfg.Mode == "tls" && r.TLS == nil) || r.Host != public.Host && !(p.cfg.Mode == "proxy" && r.Host == p.cfg.BackendAuthority) {

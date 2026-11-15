@@ -1,5 +1,6 @@
-import { useRef, useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import { api } from "@/api/client"
+import { securityEpoch } from '@/auth/session'
 import type {
   DependentsResponse,
   Group,
@@ -73,21 +74,30 @@ export function SSHTab({ resource, groups, keyPairs, notify }: SSHTabProps) {
   // the Dialog primitive's onCloseAutoFocus hook (spec: focus returns to the
   // trigger on close).
   const lastTriggerRef = useRef<HTMLElement | null>(null)
+  const formGeneration = useRef(0)
+  useEffect(() => () => { formGeneration.current++ }, [])
+  const closeForm = () => { formGeneration.current++; setFormDialog(null); setFormError(null); setPending(false) }
 
   const openCreate = (trigger: HTMLElement) => {
     lastTriggerRef.current = trigger
     setFormError(null)
+    formGeneration.current++
+    setPending(false)
     setFormDialog({ mode: "create" })
   }
 
   const openEdit = (connection: SSHConnection, trigger: HTMLElement) => {
     lastTriggerRef.current = trigger
     setFormError(null)
+    formGeneration.current++
+    setPending(false)
     setFormDialog({ mode: "edit", connection })
   }
 
   const handleSubmit = async (request: SSHConnectionRequest) => {
     if (!formDialog) return
+    const id = formGeneration.current, epoch = securityEpoch()
+    const current = () => id === formGeneration.current && epoch === securityEpoch()
     setPending(true)
     setFormError(null)
     try {
@@ -96,17 +106,19 @@ export function SSHTab({ resource, groups, keyPairs, notify }: SSHTabProps) {
       } else {
         await api.createSSH(request)
       }
+      if (!current()) return
       await resource.reload()
-      setFormDialog(null)
+      if (!current()) return
+      closeForm()
       if (formDialog.mode === "edit") {
         notify(`Updated SSH connection "${request.name}".`, "success")
       } else {
         notify(`Created SSH connection "${request.name}".`, "success")
       }
     } catch (error) {
-      setFormError(errorMessage(error))
+      if (current()) setFormError(errorMessage(error))
     } finally {
-      setPending(false)
+      if (current()) setPending(false)
     }
   }
 
@@ -290,7 +302,7 @@ export function SSHTab({ resource, groups, keyPairs, notify }: SSHTabProps) {
       <Dialog
         open={formDialog !== null}
         onOpenChange={open => {
-          if (!open && !pending) setFormDialog(null)
+          if (!open) closeForm()
         }}
       >
         <DialogContent
@@ -317,7 +329,7 @@ export function SSHTab({ resource, groups, keyPairs, notify }: SSHTabProps) {
               pending={pending}
               error={formError}
               onSubmit={request => void handleSubmit(request)}
-              onCancel={() => setFormDialog(null)}
+              onCancel={closeForm}
             />
           )}
         </DialogContent>

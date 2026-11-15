@@ -1,18 +1,24 @@
-import { useEffect, useState, useSyncExternalStore } from 'react'
+import { useEffect, useRef, useState, useSyncExternalStore } from 'react'
 import type { ReactNode } from 'react'
 import { authClient, AuthClient } from './auth'
 import { SecurityView } from './security-view'
-import { securitySignal } from './session'
+import { securityEpoch, securitySignal, useSecurityEpoch } from './session'
 
 export function AuthGate({ children, client = authClient }: { children: ReactNode, client?: AuthClient }) {
   const state = useSyncExternalStore(client.subscribe, client.getSnapshot)
   const [error, setError] = useState('')
-  const [pending, setPending] = useState(false)
+  const [pendingEpoch, setPendingEpoch] = useState<number | null>(null)
   const [recovery, setRecovery] = useState('')
+  const epoch = useSecurityEpoch()
+  const pending = pendingEpoch === epoch
+  const generation = useRef(0)
   const resetSignal = securitySignal()
-  useEffect(() => { setRecovery('') }, [client, state.ready, state.authenticated, state.unlocked, state.recovering])
   useEffect(() => {
-    const clearRecovery = () => setRecovery('')
+    setRecovery(''); setError('')
+    setPendingEpoch(value => value === epoch ? value : null)
+  }, [client, state.ready, state.authenticated, state.unlocked, state.recovering, epoch])
+  useEffect(() => {
+    const clearRecovery = () => { generation.current++; setRecovery(''); setError(''); setPendingEpoch(null) }
     resetSignal.addEventListener('abort', clearRecovery)
     return () => { resetSignal.removeEventListener('abort', clearRecovery) }
   }, [resetSignal])
@@ -21,13 +27,21 @@ export function AuthGate({ children, client = authClient }: { children: ReactNod
     void client.status().catch(() => {})
     // Poll security metadata only: another browser can globally lock this vault.
     const timer = setInterval(() => { void client.status().catch(() => {}) }, 15000)
-    return () => { setRecovery(''); clearInterval(timer); unwatch(); client.cancel() }
+    return () => { generation.current++; setRecovery(''); clearInterval(timer); unwatch(); client.cancel() }
   }, [client])
   const run = async (action: () => Promise<void>) => {
     // Drop unsubmitted recovery input before a competing flow can await.
-    setRecovery(''); setError(''); setPending(true)
-    try { await action() } catch (e) { setError(e instanceof Error ? e.message : 'Authentication failed') }
-    finally { setPending(false) }
+    setRecovery(''); setError('')
+    let id = ++generation.current, taskEpoch = securityEpoch()
+    try {
+      // Login/recovery cancel their previous epoch synchronously on entry.
+      const task = action()
+      id = ++generation.current
+      taskEpoch = securityEpoch()
+      setPendingEpoch(taskEpoch)
+      await task
+    } catch (e) { if (id === generation.current && taskEpoch === securityEpoch()) setError(e instanceof Error ? e.message : 'Authentication failed') }
+    finally { if (id === generation.current && taskEpoch === securityEpoch()) setPendingEpoch(null) }
   }
   return <>
     <section aria-label="Warden security" className="flex flex-wrap items-center gap-3 p-4 border-b">

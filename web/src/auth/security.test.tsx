@@ -4,6 +4,8 @@ import { render, screen, fireEvent, cleanup } from '@testing-library/react'
 import { AuthClient } from './auth'
 import { SecurityView } from './security-view'
 import { encode, wrap, recoveryAuth } from '../setup/vault-wrap'
+import { invalidateSecurity } from './session'
+import { act } from '@testing-library/react'
 
 beforeEach(()=>vi.stubGlobal('crypto',webcrypto))
 afterEach(()=>{cleanup();vi.unstubAllGlobals()})
@@ -28,9 +30,32 @@ async function harness(){
   else if(route.endsWith('/key'))data={id:'rotation',dek:encode(dek),vault_id:vault,prf_input:input}
   return new Response(JSON.stringify(data),{status:200,headers:{'Content-Type':'application/json'}})
  })
- const credentials={create:vi.fn(async()=>credential(undefined,9)),get:vi.fn(async()=>credential(new Uint8Array(prf),9))}
+ const credentials={create:vi.fn(async()=>credential(undefined,9)),get:vi.fn(async(_options:CredentialRequestOptions)=>credential(new Uint8Array(prf),9))}
  return {client:new AuthClient(fetcher,credentials),fetcher,credentials,sent,root,recovery,dek,prf}
 }
+test('global epoch cancels an authenticator promise without AuthClient.cancel',async()=>{
+ const h=await harness();await h.client.status();let resolve!:(value:PublicKeyCredential)=>void
+ h.credentials.get.mockImplementationOnce(()=>new Promise(r=>{resolve=r}))
+ const pending=h.client.grantFor('GET','/api/v1/data/export','')
+ await vi.waitFor(()=>expect(resolve).toBeDefined());invalidateSecurity()
+ expect(h.credentials.get.mock.calls.at(-1)?.[0]?.signal?.aborted).toBe(true)
+ resolve(credential())
+ await expect(pending).rejects.toThrow(/cancel/i)
+ expect(h.sent.some(x=>x.path.endsWith('/fresh/finish'))).toBe(false)
+})
+test.each(['cancel', 'epoch', 'unmount'])('late recovery rotation never restores offline key after %s', async reset => {
+ const h=await harness(); await h.client.status()
+ let resolve!:(value:string)=>void
+ vi.spyOn(h.client,'rotateRecovery').mockImplementationOnce(()=>new Promise(r=>{resolve=r}))
+ const view=render(<SecurityView client={h.client}/>)
+ fireEvent.click(screen.getByRole('button',{name:'Rotate recovery key'}))
+ if(reset==='cancel')fireEvent.click(screen.getByRole('button',{name:'Cancel security operation'}))
+ else if(reset==='epoch')act(()=>invalidateSecurity())
+ else view.unmount()
+ await act(async()=>resolve('warden-recovery-v1:synthetic-late-root'))
+ if(reset==='unmount')render(<SecurityView client={h.client}/>)
+ expect(screen.queryByText(/synthetic-late-root/)).not.toBeInTheDocument()
+})
 test('device approval UI compares fingerprint and requires a fresh exact request grant',async()=>{
  const h=await harness();await h.client.status();render(<SecurityView client={h.client}/>)
  expect(await screen.findByText('fixture device')).toBeInTheDocument()
@@ -85,6 +110,12 @@ test('recovery derives proof before wrapper, unlocks restricted context, replace
  await h.client.addPasskey()
  expect(h.client.getSnapshot()).toMatchObject({recovering:false,authenticated:false,unlocked:false})
  expect(h.sent.filter(x=>x.path.endsWith('/fresh/begin'))).toHaveLength(0)
+})
+test('a pending rotation cannot be reused after an external security epoch reset',async()=>{
+ const h=await harness();await h.client.status();const saved=await h.client.rotateRecovery()
+ invalidateSecurity()
+ await expect(h.client.confirmRecoveryRotation(saved)).rejects.toThrow(/cancel|pending/i)
+ expect(h.sent.some(x=>x.path.endsWith('/rotation/commit'))).toBe(false)
 })
 test('rotation requires saved reentry; wrong root cannot send commit',async()=>{
  const h=await harness();await h.client.status();const saved=await h.client.rotateRecovery()

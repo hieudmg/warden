@@ -1,5 +1,6 @@
-import { useRef, useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import { api } from "@/api/client"
+import { securityEpoch } from '@/auth/session'
 import type {
   DBConnection,
   DBConnectionRequest,
@@ -91,21 +92,30 @@ export function DBTab({ resource, sshProfiles, groups, notify }: DBTabProps) {
   // the Dialog primitive's onCloseAutoFocus hook (spec: focus returns to the
   // trigger on close).
   const lastTriggerRef = useRef<HTMLElement | null>(null)
+  const formGeneration = useRef(0)
+  useEffect(() => () => { formGeneration.current++ }, [])
+  const closeForm = () => { formGeneration.current++; setFormDialog(null); setFormError(null); setPending(false) }
 
   const openCreate = (trigger: HTMLElement) => {
     lastTriggerRef.current = trigger
     setFormError(null)
+    formGeneration.current++
+    setPending(false)
     setFormDialog({ mode: "create" })
   }
 
   const openEdit = (connection: DBConnection, trigger: HTMLElement) => {
     lastTriggerRef.current = trigger
     setFormError(null)
+    formGeneration.current++
+    setPending(false)
     setFormDialog({ mode: "edit", connection })
   }
 
   const handleSubmit = async (request: DBConnectionRequest) => {
     if (!formDialog) return
+    const id = formGeneration.current, epoch = securityEpoch()
+    const current = () => id === formGeneration.current && epoch === securityEpoch()
     setPending(true)
     setFormError(null)
     try {
@@ -114,17 +124,19 @@ export function DBTab({ resource, sshProfiles, groups, notify }: DBTabProps) {
       } else {
         await api.createDB(request)
       }
+      if (!current()) return
       await resource.reload()
-      setFormDialog(null)
+      if (!current()) return
+      closeForm()
       if (formDialog.mode === "edit") {
         notify(`Updated database connection "${request.name}".`, "success")
       } else {
         notify(`Created database connection "${request.name}".`, "success")
       }
     } catch (error) {
-      setFormError(errorMessage(error))
+      if (current()) setFormError(errorMessage(error))
     } finally {
-      setPending(false)
+      if (current()) setPending(false)
     }
   }
 
@@ -293,7 +305,7 @@ export function DBTab({ resource, sshProfiles, groups, notify }: DBTabProps) {
       <Dialog
         open={formDialog !== null}
         onOpenChange={open => {
-          if (!open && !pending) setFormDialog(null)
+          if (!open) closeForm()
         }}
       >
         <DialogContent
@@ -319,7 +331,7 @@ export function DBTab({ resource, sshProfiles, groups, notify }: DBTabProps) {
               pending={pending}
               error={formError}
               onSubmit={request => void handleSubmit(request)}
-              onCancel={() => setFormDialog(null)}
+              onCancel={closeForm}
             />
           )}
         </DialogContent>

@@ -6,6 +6,7 @@ import { api, ApiError } from "@/api/client"
 import type { KeyPairSummary, KeyPairVault } from "@/api/types"
 import type { ListResource } from "@/hooks/use-list-resource"
 import { KeyPairsTab } from "./key-pairs-tab"
+import { invalidateSecurity } from '@/auth/session'
 
 vi.mock("@/api/client", () => {
   class MockApiError extends Error {
@@ -77,6 +78,38 @@ beforeEach(() => {
 })
 
 describe("KeyPairsTab", () => {
+  test('a rejected save from a closed dialog cannot contaminate a new dialog', async () => {
+    let reject!: (error: Error) => void
+    mockedAPI.createKeyPair.mockImplementationOnce(() => new Promise((_resolve, failure) => { reject = failure }))
+    const user = userEvent.setup()
+    render(<KeyPairsTab resource={resource()} notify={notify} />)
+    await user.click(screen.getByRole('button', { name: 'New key pair' }))
+    await user.type(screen.getByLabelText('Name'), 'old')
+    await user.type(screen.getByLabelText('Private key'), 'synthetic-private')
+    await user.click(screen.getByRole('button', { name: 'Save' }))
+    await user.click(screen.getByRole('button', { name: 'Close' }))
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: 'New key pair' }))
+    await act(async () => reject(new Error('old request failure')))
+    expect(screen.queryByText('old request failure')).not.toBeInTheDocument()
+    expect(screen.getByLabelText('Private key')).toHaveValue('')
+    expect(notify).not.toHaveBeenCalled()
+  })
+  test.each(['close', 'epoch', 'unmount'])('late private-key file text cannot survive %s', async reset => {
+    let resolve!: (text: string) => void
+    const file = new File(['synthetic-late-private'], 'private.txt', {type:'text/plain'})
+    vi.spyOn(file, 'text').mockImplementationOnce(() => new Promise(r => { resolve = r }))
+    const user = userEvent.setup(), view = render(<KeyPairsTab resource={resource()} notify={notify} />)
+    await user.click(screen.getByRole('button', { name: 'New key pair' }))
+    await user.upload(screen.getByLabelText('Select private key file'), file)
+    if (reset === 'close') await user.click(screen.getByRole('button', { name: 'Cancel' }))
+    else if (reset === 'epoch') act(() => invalidateSecurity())
+    else view.unmount()
+    await act(async () => resolve('synthetic-late-private'))
+    if (reset === 'unmount') render(<KeyPairsTab resource={resource()} notify={notify} />)
+    await user.click(screen.getByRole('button', { name: 'New key pair' }))
+    expect(screen.getByLabelText('Private key')).toHaveValue('')
+  })
   test("shows a loading state while the resource loads", () => {
     render(<KeyPairsTab resource={resource({ loading: true })} notify={notify} />)
     expect(screen.getByText("Loading…")).toBeInTheDocument()
