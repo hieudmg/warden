@@ -1,4 +1,4 @@
-import { render, screen, waitFor, within } from "@testing-library/react"
+import { act, render, screen, waitFor, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { beforeEach, describe, expect, test, vi } from "vitest"
 import { api, ApiError } from "@/api/client"
@@ -98,6 +98,21 @@ beforeEach(() => {
 })
 
 describe("DBTab", () => {
+  test('late profile save failure cannot repopulate a closed or replacement dialog',async()=>{
+    let reject!:(error:Error)=>void
+    mockedAPI.updateDB.mockImplementationOnce(()=>new Promise((_r,f)=>{reject=f}))
+    const user=userEvent.setup();render(<DBTab resource={resource({data:[db(1,'old')]})} groups={[]} sshProfiles={[]} notify={vi.fn()} />)
+    await user.click(screen.getByRole('button',{name:'Edit old'}))
+    await user.type(screen.getByLabelText('Password'),'synthetic-secret')
+    await user.click(screen.getByRole('button',{name:'Save'}))
+    await user.click(screen.getByRole('button',{name:'Close'}))
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+    await user.click(screen.getByRole('button',{name:'New database'}))
+    await act(async()=>reject(new Error('stale profile failure')))
+    expect(screen.queryByText('stale profile failure')).not.toBeInTheDocument()
+    expect(screen.getByLabelText('Password')).toHaveValue('')
+    expect(screen.getByLabelText('Password')).toHaveAttribute('type','password')
+  })
   test("separates archived databases and archives active ones", async () => {
     const user = userEvent.setup()
     const reload = vi.fn().mockResolvedValue(undefined)

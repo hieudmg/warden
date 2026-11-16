@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"io/fs"
 	"os"
@@ -177,6 +178,95 @@ func TestRunServerUpgradeHelp(t *testing.T) {
 	}
 	if stderr.Len() != 0 {
 		t.Fatalf("stderr = %q, want empty", stderr.String())
+	}
+}
+
+func TestInitHelpAndPromptedConfiguration(t *testing.T) {
+	var out, errOut bytes.Buffer
+	if code := run([]string{"init", "--help"}, &out, &errOut, emptyLookupEnv); code != 0 || !strings.Contains(out.String(), "warden-server init") {
+		t.Fatalf("init help exit %d: %s %s", code, &out, &errOut)
+	}
+	dir := t.TempDir()
+	path := filepath.Join(dir, "server.json")
+	answers := strings.Join([]string{path, filepath.Join(dir, "vault.db"), "https://warden.example:8443", "warden.example", "proxy", "127.0.0.1:8080", "127.0.0.1:8080"}, "\n") + "\n"
+	cfg, gotPath, err := promptInitialization(strings.NewReader(answers), &out, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if gotPath != path || cfg.DBPath != filepath.Join(dir, "vault.db") || cfg.Security == nil || cfg.Security.PublicOrigin != "https://warden.example:8443" {
+		t.Fatal("prompt configuration differs", cfg, gotPath)
+	}
+	if _, _, err := promptInitialization(strings.NewReader(strings.ReplaceAll(answers, "https://", "http://")), &out, ""); err == nil {
+		t.Fatal("accepted HTTP")
+	}
+}
+
+func serveRefusalConfigFixture(t *testing.T, db, key string) []byte {
+	t.Helper()
+	data, err := json.Marshal(map[string]string{"db_path": db, "master_key_path": key})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return data
+}
+
+func TestServeRefusalConfigFixturePreservesWindowsPaths(t *testing.T) {
+	// Windows-shaped input is intentional even on Linux; this proves JSON
+	// serialization, not native Windows filesystem or startup behavior.
+	db := `C:\state\warden.db`
+	key := `C:\state\master.key`
+	data := serveRefusalConfigFixture(t, db, key)
+	var got map[string]string
+	if err := json.Unmarshal(data, &got); err != nil {
+		t.Fatalf("fixture is not valid JSON for Windows paths: %v", err)
+	}
+	if got["db_path"] != db || got["master_key_path"] != key {
+		t.Fatalf("fixture changed paths: %q", got)
+	}
+}
+
+func TestServeRefusesUninitializedAndLegacyWithoutMutation(t *testing.T) {
+	for _, legacy := range []bool{false, true} {
+		t.Run(map[bool]string{false: "absent", true: "legacy"}[legacy], func(t *testing.T) {
+			dir := t.TempDir()
+			db := filepath.Join(dir, "warden.db")
+			artifacts := map[string][]byte{}
+			if legacy {
+				for _, suffix := range []string{"", "-wal", "-shm"} {
+					artifacts[db+suffix] = []byte("synthetic old state" + suffix)
+				}
+			}
+			key := filepath.Join(dir, "master.key")
+			artifacts[key] = bytes.Repeat([]byte{42}, 32)
+			cfg := filepath.Join(dir, "server.json")
+			artifacts[cfg] = serveRefusalConfigFixture(t, db, key)
+			for path, data := range artifacts {
+				if err := os.WriteFile(path, data, 0640); err != nil {
+					t.Fatal(err)
+				}
+			}
+			var out, errOut bytes.Buffer
+			if code := run([]string{"serve", "--config", cfg}, &out, &errOut, emptyLookupEnv); code != 1 {
+				t.Fatalf("exit %d", code)
+			}
+			if !strings.Contains(errOut.String(), "warden-server init") || (legacy && !strings.Contains(errOut.String(), "export")) {
+				t.Fatalf("missing safe refusal guidance: %s", &errOut)
+			}
+			entries, _ := os.ReadDir(dir)
+			if len(entries) != len(artifacts) {
+				t.Fatalf("created managed state: %v", entries)
+			}
+			for path, want := range artifacts {
+				got, err := os.ReadFile(path)
+				if err != nil || !bytes.Equal(got, want) {
+					t.Fatalf("changed artifact %s: %v", path, err)
+				}
+				info, _ := os.Stat(path)
+				if info.Mode().Perm() != 0640 {
+					t.Fatalf("changed mode %s", path)
+				}
+			}
+		})
 	}
 }
 

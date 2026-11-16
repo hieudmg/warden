@@ -12,7 +12,6 @@ import (
 	"io"
 	"net"
 	"net/http"
-	"net/http/httptest"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -126,7 +125,7 @@ func TestParseDBReference(t *testing.T) {
 }
 
 func TestRunDBSelectsNamedDatabase(t *testing.T) {
-	apiSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	apiSrv := newCLITestAPI(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/api/v1/db-connections":
 			io.WriteString(w, `[{"id":10,"name":"reporting","host":"db.example","port":3306,"username":"reader","database":"main","databases":[{"name":"main","is_default":true},{"name":"audit","is_default":false}]}]`)
@@ -254,7 +253,7 @@ func TestRunXSSHHelpOmitsAcceptNewFlag(t *testing.T) {
 }
 
 func TestRunSSHUsesAgent(t *testing.T) {
-	apiSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	apiSrv := newCLITestAPI(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/api/v1/ssh-connections":
 			io.WriteString(w, `[{"id":7,"name":"prod","host":"ssh.example","port":22,"username":"user"}]`)
@@ -325,7 +324,7 @@ func TestRunPortWatchRequiresRange(t *testing.T) {
 }
 
 func TestRunPortWatchUsesSavedConnection(t *testing.T) {
-	apiSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	apiSrv := newCLITestAPI(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/api/v1/ssh-connections":
 			io.WriteString(w, `[{"id":17,"name":"prod","host":"ssh.example","port":22,"username":"user"}]`)
@@ -371,7 +370,7 @@ func TestRunPortWatchUsesSavedConnection(t *testing.T) {
 }
 
 func TestRunCPUsesAgent(t *testing.T) {
-	apiSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	apiSrv := newCLITestAPI(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/api/v1/ssh-connections":
 			io.WriteString(w, `[
@@ -462,7 +461,7 @@ func TestRunCPUsesAgent(t *testing.T) {
 }
 
 func TestRunDBRoutesTunnel(t *testing.T) {
-	apiSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	apiSrv := newCLITestAPI(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/api/v1/db-connections":
 			io.WriteString(w, `[
@@ -558,6 +557,7 @@ func TestAgentServeHidden(t *testing.T) {
 	cacheDir := t.TempDir()
 	t.Setenv("HOME", cacheDir)
 	t.Setenv("XDG_CACHE_HOME", cacheDir)
+	t.Setenv("LocalAppData", cacheDir)
 
 	var calls int
 	oldRunAgentServe := runAgentServe
@@ -615,7 +615,7 @@ func emptyLookupEnv(string) (string, bool) {
 }
 
 func TestRunConfigSearch(t *testing.T) {
-	apiSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	apiSrv := newCLITestAPI(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/api/v1/ssh-connections":
 			io.WriteString(w, `[
@@ -819,7 +819,7 @@ func TestWriteConfigSearchResultsEscapesControlCharacters(t *testing.T) {
 }
 
 func TestRunConfigSearchNoMatches(t *testing.T) {
-	apiSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	apiSrv := newCLITestAPI(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		io.WriteString(w, `[]`)
 	}))
 	defer apiSrv.Close()
@@ -871,7 +871,7 @@ func TestRunSSHEndToEnd(t *testing.T) {
 	host, portStr, _ := net.SplitHostPort(srv.addr)
 	port, _ := strconv.Atoi(portStr)
 
-	apiSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	apiSrv := newCLITestAPI(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/api/v1/ssh-connections":
 			io.WriteString(w, fmt.Sprintf(`[{"id":1,"name":"prod","host":%q,"port":%d,"username":"user","has_password":true,"key_pair_id":0,"proxy_host":"","proxy_port":0,"proxy_username":"","has_proxy_password":false,"jump_connection_ids":"[]"}]`, host, port))
@@ -923,7 +923,7 @@ func TestRunSSHPropagatesRemoteExitStatus(t *testing.T) {
 
 	host, portStr, _ := net.SplitHostPort(srv.addr)
 	port, _ := strconv.Atoi(portStr)
-	apiSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	apiSrv := newCLITestAPI(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/api/v1/ssh-connections":
 			io.WriteString(w, fmt.Sprintf(`[{"id":1,"name":"prod","host":%q,"port":%d,"username":"user","has_password":true,"key_pair_id":0,"proxy_host":"","proxy_port":0,"proxy_username":"","has_proxy_password":false,"jump_connection_ids":"[]"}]`, host, port))
@@ -967,7 +967,7 @@ func TestWriteInteractiveProgressUsesGreenOutput(t *testing.T) {
 // TestRunSSHUnknownConnection verifies a missing connection name fails
 // cleanly before any transport is attempted.
 func TestRunSSHUnknownConnection(t *testing.T) {
-	apiSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	apiSrv := newCLITestAPI(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/api/v1/ssh-connections" {
 			io.WriteString(w, `[]`)
 			return
@@ -1001,7 +1001,7 @@ func TestRunSSHUnknownConnection(t *testing.T) {
 // TestRunDBUnknownConnection verifies a missing DB connection name fails
 // cleanly before any transport is attempted.
 func TestRunDBUnknownConnection(t *testing.T) {
-	apiSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	apiSrv := newCLITestAPI(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/api/v1/db-connections" {
 			io.WriteString(w, `[]`)
 			return
@@ -1035,7 +1035,7 @@ func TestRunDBUnknownConnection(t *testing.T) {
 // TestRunXSSHReturnsToPickerAfterSessionEnds verifies picker mode presents
 // the connection menu again after both a remote shell exit and a disconnect.
 func TestRunXSSHReturnsToPickerAfterSessionEnds(t *testing.T) {
-	apiSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	apiSrv := newCLITestAPI(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/api/v1/ssh-connections":
 			io.WriteString(w, `[{"id":1,"name":"prod"}]`)
@@ -1103,7 +1103,7 @@ func TestRunXSSHReturnsToPickerAfterSessionEnds(t *testing.T) {
 // cleanly before any transport or terminal setup.
 func TestRunXSSHExplicitArchivedProfileReachesTransportEndpoint(t *testing.T) {
 	transportRequested := false
-	apiSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	apiSrv := newCLITestAPI(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/api/v1/ssh-connections":
 			io.WriteString(w, `[{"id":1,"name":"retired","host":"host","port":22,"username":"u","archived":true}]`)
@@ -1139,7 +1139,7 @@ func TestRunXSSHExplicitArchivedProfileReachesTransportEndpoint(t *testing.T) {
 }
 
 func TestRunXSSHUnknownConnection(t *testing.T) {
-	apiSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	apiSrv := newCLITestAPI(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/api/v1/ssh-connections" {
 			io.WriteString(w, `[]`)
 			return
@@ -1177,7 +1177,7 @@ func TestRunXSSHRequiresInteractiveTerminal(t *testing.T) {
 	if term.IsTerminal(int(os.Stdin.Fd())) {
 		t.Skip("stdin is a terminal; non-terminal requirement not exercisable")
 	}
-	apiSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	apiSrv := newCLITestAPI(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/api/v1/ssh-connections":
 			io.WriteString(w, `[{"id":1,"name":"prod","host":"127.0.0.1","port":22,"username":"user","has_password":true,"key_pair_id":0,"proxy_host":"","proxy_port":0,"proxy_username":"","has_proxy_password":false,"jump_connection_ids":"[]"}]`)
@@ -1219,7 +1219,7 @@ func TestRunXSSHWithoutNameRequiresInteractiveTerminal(t *testing.T) {
 	if term.IsTerminal(int(os.Stdin.Fd())) {
 		t.Skip("stdin is a terminal; non-terminal requirement not exercisable")
 	}
-	apiSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	apiSrv := newCLITestAPI(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/api/v1/ssh-connections":
 			io.WriteString(w, `[{"id":1,"name":"prod","host":"127.0.0.1","port":22,"username":"user","has_password":true,"key_pair_id":0,"proxy_host":"","proxy_port":0,"proxy_username":"","has_proxy_password":false,"jump_connection_ids":"[]"}]`)
@@ -1255,7 +1255,11 @@ func TestRunXSSHWithoutNameRequiresInteractiveTerminal(t *testing.T) {
 // runtime directory is isolated per test to avoid cross-test clients.
 func startCLITestAgent(t *testing.T) func() {
 	t.Helper()
-	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+	cacheDir := t.TempDir()
+	t.Setenv("XDG_CACHE_HOME", cacheDir)
+	t.Setenv("LocalAppData", cacheDir)
+	// Callers already installed known_hosts under their private HOME.
+	t.Setenv("USERPROFILE", os.Getenv("HOME"))
 
 	runtime, err := clientagent.NewRuntime()
 	if err != nil {
@@ -1463,7 +1467,7 @@ func TestRunReportCreateRequiresAllFlags(t *testing.T) {
 }
 
 func TestRunReportCreateAPIError(t *testing.T) {
-	apiSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	apiSrv := newCLITestAPI(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusBadRequest)
 		io.WriteString(w, `{"code":"validation_error","message":"title must be 1-200 bytes"}`)
 	}))
@@ -1494,7 +1498,7 @@ func TestRunReportCreateAPIError(t *testing.T) {
 }
 
 func TestRunReportCreateSuccess(t *testing.T) {
-	apiSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	apiSrv := newCLITestAPI(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/api/v1/reports" || r.Method != http.MethodPost {
 			t.Errorf("got %s %s, want POST /api/v1/reports", r.Method, r.URL.Path)
 		}
@@ -1728,7 +1732,7 @@ func TestRunCPRejectsWrongArgumentCount(t *testing.T) {
 }
 
 func TestRunCPRejectsLocalToLocal(t *testing.T) {
-	apiSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	apiSrv := newCLITestAPI(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/api/v1/ssh-connections" {
 			io.WriteString(w, `[]`)
 			return
@@ -1758,7 +1762,7 @@ func TestRunCPRejectsLocalToLocal(t *testing.T) {
 
 func TestRunCPRejectsLocalToLocalBeforeConfigOrAPICall(t *testing.T) {
 	var apiCalls atomic.Int64
-	apiSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	apiSrv := newCLITestAPI(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		apiCalls.Add(1)
 		http.Error(w, "unexpected API request", http.StatusInternalServerError)
 	}))
@@ -1795,7 +1799,7 @@ func TestRunCPRejectsLocalToLocalBeforeConfigOrAPICall(t *testing.T) {
 
 func TestRunCPRejectsSameRemoteHostBeforeTransport(t *testing.T) {
 	var bundleCalls atomic.Int64
-	apiSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	apiSrv := newCLITestAPI(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/api/v1/ssh-connections":
 			io.WriteString(w, `[
@@ -1850,7 +1854,7 @@ func TestParseCPEndpointRecognizesWindowsVolume(t *testing.T) {
 }
 
 func TestRunCPRejectsUnknownConnection(t *testing.T) {
-	apiSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	apiSrv := newCLITestAPI(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/api/v1/ssh-connections" {
 			io.WriteString(w, `[]`)
 			return
@@ -1911,7 +1915,7 @@ func TestRunCPEndToEnd(t *testing.T) {
 	dstHost, dstPortStr, _ := net.SplitHostPort(dstSrv.addr)
 	dstPort, _ := strconv.Atoi(dstPortStr)
 
-	apiSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	apiSrv := newCLITestAPI(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/api/v1/ssh-connections":
 			io.WriteString(w, fmt.Sprintf(`[

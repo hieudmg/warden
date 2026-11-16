@@ -7,8 +7,8 @@
 #   dist/warden-linux-amd64          Linux client
 #   dist/warden.exe                  Windows amd64 client
 #
-# Uses -trimpath and CGO_ENABLED=0 so builds are deterministic for a given
-# Go toolchain, then prints SHA-256 checksums for every artifact.
+# Uses the exact minimum Go patch, -trimpath and CGO_ENABLED=0, then emits
+# SHA256SUMS over the individual release bytes (never executes target binaries).
 #
 # Usage: bash scripts/build-release.sh
 
@@ -22,11 +22,16 @@ log() { printf '== %s\n' "$*"; }
 
 cd "$ROOT"
 
-# The server binary embeds the generated UI, so the frontend must be
-# built before the release compilation below.
+# Reject a silently different compiler/frontend runtime before installing deps.
+minimum_go="$(awk '$1 == "go" { print $2 }' go.mod)"
+[[ "$minimum_go" == 1.26.11 && "$(go env GOVERSION)" == "go$minimum_go" ]] || { echo 'Go1.26.11 required' >&2; exit 1; }
+[[ "$(node --version)" == v26.12.1 && "$(npm --version)" == 11.20.0 ]] || { echo 'Node26.12.1/npm11.20.0 required' >&2; exit 1; }
+
+# The server embeds the generated UI. This script runs only in read-only jobs;
+# installation/build output never becomes code in the publisher.
 log "building frontend"
-npm --prefix "$ROOT/web" ci
-npm --prefix "$ROOT/web" run build
+npm --prefix "$ROOT/web" ci --include=dev
+NODE_ENV=production npm --prefix "$ROOT/web" run build
 
 log "building release artifacts into $DIST"
 rm -rf "$DIST"
@@ -48,6 +53,6 @@ log "artifacts:"
 (
   cd "$DIST"
   ls -la
-  sha256sum ./* | tee SHA256SUMS
+  sha256sum ./warden-linux-amd64 ./warden-server-linux-amd64 ./warden.exe | tee SHA256SUMS
 )
 log "release complete"

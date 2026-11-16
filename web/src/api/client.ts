@@ -1,3 +1,6 @@
+import { authClient } from '../auth/auth'
+import { sensitiveAction } from '../auth/actions'
+import { csrfHeader, rejectStale, securityDenied, securityEpoch, securitySignal } from '../auth/session'
 import type {
   DBConnection,
   DBConnectionRequest,
@@ -64,7 +67,13 @@ async function responseError(response: Response): Promise<ApiError> {
 }
 
 async function request<T>(path: string, options: RequestOptions = {}): Promise<T | undefined> {
+  const epoch = securityEpoch()
+  options.signal?.throwIfAborted()
   const headers = new Headers()
+  if (options.method && options.method !== 'GET') {
+    headers.set('Content-Type', 'application/json')
+    headers.set('X-CSRF-Token', csrfHeader())
+  }
   let body: string | undefined
   if (options.json !== undefined) {
     headers.set("Content-Type", "application/json")
@@ -74,13 +83,22 @@ async function request<T>(path: string, options: RequestOptions = {}): Promise<T
     body = options.body
   }
 
+  if (sensitiveAction(options.method ?? 'GET', path)) {
+    const grant = await authClient.grantFor(options.method ?? 'GET', path, body ?? '')
+    rejectStale(epoch)
+    options.signal?.throwIfAborted()
+    if (!grant) throw new ApiError('fresh_action_required', 'Fresh passkey verification required', 403)
+    headers.set('X-Warden-Action', grant)
+  }
   let response: Response
   try {
     response = await fetch(path, {
       method: options.method ?? "GET",
+      cache: 'no-store',
+      credentials: 'same-origin',
       headers,
       body,
-      signal: options.signal,
+      signal: options.signal ? AbortSignal.any([options.signal, securitySignal()]) : securitySignal(),
     })
   } catch (error) {
     if (error instanceof DOMException && error.name === "AbortError") {
@@ -89,16 +107,24 @@ async function request<T>(path: string, options: RequestOptions = {}): Promise<T
     throw networkError(error)
   }
 
+  rejectStale(epoch)
+  options.signal?.throwIfAborted()
+  securityDenied(response.status)
   if (response.status === 204) {
     return undefined
   }
 
   if (!response.ok) {
-    throw await responseError(response)
+    const error = await responseError(response)
+    rejectStale(epoch)
+    options.signal?.throwIfAborted()
+    throw error
   }
 
   const contentType = response.headers.get("Content-Type") ?? ""
   const text = await response.text()
+  rejectStale(epoch)
+  options.signal?.throwIfAborted()
   if (text === "") {
     return undefined
   }
@@ -184,23 +210,42 @@ export const api = {
 
   // Data transfer (migration between servers). The export is plaintext and
   // contains secrets, so callers must warn before requesting or submitting it.
-  exportData: async (): Promise<Blob> => {
+  exportData: async (signal?: AbortSignal): Promise<Blob> => {
+    const epoch = securityEpoch()
+    signal?.throwIfAborted()
+    const grant = await authClient.grantFor('GET', '/api/v1/data/export', '')
+    rejectStale(epoch)
+    signal?.throwIfAborted()
+    if (!grant) throw new ApiError('fresh_action_required', 'Fresh passkey verification required', 403)
     let response: Response
     try {
-      response = await fetch("/api/v1/data/export")
+      response = await fetch("/api/v1/data/export", {cache:'no-store',credentials:'same-origin',signal: signal ? AbortSignal.any([signal, securitySignal()]) : securitySignal(),headers:{'X-Warden-Action':grant}})
     } catch (error) {
       if (error instanceof DOMException && error.name === "AbortError") {
         throw error
       }
       throw networkError(error)
     }
+    rejectStale(epoch)
+    signal?.throwIfAborted()
+    securityDenied(response.status)
     if (!response.ok) {
-      throw await responseError(response)
+      const error = await responseError(response)
+      rejectStale(epoch)
+      signal?.throwIfAborted()
+      throw error
     }
-    return response.blob()
+    const blob = await response.blob()
+    rejectStale(epoch)
+    signal?.throwIfAborted()
+    return blob
   },
-  importData: async (file: File): Promise<void> => {
+  importData: async (file: File, signal?: AbortSignal): Promise<void> => {
+    const epoch = securityEpoch()
+    signal?.throwIfAborted()
     const body = await file.text()
-    await request<void>("/api/v1/data/import", { method: "POST", body })
+    rejectStale(epoch)
+    signal?.throwIfAborted()
+    await request<void>("/api/v1/data/import", { method: "POST", body, signal })
   },
 }

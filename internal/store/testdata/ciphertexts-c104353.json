@@ -1,0 +1,51 @@
+[
+  {
+    "table": "key_pairs",
+    "id": 23,
+    "field": "public_key",
+    "aad": "warden/key-pair/23/public_key",
+    "ciphertext": "AaVdbq6pg/NwS5Ux8WjwnYw1fIzSfZj+SHZpHreB8pwOI4x6ca6o+TQuO8GH"
+  },
+  {
+    "table": "key_pairs",
+    "id": 23,
+    "field": "private_key",
+    "aad": "warden/key-pair/23/private_key",
+    "ciphertext": "Ab3Fv7Ue1n1+u00z6BPX5Vd88/PqqQjEvEQQTQhd+59JbSrmEaUDu8GFpFqMFJsb6YwvzNdGGnrXiP7Nlg=="
+  },
+  {
+    "table": "key_pairs",
+    "id": 23,
+    "field": "private_key_passphrase",
+    "aad": "warden/key-pair/23/private_key_passphrase",
+    "ciphertext": "AcBZvOPDZbMmhe3fgmHXBP4AdIiHq50YkXK+ExVya87wdSZ+sl6078McscMcRFUFbQ=="
+  },
+  {
+    "table": "ssh_connections",
+    "id": 31,
+    "field": "password",
+    "aad": "warden/ssh/31/password",
+    "ciphertext": "AYwZNQ/AQ2Lv+HH/DQFImWhG+pp0vriuPhlcbYI0dZ32TeONhR/E/Vf/K6dRSf2rvsl0"
+  },
+  {
+    "table": "ssh_connections",
+    "id": 31,
+    "field": "proxy_password",
+    "aad": "warden/ssh/31/proxy_password",
+    "ciphertext": "AQFOyvNAI1VufeGTmZ++4IoJbp39SwVMrlbYIIsR+GFebZcXlMWWyn7dPwhwUkDPzV7loT4="
+  },
+  {
+    "table": "db_connections",
+    "id": 43,
+    "field": "password",
+    "aad": "warden/db/43/password",
+    "ciphertext": "AXfjYxcwBCU3DLc5G0rANHZ+TVgEogl8bXGw6stiu9pqxeGCETnuWF/jEG/ZDeUocac="
+  },
+  {
+    "table": "db_connections",
+    "id": 47,
+    "field": "password",
+    "aad": "warden/db/47/password",
+    "ciphertext": "AcCEpM65UnoWe+NVXvqM82VkdovU+NvYl+e4LZeeaDIP75MV4/WgyujInfCOM9rjtCK1d+3GHW4="
+  }
+]

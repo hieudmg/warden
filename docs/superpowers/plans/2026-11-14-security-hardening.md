@@ -1,0 +1,727 @@
+# Warden security hardening implementation plan
+
+## Goal and binding contract
+
+Implement [the approved design](../specs/2026-11-14-security-hardening-design.md): single-owner passkey management authentication, explicit HTTPS initialization, PRF/recovery-wrapped random vault key, locked restarts, web-approved CLI credentials, and the in-scope source-grounded audit remediation. The owner's clarification limits TLS hardening to Warden-owned boundaries: mandatory HTTPS for setup/web/client APIs and distribution, and protected local IPC remain; preserve existing external DB and HTTP CONNECT proxy transport behavior. Do not add mandatory or optional external TLS, TLS-only profile/schema/form changes, a new export format, or a conditional plaintext exception. The design fixes protocol/crypto/route contracts; this plan defines bounded delivery and proof. Do not replace standards support with vendor compatibility research or plaintext server-key fallback.
+
+Breaking release approved: `0.22.1 -> 0.23.0`, subject to latest-base recheck and all three version fields in `AGENTS.md`. No legacy encrypted-storage compatibility or automatic deletion; only old-release export -> fresh init -> documented export import. No real migration, deployment, commit/push, dependency edits or app implementation during preparation of these documents.
+
+## Current implementation status — T17 local checkpoint, 2026-11-16
+
+T1–T16 implementation history and reviewed T16 HEAD `774ce3b` are retained below.
+Bounded T17 now replaces the obsolete HTTP/key runner with actual production
+init/serve/CLI + signed HTTPS composition, separately named preservation/daemon
+suites and read-only CI wiring; updates current operational/recovery/security
+runbooks and exactly three version fields to approved **0.23.0**. The
+[T17 requirement/evidence matrix](../reports/2026-11-14-t17-integration.md) records
+current full Go/race/vet, web279+13/audit0/build, offline installers, browser,
+whole SSH/DB race25 and CI checks, genuine substitutions and actual skips/failures.
+The runner/release/test builds explicitly override test NODE_ENV with production;
+the original failed browser trace and focused RED→GREEN evidence are retained.
+
+**No task checkbox or release is accepted here.** Genuine authenticator PRF with
+production trust, native Windows, hosted artifact/downstream/OIDC/signature
+proofs and independent combined acceptance remain pending. Unix cross-owner
+chown fixture also skips without privilege; no native privacy proof is inferred.
+Actual stripped-binary scans conservatively exit3; source0symbol/0package retains
+eight module-only findings. Narrow owner acceptance of specified T16 Action
+Undici/DSSE residuals is not remediation, blanket waiver or dispatch/publication
+authority. Older task checkpoints describe their time, not current missing code.
+
+### Native Windows follow-up — draft PR #45, 2026-11-16
+
+Hosted read-only run43786023388 attempt1 (event head `d8aa802`, actual PR merge
+`c987a687`) passed Linux job133033735087 but failed Windows job133033735279:
+**13/16 named top-level PASS, three FAIL, zero reported skips** (agent7/SFTP5/
+upgrade-private-stage1 pass). The two actual C# fixtures fail at LF-only source
+extraction; native helper ordinary replacement fails with its cause suppressed,
+while locked-failure passes. This supersedes historical UNRUN wording only for
+that original run, not acceptance. The [follow-up report](../reports/2026-11-16-native-windows-followup.md)
+records actual logs, deterministic CRLF RED→GREEN through one shared test-only
+extractor, preserved actual C# bytes and production safeguards, and bounded
+native exception diagnostics. Null-string binding remains a hypothesis; no
+production helper fix or native GREEN is claimed. Local full Go, affected
+upgrade/client race, vet, offline installers, real curl,12 CI contracts and
+compile-only Windows pass. Parent review/diagnostic push to automatic CI is
+needed before diagnosing the helper and obtaining all16 native passes/zero skips.
+Release0.23.0 and all pending acceptance checkboxes/gates remain unchanged; no
+manual signing/dispatch/publication or production service operation authorized.
+
+### Native Windows round 2 — current14/16, two failures
+
+Parent reviewed/committed/pushed the diagnostic checkpoint as `6c385371`.
+Run43789164306 attempt1 checked out merge `0fbbf0a` into basec104353: Linux
+133043430649 PASS, Windows133043430885 FAIL. **14/16 required top-level PASS,
+two FAIL, zero reported skips**; original13/3 above is historical, not this run.
+The private-files/HTTP-refusal actual-C# fixture now passes. Helper ordinary and
+metacharacter positives fail with invalid-path ArgumentException; identical
+errors in locked negatives do not yet prove lock handling. HTTPS matrix times
+out at its2min context; existing output does not establish compile/CA-add/
+download phases or CA absence after cleanup. Round2 adds only test-side exact
+argument/null controls, streamed bounded phases/exception types/fixture counts,
+and exact-CA absence assertions. Production helper/C#/TLS and all budgets stay
+unchanged pending actual boundary evidence; no speculative fix or native GREEN.
+The [chronological follow-up](../reports/2026-11-16-native-windows-followup.md#round-2--new-native-evidence-and-pre-edit-exception-2026-11-16)
+records the pre-edit native TDD exception, real portable streaming RED→GREEN,
+fresh local fullGo/affected race/vet/installers/curl/12contracts and compile-only
+Windows. Parent review/possible next diagnostic push is required. All16 native
+passes once/zero skips,0.23.0, unchecked acceptance gates and narrow T16 risk
+scope remain; no manual signing/dispatch/public attestation/service authority.
+
+### Native Windows round 3 — binding proven; bounded CA CLI candidate
+
+Parent-reviewed R2 is41fa49b. Run43793981262 attempt1 checked out PR merge
+`f87c2d48` into basec104353: Linux133058505878 SUCCESS; Windows133058505659
+FAIL, still **14/16 named top-level PASS/two FAIL/zero reported skips**. All four
+helper cases prove legal exact source/target, literal C#null PASS, PS$null→empty
+argument refusal and explicit PS5.1NullString→null PASS. This isolates the backup
+argument: R3 makes only the authorized production File.Replace sentinel change,
+with portable actual-encoded-program RED→GREEN; native ordinary/metacharacter
+positives and sharing-violation negatives remain pending. HTTPS actual C# compile
+and Root CurrentUser open complete; last phase is `$store.Add($ca)`, no network,
+independent exact-CA absence PASS. Parent's official scout/steer authorizes the
+no-force `certutil.exe -user -addstore Root <CAfile>` fixture candidate, not UI
+cause or known noninteractive success. Go directly owns its bounded child;
+preexisting absence precedes cleanup arming, exact DER/thumbprint postcondition
+precedes Download. Shared2min matrix/20s independent cleanup and every safeguard
+remain. See [chronological R3 evidence](../reports/2026-11-16-native-windows-followup.md#round-3--demonstrated-helper-binding-defect-root-insertion-stall-2026-11-16).
+
+Fresh fullGo794PASS/3existing skips, portable focused/race10/vet/installers/
+actualcurl/12contracts/actionlint and Windows compile-only pass. **Broad upgrade/
+client race FAILS** in unchanged `terminal/TestResizeEventsPropagate` (SIGWINCH
+timeout plus send/close data race); retained with source hashes, no rerun waiver,
+terminal edit or inferred baseline execution. Parent must disposition that
+separate failure and independently review/fresh-check R3 before any possible
+fix/diagnostic push. All16 native passes once/zero skips,0.23.0, open genuine
+PRF/production-trust/privileged Unix/hosted provenance gates and narrow T16 risk
+scope stay unchanged. No manual signing/dispatch/publication/production authority
+or completed checkbox. This is a source-supported helper correction plus bounded
+CA evaluation, not accepted native GREEN or a fully green local checkpoint.
+
+### Native Windows round 4 — helper verified;15/16, one CA-import failure
+
+At parent-reviewed df07a75 (R3native fix plus separately fixed/reviewed Unix
+resize), run43801723735 attempt1 checked out merge `b0ac0f7ca10a0c0bd7e08cf501472b6c3f501c65`
+into basec104353. Linux133083319416 whole-pipeline SUCCESS; Windows133083319948
+FAIL. Actual three JSONL streams reconcile16unique top names each once:
+**15PASS/one FAIL/zero skips**. Helper all4ordinary/metacharacter positive/locked
+subcases PASS, including actual sharing IOExceptionHRESULT-2147024864; helper
+native defect CLOSED, do not edit further. Sole failure is trusted-HTTPS matrix:
+no-force certutil stalls after Signature matches Public Key, no network or main
+postcondition/modes, independent exact-CA absence PASS. UI cause unproven.
+
+Official full certutil global Options define **-f = Force overwrite**, not a
+noninteractive promise. Parent supersedes no-force restriction only for one
+bounded unique-CA CurrentUserRoot `-user -f -addstore Root CAfile` candidate.
+R4 extracts the actual fixed test-only Cmd.Args builder and observes missing-f
+RED→GREEN, retaining preexistence before cleanup arming/exact DER before Download,
+direct Go ownership/checked exit/bounded join/shared120s+cleanup20s/all11modes.
+Native effect pending; optional owned main-window snapshot omitted with explicit
+attribution/reliability/lifecycle limitation, not a fabricated UI-cause claim.
+[Chronological R4 report](../reports/2026-11-16-native-windows-followup.md#round-4--helper-native-green-sole-ca-import-gate-2026-11-16)
+binds fresh fullGo798PASS/3existing skips, affected race343PASS/1skip, focused/
+vet/installers/actualcurl/12contracts/actionlint and compile-only Windows. Prior
+Unix required-race/race25/HTTPS-runner proofs reused against unchanged source,
+not new executions or a passing-rerun waiver of historical R3failure.
+
+Parent independent review/fresh checks before possible ONE candidate push;
+all16nativeoncePASS/zero skips still required. Keep0.23.0 and every production
+security boundary; no helper/Unix/crypto/TLS/policy change. If candidate also
+stalls, stop for new bounded evidence/decision, not blind retry or budget growth.
+External genuinePRF/production-trust/privilegedUnix/hosted provenance gates and
+manual signing authorization remain open/unanswered. No checkbox completed.
+
+### Native Windows round 5 — force hypothesis falsified; diagnostic only
+
+Reviewed R4 committed/pushed as9a12611; run43805627542attempt1 merge2335af14279e4fa2d89a14c439da7a447ee2b506
+into basec104353 independently reconciles16unique names once **15PASS/1FAIL/0SKIP**.
+Helper all4cases remain native PASS/genuine sharing HRESULT-2147024864; freeze
+helper and Unix. Linux entire pipeline PASS/fullrace/SSHDBrace25. Sole HTTPS
+matrix failure: -user -f -addstore Root still stalls119.37s after Signature
+matches Public Key; no importend/DERpostcondition/mainmodes/network, independent
+exact-CA absence PASS/join. **Missing-f-alone FALSIFIED, UI cause UNKNOWN.**
+
+Parent authorizes ONE owned read-only diagnostic candidate, no import change or
+unchanged retry. R5 keeps exact R4 argv and preflight/DER/cleanup/all11modes,
+reserves8s inside existing120s, wraps Cmd.Cancel after Start to synchronously
+run/join one current-Go-test subprocess at most6s/end by matrix-minus2s, then
+original kill/result plus reserved1s each WaitDelay. Windows snapshot uses official
+Toolhelp numeric thread table filtered to owned PID BEFORE logging/window query,
+EnumThreadWindows only owned threads, repeated PID/thread checks before bounded
+class/caption/presence reads. No global window enumeration/foreigntext/messages/
+UI action, WCT/custom ABI, memory/stack/debugger, policy/trust/TLS change. No
+PowerShell/compiler observer child. Empty/capability/raced data UNKNOWN, never
+no-UI or consent approval; categorical wait reason not queried.
+
+[Chronological R5 report](../reports/2026-11-16-native-windows-followup.md#round-5--force-hypothesis-falsified-owned-observation-only-2026-11-16)
+records pre-edit native exception, official/version-matched API inspection,
+actual shared cancellation/budget RED→GREEN, owned helper success/exit7/block/
+unavailable/start-failure/normal/error-result checks, fresh focused race/fullGo
+802PASS3existing skips/affected race347PASS1skip/vet/installers/actualcurl/
+12contracts/actionlint, final Windows cross-compile/vet **not execution**.
+Previous unchanged Unix/component proofs reused explicitly, not new R5 execution.
+Bundle `/var/tmp/warden-windows-r5-review.{diff,json,sha256}` covers original9a12611
+through all6task paths/two new Go files and entire new ignored-ledger delta.
+
+Parent independent review/fresh checks then at most ONE new observational autoPR
+run; native diagnostic remains UNRUN/UNKNOWN, bug NOT resolved. Positive owned
+security-window evidence requires owner decision before any GUI/scope change;
+empty/unavailable needs interactive Windows evidence, no workaround. All16once
+PASS/zero skips/all11verified-HTTPS modes/exact CA absence still required.
+Version0.23.0/security contracts and external PRF/production-trust/privilegedUnix/
+hosted provenance/signatures remain open, manual signing authority unanswered.
+No staging/commit/push/CI/dispatch/install/deploy/service/trust/publication authority.
+
+### Native Windows round 6 — approved consent, fail-closed control checkpoint
+
+R5 published d22e9ce; run43812138655attempt1 merge5b71d693ee34aa4c5221faf59b34ec49701a7e6c
+independently reconciles16namesonce **15PASS/1FAIL/0SKIP**. Owned PID8384/TID3196
+`#32770`/`Security Warning` with ID6/7 present was observed;18ms observer join,
+then certutil deadline/exit1/join. Exact CA absence PASS,6network counts0, no DER/
+11modes. All4helper cases PASS/frozen; Linux entire pipeline PASS. Positive UI
+observation is NOT sole-cause proof or successful consent.
+
+Owner explicitly replied **approve** to fixture-only generated-CA consent with
+full UI thumbprint/random CN/exact DER identity, fail-closed ambiguity, CurrentUser
+only/exact cleanup, no global SendKeys/policy changes; wrong-certificate approval
+risk and unavailable safer interactive alternative were explicitly described.
+This supersedes no-action authority only for a safely identified single CA.
+Actual child text/layout/labels remain unknown. Use the explicitly permitted
+**first observational checkpoint**, not guessed native IDs/labels/action code.
+
+R6 adds proactive6s owned observer inside same120s/8s reserve, child5s/fixed caps,
+creation FILETIME/live handle/PID/TID/parent/control rechecks, bounded specific-target
+WM_GETTEXT100ms for owned public Static/Button text, immutable CA DER SHA256/full
+SHA1/CN preflight and identity-only matcher. Always **NO ACTION/exit3**, including
+synthetic exact-identity matches, until actual native contract is known. Join
+observer/output before original owned kill; normal/early exit cancels/joins,
+exactly-once cancel/result and no detached logger. No approval action framework.
+Native integration exception documented before edits; portable actual R5 seams
+and missing-control capability RED→GREEN, real child lifecycle/guard coverage,
+final25×race PASS, Windows compile/vet **not execution**. Fixed R4argv, production/
+helper/Unix/C#/preflight-main-cleanup/all11modes/native16/version remain unchanged.
+
+Fresh fullGo806PASS3existing skips/affected race351PASS1skip with explicit child-only
+normal fixture umask022; parent evidence umask077/logs private. Initial077 broad
+mode failures retained and deterministically explained by unchanged fixtures'
+unmasked0755/0640 assumptions; A/B source-identical upgrade test proves this is
+harness mode, no assertion/source change or erased failure. Vet/offline installers/
+12CIcontracts/actionlint PASS. **Required actual-curl suite FAILED twice**, including
+isolated client+server CDN positives with unchanged0.1s/0.25s fixture limits;
+worker-concurrency-only explanation insufficient, cause UNKNOWN. No passing rerun
+waiver, timeout inflation or unrelated installer/Unix edits. Parent must resolve/
+adjudicate this separate validation blocker before any publication/CI. Whole
+unchanged SSH/DBrace25/component/terminal proofs reused by exact hash, not rerun.
+
+[Chronological R6 report](../reports/2026-11-16-native-windows-followup.md#round-6--owned-certificate-control-observation-checkpoint-2026-11-16)
+and `/var/tmp/warden-windows-r6-review.{diff,json,sha256}` cover originald22e9ce
+through all6paths/2new Go files/entire ledger delta, all success AND failed evidence.
+Parent independent review/fresh affected race/vet/Windows compile plus curl blocker
+resolution before at most one parent-controlled observational autoPR checkpoint.
+Native consent/action test UNIMPLEMENTED by design at this allowed checkpoint;
+if text/ownership/identity unavailable stop, never weaken criteria. All16oncePASS/
+zero skips/all11verifiedHTTPS modes/exact CA cleanup still required. External
+PRF/production trust/privileged Unix/artifact-OIDC-signatures remain open; public
+signing unanswered/unauthorized. No checkbox completed or bug-resolution claim;
+no worker staging/commit/push/PR/CI/installation/service/deploy/signing/release.
+
+## Execution, dependencies, and evidence discipline
+
+- Repository `/var/www/code/go/warden`, branch `hieudmg/security-hardening`, inspected HEAD/fetched `origin/main` both `c104353` on 2026-11-14. Only one writer in this checkout. A controller may assign sequential workers one task at a time; no parallel writers/worktrees. Each handoff names changed paths, red/green commands, remaining failures and next dependency. Preserve unrelated work, particularly protected untracked `mise.toml` (do not read/change/stage).
+- Read root `AGENTS.md` and each task's source before editing. Obtain Context7 documentation and exact selected-version source **before** importing/configuring/calling third-party APIs. Parent WebAuthn reference `ctx7:docs:752087b042ac2f5c2437a538` is initial evidence only; inspect verifier expiry enforcement, userHandle ownership, required UV and serialization of client PRF outputs. Standard/client crypto vectors do not substitute for valid server-side signature tests.
+- For **every behavior**, first add the named focused acceptance/regression test, run it and record its expected RED cause against current code, then implement the smallest complete slice and record GREEN. Names below are required acceptance intentions, not claims that those tests exist today. Use source-named `_test.go` / `.test.ts(x)` files. Preserve current tests unless changing approved behavior; explicitly update old no-auth/text-password expectations.
+- Exceptions: documentation, version fields, workflow/config declaration changes, lockfile-only updates cannot always have a meaningful runtime RED. Explain the exception in the task record **before editing** and specify the strongest check (schema/static fixture, actual artifact test, compatible build or vulnerability reproducer). Do not use this exception to skip runtime tests for auth, crypto, network, data preservation or Windows behavior.
+- Run integration/race/full checks after related changes, inspect the actual diff and record failures/skips. A build or mocked passkey test alone does not prove a secure working feature. No live credentials, production DBs, real migration or release upload in tests.
+- Ordinary internal names/layout are implementer choices; protocol, security, data compatibility and unresolved owner policies are not. Do not add a generic policy framework, multi-user layer, provider detection, or skeleton-first packages with no runnable outcome.
+
+### Delivery dependency graph
+
+`T1 -> T2 -> T3` is the early coherent runnable milestone **M1**, before broad audit work: init -> registration/recovery saved confirmation -> serve/authenticated management -> restart locked -> PRF unlock and recovery. Each task includes its UI and tests; don't postpone a usable client behind large foundations. **Owner-authorized resequencing at reviewed T1–T3 HEAD `77203cc`: execute bounded T10 BEFORE T4.** Existing Windows endpoint impersonation is unsafe as a carrier for T4's new agent-owned credential/API transport. T10 supplies authenticated confidential IPC and the explicitly required permanent-until-external-stop daemon lifetime; it does not implement API credentials or pairing. Thus `T3 -> T10 -> T4` is the current sequential order (T10 technically depends only on the baseline). T4 adds authenticated CLI pairing. Then execute one at a time: T5 legacy transfer/rollback; T6–T8 backend boundaries/graph/audit; T9 frontend; T11 file transfer; T12 SSH lifecycle/cancellation (including proxy CONNECT and DB tunnel cancellation); T13 API redirects/output; T14 upgrade/installers; T15 dependencies; T16 CI/publication isolation; T17 final integration/release documentation. T4 precedes T13 credential-leak testing; T14/T15 precede T16 artifact checks; T1–T16 feed T17. There are 17 tasks; no external TLS profile or execution tasks remain. No release is ready at M1.
+
+### Baseline actually checked for this document
+
+- `go test ./...` rerun: all reported packages pass except `internal/client/sftp/TestPosixRelMatchesFilepathRel`: `posixRel("a", ".") = ".."`, expected `"../."`. Do not silently waive new SFTP failures as this baseline. Log captured outside the checkout at `/tmp/warden-security-plan-go-baseline.log` (ephemeral, not a durable artifact).
+- Local `go version` is `go1.25.14 linux/amd64`; module declares Go 1.25.0. Parent vulnerability run used automatic Go 1.26.11. Record actual toolchain for each future check, including tool-driven upgrades.
+- Fresh `npm --prefix web audit --json`: 20 affected packages (1 critical/10 high/8 moderate/1 low), versus parent's earlier 23 (1/11/10/1). Local Node v26.12.1/npm 11.20.0. `npm ls` traced shadcn/MCP/express/proxy-addr and dotenvx/systeminformation/undici plus jsdom/undici; CSS imports shadcn. This is dependency evidence, not a runtime exploit finding or completed remediation.
+- Parent supplied govulncheck findings GO-2026-6354/6355, x/crypto v0.55.0 -> fixed v0.56.0, reachable at `internal/client/ssh/graph.go` NewClientConn. Not rerun for this documentation task.
+- No verified native Windows environment. Full web/build, installer, real PRF/HTTPS E2E, race, vulnerability remediation and release checks have **not** run for a new implementation because none exists yet.
+
+## T1: Explicit initialization creates one recoverable, wrapped-key installation
+
+- **Outcome:** runnable `warden-server init` prompts/validates HTTPS origin/RP/proxy or TLS/storage config; serves only a password-gated setup plane; registers first required-UV passkey, obtains working PRF (including follow-up get), confirms saved recovery, commits once, closes and exits. Normal serve refuses uninitialized/old storage non-destructively. This is one vertical setup outcome, not a generic auth foundation.
+- **Files/components:** `cmd/warden-server/{main,main_test}.go`, `internal/config/{config,config_test}.go`, `internal/server/{server,web}.go`; small new `internal/server/auth/` and `internal/server/setup/` with source-named tests; `internal/store/{store,migrations}.go`, new auth schema under `migrations/`, `internal/crypto/` wrapping/key-check tests; `web/src/` setup view, standards-based WebAuthn/crypto helpers and tests. `internal/web/embed.go`, `web/scripts/verify-dist*` for actual setup assets. Adjust help/docs with this behavior.
+- **Interface:** use design's version-1 envelopes, KDF/AAD/lengths and one owner. Initialized marker/owner/credential/passkey wrapper/recovery wrapper+verifier/key-check are one commit. Setup authorization has no general data access. Probe old DB before existing `store.Open` can migrate/configure WAL/chmod; never load a disk master key as fallback. Persist no raw DEK/PRF/recovery key or recovery-auth subkey. Prevent concurrent storage initialization. Config is not the initialized marker.
+- **RED acceptance:** `TestServeRefusesUninitializedAndLegacyWithoutMutation` (hash/permissions/content and DB/WAL/SHM preserved, no new managed state); `TestInitRefusesInitializedAndConcurrentInit`; `TestInitOnlySetupRoutesAndAssets` (enumerate current profile/report/transport/export and normal UI routes); `TestInitPasswordTerminalOnly` (eight allowed chars, RNG failure, no password in URL/log/redirected outputs); `TestInitDeadlineStartsAtListenerReady` (failed bind, clock advance, absolute 15 minutes, in-flight completion at expiry); `TestInitGlobalFailuresAndRateLimits` (distributed sources cannot exceed 20 wrong attempts/burst/rate, bounded challenge state); `TestSetupFinalizeAtomicSingleWinner` (concurrent finish, disconnect, transaction failure and process restart on either side of commit).
+- **Ceremony/crypto RED:** table-driven registration rejects replay/expiry/UV=false/wrong origin/RP/signature/userHandle/owner/purpose, duplicate credential and malformed encoding. `setup.test.tsx` covers `create()` without PRF results -> authenticated `get()` succeeds, no PRF support/results -> explicit failure/no commit. `vault-wrap.test.ts` + Go shared-vector tests cover exact AAD/KDF bytes, correct unwrap, wrong passkey/salt/vault/credential/purpose, truncated/tag-flipped ciphertext, unknown version, IV generation freshness, wrong-length key and no partial plaintext. `TestSetupRequiresSavedRecoveryRoundTrip` rejects checkbox-only/wrong re-entry; simulate crypto/commit failure and ensure no unrecoverable initialized state.
+- **Checks:** focused new Go/JS tests RED/GREEN, frontend build/emitted setup dependency allowlist, `go test ./cmd/warden-server ./internal/config ./internal/crypto ./internal/store ./internal/server/...`, production setup HTTP/TLS integration with an injected ceremony verifier **and** signature-verifier tests using real signed fixtures. Fake verifier seams are test-only, not env/production bypasses.
+- **Execution checkpoint:** T1 setup implementation and measured RED/GREEN/check results are recorded in [the T1 report](../reports/2026-11-14-t1-initialization.md) and `.superpowers/sdd/2026-11-14-security-hardening-7c97840ce693/ledger.md`. Normal serve remains intentionally disabled until T2. Genuine PRF-capable authenticator positive HTTPS acceptance is still pending, so this is not M1 or full security acceptance.
+- **Authority:** no automatic reset, insecure HTTP public origin, compatibility fallback, or vendor gate. Exact library APIs require evidence before use.
+- [ ] Implement and verify T1.
+
+## T2: Passkey login works locked; fresh verified PRF unlock enables management
+
+- **Depends on:** T1's initialized format, wrappers and owner/credential verifier.
+- **Outcome:** normal HTTPS service starts locked with auth metadata available; login works without vault key; fresh ceremony authorizes DEK delivery; authenticated management works only after unlock. Explicit global lock and browser logout have distinct behavior. Include working login/locked/unlock/management UI, not API-only scaffolding.
+- **Files/components:** `cmd/warden-server/main.go`, `internal/store/store.go` and secret getters, `internal/server/auth/`, new small runtime vault owner under `internal/crypto/` or store (one spelling); `internal/server/{server,web,http_error}.go`, profiles/reports registration; `web/src/{app.tsx,api/client.ts}` and auth UI/helpers/tests; source-named server/store tests.
+- **Interface:** only auth/status/security metadata can operate locked; all current managed-data routes require web session and unlocked vault. Session hash persistence/cookie flags/rotation/idle30m/absolute12h; 5-minute single-use ceremony and 60-second action grant per design. Server validates delivered DEK against initialized AEAD key-check only after a fresh verified assertion. No possession-of-key alternative. Outer Host validation and cookie Origin/CSRF/JSON gate must be present before mounting management handlers. No API-token acceptance on this audience.
+- **RED acceptance:** `TestLoginWhileLockedWithoutCodec` proves no vault getters/decrypt calls; `TestUnlockRequiresFreshVerifiedCeremony` rejects valid key without session/assertion, stale/reused grant, different session/credential/action/key, bad assertion plus correct key, wrong key plus good assertion. `TestRestartAlwaysLocked` opens synthetic persisted data/sessions with no DEK access. `TestManagementRoutesRequireSessionAndUnlock` enumerates every `Register` route, methods and aliases including reports/projects, key pairs, archive/dependents, transport/export/import; no partial secret response. `TestSessionCookieExpiryRotationAndRevocation`; login/assertion rejection matrix includes challenge replay/concurrent consumption, expiry enforced server-side, required UV, origin/RPID, unknown/revoked credential, wrong userHandle/cross-owner synthetic fixture, and synced-passkey counter cases from verified library semantics.
+- **Lock/logout RED:** `TestGlobalLockDrainsSecretOperations` uses a blocked getter/export/import and race barriers, asserts no post-ack secret delivery or late unlock; `TestLogoutDoesNotGloballyLock` and `TestLockDoesNotLogout` cover two browser sessions. `auth.test.tsx` proves locked login, explicit PRF follow-up, unsupported PRF message/no fallback, auth reset and late-response rejection. Rate-limit/outstanding-challenge acceptance asserts the design's limits without unbounded IP state.
+- **Checks:** focused tests, `go test -race ./internal/store ./internal/server/...`, full web tests/build, HTTPS subprocess restart test against disposable storage. Confirm session state persistence cannot persist an unlocked state. Existing handlers must not retain a copied forever-valid codec.
+- **Bounded execution checkpoint:** T2 implemented against local T1 checkpoint `dbf7a19`; actual RED/GREEN, live SQLite/WAL preflight, signed HTTPS direct/proxy subprocess restart, browser reset tests and final check results are in [the T2 report](../reports/2026-11-14-t2-authenticated-runtime.md) and the execution ledger. Sensitive vault reveal/mutation, export/import and transport extraction (which can inject vault private keys) fail closed until their fresh-action/client-audience implementation; no T3 recovery/passkey management or T4 client implementation is claimed. Genuine authenticator PRF/browser and native Windows evidence remain pending for M1/final acceptance. This checkbox remains unchecked for those external acceptance boundaries; T1 also remains unchecked.
+- [ ] Implement and verify T2.
+
+## T3: Multiple passkeys, fresh sensitive actions and recovery replacement work end to end (M1)
+
+- **Depends on:** T2's fresh grants, vault ownership, auth UI; T1 recovery proof/wrapper.
+- **Outcome:** add/revoke passkeys safely, perform recovery unlock/replacement, rotate recovery material with saved confirmation, and enforce fresh actions on key/export/import operations. Demonstrate the entire M1 workflow before starting broad audit hardening.
+- **Files/components:** auth/setup persistence and handlers; `internal/server/profiles/{key_pairs,transfer}.go`, auth action middleware; `web/src/` passkey/recovery/security views, key-pair tab/export/import callers and tests. Don't build a generic permission language.
+- **Interfaces:** old-owner fresh grant bound to pending new credential, fresh authenticated key delivery only from unlocked vault, new registration plus its own PRF get; atomically commit new credential+wrapper. Recovery nonce/auth-subkey hash verification precedes restricted recovery session and DEK delivery; replacement yields usable PRF wrapper before revocation and normal passkey login. No recovery-managed data/export access. Removing last active passkey refused until replacement. Owner clarification on resumed T3: recovery MUST register a new PRF-capable passkey, verify its independent required-UV assertion, same-DEK key check and local wrapper round-trip, then atomically replace ALL prior passkeys/wrappers with only the new credential, revoke prior sessions/client authorizations, and require ordinary login. Never delete first; aborted recovery leaves identity unchanged. Restricted recovery cannot manage/read/export even after unlocking. Replacement preserves recovery material; separate rotation atomically replaces current wrapper/verifier only after saved re-entry and local unwrap confirmation. T4 remains absent: provide only a durable authorization-generation contract for future client invalidation, not speculative client schema.
+- **RED acceptance:** `TestNewPasskeyCannotUseOldWrapper`; `TestAddPasskeyRequiresUnlockedOwnerAndFreshBoundGrant`; `TestCredentialWrapperCommitRollsBack`; `TestRevokedAndLastPasskeyRules`; `TestFreshActionGrantPurposeTargetSessionAndReplay` (key reveal/change, export/import, enrollment/removal/recovery rotation). `TestRecoveryRequiresProofBeforeWrapperOrKeyDelivery` rejects supplied DEK/nonce-only/wrong secret/expired context; `TestRecoveryCannotReadManagementData`; `TestRecoveryReplacementSurvivesRestartAndRevokesOldAccess`; `TestRecoveryRotationSavedConfirmationAndRollback`; audit/log assertions contain no raw proof/key. Browser tests cover cancel/failure/reset, both passkeys after separate logins, recovery replacement and removal of transient material.
+- **M1 demonstration:** on a disposable HTTPS origin, use a standards PRF-capable authenticator to init/save+re-enter recovery, exit, serve/login/unlock/create a synthetic secret, restart/login while locked/refuse data/unlock/read, logout/login without implicit global lock, global lock, recover/replace passkey, restart/unlock again. Capture commands, test artifacts and observed results. No provider/browser selection research gate: standards conformance is the test contract; if the available automation lacks PRF, report that limitation and retain external PRF ceremony validation as pending, not passing. An ordinary virtual WebAuthn authenticator without PRF is only a negative test, not M1 positive proof.
+- **Checks:** focused server/store/web tests, race checks, production build/embedded assets, real verifier fixtures and HTTPS E2E. Do not claim M1 verified solely from mocked extension outputs.
+- **Resumption:** owner resolved the previous recovery disposition blocker with atomic replacement of ALL old passkeys/wrappers as specified above. Resume against reviewed T2 `99bcbeb` with fresh focused RED evidence; the withdrawn patch/tests remain historical reference, not newly established acceptance. Documentation-only policy recording uses the documented TDD exception.
+- **Previous attempt status (no application changes retained from that attempt):** the bounded T3 attempt against reviewed T2 `99bcbeb` stopped on the unresolved disposition of existing passkeys/wrappers after recovery replacement. Partial test-first server edits were saved outside the checkout and withdrawn; restored T2 checks pass except the known SFTP baseline. See [the T3 attempt report](../reports/2026-11-14-t3-passkeys-recovery.md) for exact evidence, the retain-versus-replace policy decision and remaining work. T3/M1 are not delivered or accepted; no T4 handoff is ready.
+- **Current resumed checkpoint:** bounded T3 implementation is retained against `99bcbeb`: multiple credentials, exact-request grants and v1 transfer, restricted recovery with atomic ALL-old replacement, separate saved-confirmed rotation, working security UI, CAS/session revocation and durable future-client authorization generation. Fresh RED/GREEN evidence, production-Run TLS/signed-fixture lifecycle, real HTTP key-delivery cancellation/emission tests, Go/race/web/build/vet results and remaining external acceptance are in [the current T3 report](../reports/2026-11-14-t3-passkeys-recovery.md). The withdrawn attempt remains historical only. Genuine PRF-positive HTTPS/browser, native Windows and production-browser CSP evidence are pending; do not claim verified M1 or start T4/later from this checkpoint without the next authorization.
+- [ ] Implement and verify T3 / M1.
+
+## T4: First-use web approval issues individually revocable CLI credentials
+
+- **Depends on:** T10's authenticated/private IPC and same-daemon lifetime, plus T3's fresh approval grants and protected management plane. T3's `Installation.AuthorizationGeneration` is the durable recovery-invalidation contract: bind each future durable client verifier to the generation at approval and compare current generation on EVERY client request, including pooled use and after restart. Recovery increments it in the same CAS identity/session-revocation transaction; never activate/rebind an old verifier automatically. No client schema is present in T3.
+- **Files/components:** auth persistence/handlers, explicit client-route registration in profiles/reports, `internal/client/api/{client,client_test}.go`, `internal/client/report/{report,report_test}.go`, `internal/config/`, `cmd/warden/{main,main_test,help_test}.go`, browser device approval/list/revoke views and tests; `internal/client/agent/{client,server,protocol,runtime,pool}.go` for per-user agent-owned API request/token integration and native Windows IPC ACL tests.
+- **Contract:** design's client capability allowlist at `/api/v1/client/`; no alias to the whole management mux. Per-user agent generates/owns the raw API token and polling secret only in memory and makes API requests for CLI commands through protected IPC. Durable server hash commitment/revocation survives server restarts; separate poll secret, fingerprint-confirmed fresh web approval, five-minute pairing expiry/20 pending cap/creation+poll limits. No disk API token, idle/absolute client-token expiry, automatic rotation or refresh-token scheme. Agent exit/restart requires new approval, server restart alone does not; The daemon runs until external termination with no timed/idle exit, including unauthenticated/logged-out/revoked/empty-pool states. SSH pool idle eviction never terminates it; logout clears/revokes auth but leaves the process alive. Revocation, server outage/restart and vault lock likewise never trigger daemon exit. No API/poll secret in URL/terminal/env/argv/log; bearer only after approval. Locked gates still apply, credentials never unlock. New credential labeled and individually revoked; hash comparison and durable revocation checked per request. Existing CLI project/report/archive/transport functions target the new audience. Disk IPC trust/discovery material remains separately allowed/private, never contains the API token. Stolen API tokens remain usable until explicit revocation/recovery invalidation, even after legitimate agent exit.
+- **RED acceptance:** `TestPairingCannotReadBeforeApproval`; `TestPairingApprovalBindsCredentialCommitment` (swapped request/secret/device fingerprint, replay, denial/expiry/concurrent approval); `TestPairingGlobalAndPollingLimits`; `TestCredentialAudienceAndPerRequestRevocation` (cookie on client route, bearer on management/security/export rejected; no unauthenticated metadata path); `TestAgentOwnsAPITokenInMemoryAndNeverPersistsOrReturnsIt`; `TestClientTokenSurvivesServerRestartWithoutExpiryOrRotation`; `TestAgentRestartRequiresReapproval`; `TestSSHPoolIdleExpiryDoesNotEndAuthAgent`; `TestAuthAgentLivesUntilExternalCancellation` uses a deterministic fake clock beyond pool TTL/long idle with an empty pool and unauthenticated/logout/revoke/outage/restart/lock states, then proves clean external cancellation; `TestClientCommandsRequirePairedHTTPSCredential` with agent/command/API/report fixtures. Verify no secret in logs or IPC trust/discovery files, and a captured token remains usable until explicit revocation under the selected policy. UI tests require fresh approval, explain fingerprint and show revocation.
+- **Checks:** focused CLI/config/API/report/server tests; two-device HTTPS subprocess pairing/revoke/server-restart and agent-restart tests; native Windows IPC trust/discovery ACL test pending until environment available. Do not claim local file privacy on Windows from POSIX mode bits.
+- **Bounded implementation checkpoint:** T4 is implemented against reviewed T10/corrections `852eed9`, with explicit client routes, signed fresh web approval/revocation UI, memory-only same-agent API transport for all existing CLI constructors, bounded API request/response streams, exact-origin HTTPS/no-redirect delivery and durable v8 verifier/schema evolution from the exact supported v7 initialized checkpoint. Actual RED/GREEN chronology, synthetic signed two-device CLI/agent/server HTTPS subprocess restart journey, race/full checks, scope limits and runnable T5 handoff are in [the T4 report](../reports/2026-11-14-t4-client-enrollment.md) and the execution ledger. Native Windows and genuine PRF/browser/CSP acceptance remain pending; no M1/security release or T5/later implementation is claimed. The checkbox remains unchecked for those acceptance boundaries.
+- [ ] Implement and verify T4.
+
+## T5: Old-format refusal and legacy export import preserve data and rollback
+
+- **Depends on:** T3's fresh import/export and new initialized identity.
+- **Files/components:** `internal/model/transfer.go`, `internal/store/{store,migrations,transfer}.go` and tests, `internal/server/profiles/transfer*.go`, web transfer controls/tests, `docs/{deployment,security}.md`, prior transfer documentation, `scripts/test.sh` replacement fixture flow.
+- **Contract:** no old encrypted DB/key loader compatibility. Preserve documented `warden-data` version 1 arrays/IDs/timestamps/notes/archive flags, dangling soft references and hard report/project validation. Empty **managed** tables permit import despite auth/audit state; auth credentials/wrappers/sessions are never imported/exported. Import re-encrypts with destination DEK and row/field AAD in one transaction; don't replace CRUD validation semantics silently.
+- **RED acceptance:** `TestLegacyDBRefusalPreservesArtifacts` covers absent/known-old/unknown/corrupt/partially initialized state before migrations/WAL/chmod; `TestVersion1ExportFixtureIntoInitializedEmptyVault` checks synthetic complete old documented shape, all record kinds/notes, IDs/timestamps/archive/dangling references and decrypted destination secrets. `TestImportFailurePreservesIdentityAndManagedData` injects encryption/SQL/commit/cancellation failures and retry; concurrent imports have one winner, nonempty destination unchanged. Keep/extend `TestSSHAADBindingPreventsFieldSwap` for wrong field/row/resource/DEK and tampered blobs. Auth or setup tables must never satisfy/defeat managed emptiness incorrectly.
+- **Checks:** source-grounded synthetic fixtures with checksums, store/API/UI tests, two-disposable-store round trip with different DEKs, old encrypted DB byte/mode/hash checks, full Go/web checks. Document manual old-export/fresh-storage/import/verify/cutover/rollback steps and plaintext-export protection **without running them on real data**. Retain old binary/config/DB+WAL/SHM/key; no automatic cleanup/re-encryption/in-place migration.
+- **Bounded implementation checkpoint (reviewed T1–T4/T10 HEAD `3ebf59e`):** existing T3 v1 import/export already satisfies the transfer contract; no importer/storage/crypto/auth change was invented. Actual historical `c104353` exporter produced the complete synthetic fixture; passing-existing initialized-store/signed-HTTPS preservation, encryption/SQL/real COMMIT/cancellation rollback+retry, deterministic single-winner and nonmutating legacy-refusal characterizations plus temporary sensitivity checks are distinguished from actual help RED/GREEN in [the T5 report](../reports/2026-11-14-t5-transfer-preservation.md). [Manual migration/rollback](../../migration.md) retains coherent old artifacts and requires fresh init/import/verification, no deletion or compatibility. Full Go retains only the observed SFTP baseline failure; earlier intermittent DB remains unresolved. The separate offline fixture script is T5-only; T17 still owns replacing historical `scripts/test.sh`. Independent review/native/genuine PRF/browser acceptance remain pending; no security release or subsequent task authority.
+- [ ] Implement and verify T5 (bounded implementation evidenced; independent/external acceptance separately pending).
+
+## T6: Backend request boundaries, deadlines and cache policy hold on failures
+
+- **Depends on:** M1; T4 for bearer-versus-cookie test matrix.
+- **Files/components:** `internal/server/{server,server_test,web,web_test,http_error}.go`, config/main integration, profile/key-pair/transfer/report handler tests and reverse-proxy deployment examples.
+- **RED acceptance:** `TestCrossOriginTextPlainPOSTRejected` for create/import/report/setup/auth; `TestHostAndDNSRebindingRejectedBeforeRouting` tests attacker Host, alternate port, duplicate/malformed authority, forwarded-header spoofing and configured loopback proxy. Cookie mutations reject foreign/null/missing Origin, wrong/missing CSRF, simple content types; proper JSON+origin+CSRF succeeds. API bearer requests with no Origin work only on client allowlist, foreign Origin fails. Direct TLS and explicit proxy use stable configured WebAuthn origins, not request headers.
+- **Deadline tests:** `TestSlowHeadersBodiesAndIdleConnectionsTerminate`; `TestFullSizeImportWithinDeadline` submits representative valid near-50-MiB synthetic data within 120 s and rejects limit+1, slow/trailing bodies, stalled write and cancelled upload. Header/read/write/idle are 5/120/120/60 s per design, injectable short durations in tests; test actual sockets not just handler config. `TestSetupDeadlineNotExtendedBySlowRequest`. Set explicit bounded concurrency for expensive import/export/crypto flows, assert saturation releases state.
+- **Cache tests:** `TestDataAndAuthResponsesNoStore` table includes key vault/transport/export success and decode/validation/notfound/unauth/forbidden/locked/rate/500 errors, conditional GET/HEAD and panic handling; no error path can cache a secret. Existing immutable nonsecret static assets remain functional.
+- **Checks:** socket integration plus focused server tests/race; inspect middleware order to ensure unknown routes/errors pass gates; review proxy/read-timeout docs against actual settings.
+- **Bounded implementation checkpoint (reviewed T5 HEAD `699dd6f`):** existing runtime request/audience gates and 5/120/120/60-second budgets were characterized, not needlessly replaced. Focused RED→GREEN fixed setup pre-body CSRF/unknown-route gates and OPTIONS-star bypass, immutable-cacheable static 404s, unbounded transfer/key concurrency, and TLS failed-write cleanup extending a timed-out request by close-notify. Shared HTTP defaults preserve HTTP/1, and two transfer/four key-verification slots retain existing lease/fresh-grant semantics without serializing ordinary CRUD/status/lock. Real verified-TLS and configured-loopback socket deadlines, near-50-MiB valid paced import/full-size export, cancellation/error/panic cleanup, measured memory and final checks are recorded in [the T6 report](../reports/2026-11-14-t6-backend-boundaries.md) and the chronological local ledger. Independent review, genuine PRF/browser/native Windows/CSP acceptance remain pending; T7 is not started or authorized by this checkpoint.
+- [ ] Implement and verify T6 (bounded implementation evidenced; independent/external acceptance separately pending).
+
+## T7: Jump resolution has a cumulative budget before secrets
+
+- **Depends on:** vault access contract T2; preserve archive/import behavior T5.
+- **Files/components:** `internal/server/profiles/{resolve,resolve_test}.go`, `internal/store/profiles.go` metadata-only graph read seam and tests, transport error/audit mapping.
+- **Contract:** existing depth32 plus max1,024 expanded occurrences/work per complete resolution (count duplicate edges before recursion/lookup), context cancellation, deterministic postorder and duplicates within budget. Validate all reachable structure/archived/missing/cyclic references with no secret decryptions; only then construct secrets. No deduplication that changes jump order; no partial bundle on failure. DB tunnel resolution uses same budget path.
+- **RED acceptance:** `TestResolveDuplicateDAGCumulativeBudget` exponential duplicated edges at shallow depth terminate with stable graph failure and bounded lookup/decrypt counts; `TestResolveBudgetPreservesOrderAndDuplicates` exact under-limit output; `TestResolveBudgetBoundaryDepthAndCancellation`; `TestResolveInvalidGraphBeforeAnySecretDecrypt` includes corrupt password/key material plus invalid graph, archived hop/target and DB tunnel. Graph error classification must not log raw route JSON.
+- **Checks:** focused profiles/store tests and cancellation/race test; deterministic operation-count assertions rather than flaky benchmark-only proof.
+- **Bounded implementation checkpoint (owner-authorized T7 at reviewed HEAD `78e7931`):** one cumulative 1,024-profile-occurrence budget includes the SSH/DB root and every repeated reference before lookup/recursive descent; depth32 and postorder duplicates remain intact. A narrow metadata-only SQLite read snapshot validates all reachable routes/key presence before any password/key decryption and supplies both phases consistently across committed profile/archive/key updates. Actual real-store RED→GREEN, exact operation/decrypt-spy counts, 1,024/1,025 SSH/DB boundaries, repeated cancellation/race, safe graph HTTP/audit errors and final checks are in [the T7 report](../reports/2026-11-14-t7-graph-budget.md) and the ignored execution ledger. Profiles/store/runtime normal and race, repeated count/snapshot checks and vet pass; full Go retains only the unchanged SFTP mismatch, with DB passing this run (earlier intermittent DB unresolved). Archive/import v1/exports/external DB/proxy behavior and response leases are unchanged. Independent review and genuine PRF/browser/CSP/native Windows acceptance remain pending; no T8 implementation or release claim.
+- [ ] Implement and verify T7 (bounded implementation evidenced; independent/external acceptance separately pending).
+
+## T8: Audit events contain classifications and bounded safe metadata only
+
+- **Depends on:** auth/client actions T3/T4 so their events are covered.
+- **Files/components:** `internal/server/audit/audit.go` + new `audit_test.go`, profile/report/auth record callers, `internal/store/audit*.go`, `internal/model/audit.go` if needed.
+- **RED acceptance:** `TestAuditNeverPersistsRawValidationValues` injects synthetic secret into bad transfer format/name/database selector/graph error and checks rows plus slog output; `TestAuditClassificationsAllowlist` covers known/unknown/internal/auth/lock/rate errors with no `err.Error()` fallback. `TestAuditMetadataCapsAndNoCallerMutation` enforces UA512/encoded4KiB, UTF-8 validity, oversized/nested/unserializable metadata omission, supplied source/header controls, and event actor IDs without tokens/proofs. Recorder failures remain surfaced generically without leaking original data.
+- **Checks:** focused audit/store/profile/report/auth tests, race; inspect every `RecordRequest`/`Record` call, not just new auth events. Do not “sanitize” by truncating attacker strings.
+- **Bounded implementation checkpoint (owner-authorized T8 at reviewed HEAD `896cbed`):** all existing profile/report producers now use stable allowlisted error classifications and fixed primitive metadata, with UTF-8-safe UA512-byte and encoded JSON4KiB bounds, numeric resource IDs, authenticated nonsecret credential actors and generic non-silent persistence-failure warnings. Runtime security routes now emit classified success/failure/status events without bodies, tokens or proofs; setup has no pre-finalization persistent recorder. Real SQLite/slog secret-leak RED→GREEN, caps/caller-mutation/custom-marshaler regressions, complete affected backend normal/race, repeated leakage/caps race25, producer/consumer inventory and limitations are in [the T8 report](../reports/2026-11-14-t8-audit-boundaries.md) and the ignored execution ledger. No audit schema, v1 transfer, historical-row rewrite, frontend or auth/lease contract change. Full Go retains only known unchanged SFTP mismatch; DB passes this run, earlier intermittence unresolved. Independent review and genuine PRF/browser/CSP/native Windows acceptance remain pending; no T9/release/publication authority.
+- [ ] Implement and verify T8 (bounded implementation evidenced; independent/external acceptance separately pending).
+
+## T9: Production UI resists framing, silent external requests and stale secret responses
+
+- **Depends on:** M1 UI/auth reset signals and T6 headers; run before final release build.
+- **Files/components:** `internal/server/web*.go`, `web/src/api/client*`, app/auth state, `features/{ssh,db,key-pairs,projects}/` tests/components, `web/scripts/verify-dist*`, real-browser integration fixture/config as needed.
+- **RED acceptance:** `TestUIFramingAndCSPProductionAssets` verifies frame denial/nosniff/referrer/CSP for setup/login/management and loads every emitted Vite JS/CSS/font asset. Browser run catches actual CSP violations for dialogs/popovers/inline styles, no unsafe script/eval blanket fallback. `client.test.ts` asserts no-store on generic and export fetches/errors, same-origin credentials and CSRF/action headers. SSH/DB form tests first replace deliberate text-type assertions with default-mask/reveal/reset requirements; passphrase remains masked.
+- **Async/privacy acceptance:** `projects-reports-tab.test.tsx` hostile Markdown image stays non-fetching until explicit privacy-warning activation, HTML/protocol/opener protections remain. Key-pair/auth/export tests defer promises and resolve after close/new-dialog/unmount/lock/logout/recovery reset; no secret/Blob/object URL/file text repopulates state. Retain existing request-ID/file-generation guards and test lock/auth epochs across the app.
+- **Checks:** focused then `npm --prefix web test`, `npm --prefix web run build`, emitted-dist verification and HTTPS browser network/CSP trace. If using Playwright, consult its current docs and project/machine setup guidance before introducing a dependency/config; do not pretend jsdom enforces CSP or passkeys. Evidence of actual standard PRF remains M1's separate requirement.
+- **Bounded implementation checkpoint (owner-authorized T9 at reviewed HEAD `41238eb`):** SSH/proxy/DB passwords default-mask with local reveal/reset, passphrases stay masked, and untrusted Markdown images require an explicit IP-disclosure action before external `noopener,noreferrer` opening. Observable memory-only auth epochs detach the management tree; retained request/file generations plus dialog/save/auth/body-read guards reject stale secrets, errors, downloads and pending recovery-rotation reuse. Existing restrictive headers/CSP and immutable assets were characterized rather than broadened; real-browser setup exposed and regression-fixed a native-fetch receiver bug. Measured RED/GREEN, full frontend **279 tests + 13 dist tests**, standalone **19 network-gate tests**, build/verifier, affected Go normal/race/vet and the real Chromium production-HTTPS CSP/network journey are in [the T9 report](../reports/2026-11-14-t9-ui-privacy.md) and ignored execution ledger. Browser evidence has zero implicit hostile-image requests, one explicitly activated request, zero CSP violations/page errors and trace/screenshots/videos, using **synthetic signed WebAuthn/injected PRF and a test-only certificate-trust exception**. This is not genuine PRF or production-trust/M1/native Windows acceptance. Full Go retains only the unchanged SFTP mismatch; DB passes this run, earlier intermittence unresolved. Independent review/external acceptance remain pending; no T11/T12, version/publication or subsequent-task authority.
+- **Bounded three-P2 review follow-up:** caller-only export abort checks now cover fetch and error-body completion without retry/grant changes. Browser PASS requires successful body-complete responses for all nine manifest assets, with tested, explicitly recorded lifecycle exceptions only when replacements/server-state probes verify the intended outcome. A new run establishes the actual awaited 500-ms pre-click zero-request window. Historical save REDs are corrected to pending-dialog close failures, not unexecuted replacement-contamination assertions; original browser asset/window claims are qualified. Current follow-up commands/results and new artifacts `/tmp/warden-t9-review-p2-confirmed/` are appended in the T9 report/ledger; prior evidence is retained, not promoted to proof of the new gate. Affected Go normal and focused header/cache race checks pass; no current full-Go/full-package-race rerun or external-acceptance claim.
+- [ ] Implement and verify T9 (bounded implementation evidenced; independent/external acceptance separately pending).
+
+## T10: Local-agent clients authenticate the server before protected payloads
+
+- **Depends on:** none beyond baseline; owner resequences execution to BEFORE T4 against reviewed T1–T3 `77203cc`. This prerequisite protects future credential transport; no other task is removed. Required native Windows evidence remains separate from cross-compilation.
+- **Files/components:** `internal/client/agent/{runtime,runtime_windows,runtime_unix,protocol,client,server}.go` and tests, private Windows ACL helpers/tests; minimal `pool.go` termination closure and `cmd/warden` external-signal wiring needed for the now-explicit lifetime contract. Fetch exact winio/Windows API and crypto docs before calls.
+- **Contract:** new coherent private IPC/credential-file version; TLS 1.3 local channel with a per-runtime self-signed server certificate/key. Private credential file carries the exact trusted certificate and existing token; private key stays in agent memory. Dedicated trust pool/fixed warden-agent name verification and bounded TLS handshake precede the existing bounded token-authenticated request frames; no system-root/skip-verification/plaintext fallback or bespoke crypto protocol. Neither reusable token nor bundle/SQL/command/stdin precedes server authentication, and relays cannot decrypt payloads. Native ACL/ownership protection covers runtime directory/credential file/listener. Keep Unix stale endpoint safety. Disk IPC trust/discovery credentials are separate from the API token: never persist the API token there. T4's per-user agent owns the API token/API requests in memory; the daemon has no timed/idle exit, even unauthenticated/logged out/revoked or with an empty SSH pool. Logout clears/revokes authentication without terminating the daemon; server outage/restart and vault lock are not exit triggers. Only external termination ends its lifetime. Agent restart requires reapproval, without refresh/rotation work.
+- **RED acceptance:** `TestAgentAuthenticatesServerBeforeSecretBytes` malicious listener captures entire first exchange, cannot find token/bundle/SQL/command; `TestAgentTLSRejectsWrongStaleExpiredCertificateAndTimeout`; `TestAgentTLSRelayCannotReadPayload` and existing token mismatch/oversize/protocol-version tests; ordinary streaming/EOF/cancellation/agent pool tests still pass. `TestIPCDiscoveryContainsNoAPIToken` and `TestSSHPoolIdleExpiryDoesNotEndAuthAgent` distinguish local IPC credentials from memory-only API credentials and independent lifetimes. `TestAuthAgentLivesUntilExternalCancellation` deterministically advances a fake clock past pool TTL/long idle, with an empty pool, and proves unauthenticated/logout/revoke/outage/restart/lock leave the daemon alive; external cancellation terminates cleanly. Windows-native `TestPipeSquatterCannotCollectSecrets`, `TestRuntimeACLRejectsOtherUser` exercise predictable pipe impersonation, credential path/ACL/certificate substitution, ownership and legitimate reconnect.
+- **Checks:** focused protocol/runtime/client/server tests and race, Unix ownership tests, Windows cross-compile for compile errors **plus required native Windows execution**. No native environment is presently verified; report blocker/evidence pending, not “resolved on Windows.”
+- **Bounded execution checkpoint:** TLS1.3/exact runtime pin, native private version2 discovery, exclusive startup/crash ownership, no empty-pool exit, external cancellation and minimal owned-graph termination closure are implemented against `77203cc`. See [T10 report](../reports/2026-11-14-t10-agent-ipc.md) and the execution ledger for actual RED/GREEN/current checks. Native Windows execution is still required/pending; T4 API credentials/logout/revocation/outage state acceptance is not fabricated in T10. This is an implementation handoff, not native/security-release acceptance.
+- [ ] Implement and verify T10 (native acceptance separately tracked).
+
+## T11: Copy path containment and exclusive staging with pre-write permissions
+
+- **Depends on:** none; preserve existing same-host/self-copy/symlink safety.
+- **Files/components:** `internal/client/sftp/{filesystem,transfer,remote}.go`, adapter tests/in-process SFTP fixture and native Windows path tests.
+- **RED acceptance:** `TestRemoteEntryNamesRejectedBeforeJoin` malicious server returns `..`, dot, empty, slash/backslash, rooted, UNC, drive-relative/absolute and separator-containing names; zero writes outside destination, across POSIX and native Windows semantics. `TestCopyTargetContainment` tests cleaned/native containment plus existing descendant/symlink protections. `TestPrivateExclusiveStagingBeforeFirstWrite` asserts local exclusive private-at-creation and remote exclusive OPEN followed by handle FSETSTAT0600 before any Write; collision/symlink rejection must not truncate/remove preexisting paths and unsupported/failed chmod fails closed before content. Remote creation may initially be public: the owner explicitly accepts the pre-chmod retained-descriptor read/write race, not a private-at-creation guarantee. Source-final-public mode is applied only after successful content and both closes. `TestCopyFailurePreservesOldTargetAndCleansStage` covers copy/source-close/write-close/chmod/rename errors and zero partial replacement.
+- **Baseline:** rerun `TestPosixRelMatchesFilepathRel` before edits. If fixing its confirmed `".."` versus `"../."` mismatch in this task, document the intended filepath-equivalence behavior and add exact regression first; do not silently weaken expected path-containment assertions to green the suite.
+- **Checks:** focused SFTP tests, actual local and SFTP adapter permission/exclusivity tests, native Windows traversal/ACL/file replacement checks; cross-compilation alone is not Windows proof. Keep remote POSIX namespace semantics independent of local `filepath` semantics.
+- **Historical initial blocked preflight at owner-authorized reviewed HEAD `78f8090`:** pinned `pkg/sftp v1.13.11` public `OpenFile` supports O_EXCL but cannot supply permission ATTRS in OPEN; `Mkdir` likewise omits creation attributes. Disposable real-adapter pre-write/collision/symlink REDs and actual decoded exclusive-OPEN characterization confirm the gap. No production/repository-test/dependency changes or GREEN fix; no create-then-chmod/private-dir/custom-frame workaround or silent upload disablement. See [T11 blocker evidence and required API decision](../reports/2026-11-14-t11-sftp-boundaries.md). Entry validation/containment/Rel/staging/error cleanup and native Windows acceptance remain unimplemented or unverified. Resolve the supported-client API blocker before resuming T11; do not start T12 from this checkpoint.
+- **Owner superseding decision / resumed T11:** the historical blocker above remains valid for the original stronger contract but no longer blocks this limited implementation. Keep `pkg/sftp v1.13.11` and no dependency/fork/new library/custom frames/rsync. Remote O_WRONLY|O_CREATE|O_EXCL plus handle FSETSTAT0600 must complete before any Write; failed/unsupported chmod closes/cleans owned staging, never collisions. Local private creation, path containment, old-target preservation and cleanup remain mandatory. The owner explicitly accepts another user's pre-chmod open descriptor surviving chmod and reading later contents (or writing if initial mode allowed); report this residual risk, never full original T11 satisfaction. Future cp-to-rsync replacement is outside this PR. Docs-only authority update precedes tests/production edits; native Windows acceptance remains separate.
+- **Revised bounded implementation checkpoint:** portable component checks run before both joins; native local absolute/cleaned containment closes the mixed relative/absolute descendant bypass, while remote POSIX roots/colon/full-path semantics remain independent. Explicit caller dot/root directory sources retain contents-target behavior without joining dot/root components; entries never get this exception. Local POSIX stages are exclusive0600; native Windows CREATE_NEW requests/validates protected owner-only DACL (execution pending). Real SFTP OPEN is exclusive write/create/no-truncate, followed by handle FSETSTAT0600 before any WRITE; unsupported/denied chmod closes/cleans owned stage with zero writes, never collisions. Actual RED/GREEN, public initial0644 versus pre-write0600 evidence, source/copy/write/close/chmod/rename/cancellation preservation and cleanup, normal/race/repeat/full-Go/vet/cross-build results and limits are in [the T11 report](../reports/2026-11-14-t11-sftp-boundaries.md) and ledger. The remote pre-chmod descriptor race is explicitly accepted, not private-at-creation or full original T11 satisfaction. Native Windows and independent acceptance remain pending; T12 not started.
+- **P1 rereview follow-up:** actual local and real-SFTP REDs confirmed that pre-Lstat source cleaning silently selected different bytes across symlink/`..`, erased invalid source/destination prefixes, and let source-ancestor aliases enter real descendants. Raw-component checks now reject these aliases before normalization; operational source spelling stays separate from absolute/native or POSIX comparison paths. Existing dot/root, mixed relative/absolute containment, staging/collision/cleanup guards remain covered. Fresh focused normal/race, boundary race25, vet and Windows cross-build pass; native execution remains pending. The latest parent full-Go run remains failed ONLY on DB `TestTunnelCloseClosesWholeChain` (one open connection; `/tmp/warden-t11-parent-full.log`), not superseded by older worker passes; no new full-Go run or DB/T12 fix. Exact RED/GREEN/limits in the report; stop for rereview.
+- [ ] Implement and verify revised T11 (bounded implementation evidenced; remote creation race accepted; native/independent acceptance separately tracked).
+
+## T12: SSH agent use and chained connection cancellation have safe lifecycles
+
+- **Depends on:** T10 if IPC/pool contracts changed.
+- **Files/components:** `internal/client/ssh/{graph,exec,interactive}.go`, SSH fixture/tests, `internal/client/db/tunnel*.go`, `internal/client/agent/{pool,server}.go` tests and callers in `cmd/warden/main.go`.
+- **Contract:** SSH_AUTH_SOCK authentication retained, forwarding disabled by default for all sessions independently of auth; do not add speculative forwarding UI/profile options. Make chained dial/handshake/proxy/DB channel opens cancel/timeout even with unsupported deadlines; close owned transports, reclaim late opens, invalidate unusable borrowed graph deliberately, and preserve unrelated healthy pooled uses. SSH graph/pool idle eviction remains allowed but never exits the daemon or discards an otherwise approved memory-only API token. The daemon has no timed/idle exit even unauthenticated/logged out/revoked or with an empty pool. Logout clears/revokes authentication without process exit; revocation, server outage/restart and vault lock also leave it alive. Only external termination ends the daemon; an actual restart loses the token and requires reapproval. Keep strict host-key verification and reverse-order graph closure.
+- **RED acceptance:** `TestAgentAuthenticationDoesNotRequestForwarding` covers exec/interactive/pooled reuse and SSH_AUTH_SOCK available; `TestGraphOwnsAgentConnectionsUntilClose` failure/idle expiry/eviction; `TestSSHPoolIdleExpiryDoesNotEndAuthAgent` proves API auth survives pool expiry without token rotation or new approval. `TestAuthAgentLivesUntilExternalCancellation` uses a deterministic fake clock beyond pool TTL/long idle to assert an empty-pool agent stays alive, logout/revoke/outage/restart/lock do not exit it, and external cancellation terminates cleanly. `TestSecondHopDialAndHandshakeCancelWithoutDeadline`; `TestProxyCONNECTCancelWithoutDeadline` raw and through hop; `TestDBChannelOpenCancellationReclaimsLateResult` owned/borrowed; stalled servers terminate inside injectable bound with no leaked graph/channel/goroutine. Include deadline methods returning errors, not merely absent methods, and multiple concurrent pooled operations.
+- **Checks:** focused SSH/DB/agent tests, repeated `-race` cancellation/lifecycle runs, leak counters/fixture shutdown proof. Fetch exact x/crypto source/docs; don't assume `SetDeadline` works on SSH channel conns. Do not introduce goroutine races that leave background dial open forever.
+- **Bounded implementation checkpoint (owner-authorized T12, reviewed T11 HEAD `8541e6f`):** SSH_AUTH_SOCK authentication remains functional, with zero implicit forwarding for exec/interactive/reuse. Graph/client ownership closes authentication sockets and transports once; reverse logical teardown has a root-abort escape for blocked channel writes. Synchronous context-guarded channel opens, handshake and raw/through-hop CONNECT honor cancellation even when SetDeadline returns errors; callbacks stop/join before reusable publication and deadlines reset or fail closed. Borrowed DB dialers require the pool-owner invalidation interface: canceling an unconfirmed open explicitly aborts THAT graph and disrupts its concurrent leases, while independent healthy graphs and replacement acquisition survive. Pending pool dial owners are canceled even before a Graph exists; cancellation/shutdown publication races reclaim late graphs without leases. Existing fake-clock same-daemon/API-token lifetime tests remain passing characterizations, not new auth policy. The parent DB whole-chain failure was reproduced2/50, then deterministically traced to a real fixture relay upstream-TCP leak (wait-before-close), not assumed observer timing; endpoint closure/drain joins and balanced accepted/completed counters fix it without changing the5s assertion or swallowing Close errors. Exact RED/GREEN, pinned x/crypto v0.55.0 source/API reasoning, final relevant normal/race, boundary race25, final full-Go PASS, vet/Windows cross-compile and remaining risks are in [the T12 report](../reports/2026-11-14-t12-ssh-lifecycle.md) and ledger. **One intermediate PTY Ctrl-D timeout remains unexplained, not fixed/waived by later passes**; native Windows, genuine PRF/production-trust/browser and independent acceptance remain pending. Known dependency advisories stay T15 work; no dependency/external TLS/profile/version change, T13 or publication authority.
+- **Post-review T12 follow-up:** P1 stop-win/late-cancellation cleanup now retains exactly-once owner abort through blocking late-channel/CONNECT Close, with deterministic elapsed-before-timer and post-stop deadline-reset RED→GREEN; healthy publication still stops/joins without late borrower closure. P2 fixture request drains now join before completion with pre-forced-cleanup assertions (evidence refinement, not a fabricated production RED). Test-only PTY instrumentation and deterministic RED→GREEN correct retained master/slave workers, readiness reported before controlled child startup, and canceled late-child publication. Readiness requires a real shell marker, foreground group and canonical signal/EOT settings; the10s Ctrl-D assertion is unchanged. Final focused normal/race, boundary race25, full Go and vet PASS; bounded instrumented300-case batch PASS with resource ceilings, Windows compile-only. **These independently demonstrated fixture fixes do not establish the historical timeout's cause.** Exact chronology, validation-environment/sampler errors and original PTY uncertainty remain in [the report](../reports/2026-11-14-t12-ssh-lifecycle.md); parent decides its disposition. No dependency/T13/publication scope change.
+- **Superseding recurring PTY checkpoint (before sequencing edits):** parent's fresh ordinary `go test ./... -count=1 -timeout=180s` failed Ctrl-C/Ctrl-D at10.08s; chained race never executed. Successful03/04 master writes were71us apart; child still waited. Native independent PTY cases reproduce the full10s stall; traced evidence shows EOT consumed by read(0)=0 BEFORE pending SIGINT, followed by a new prompt/read, **not a TCFLSH syscall**. Waiting for actual post-SIGINT prompt then one EOT exits130. Parent exact ordering remains unproven; no production TTY root-cause claim. P1/P2 review closed per owner; authorized SAME T12 test/fixture-only acknowledgment sequencing, deterministic held-ack RED before fix, unchanged10s/single-EOT/byte-and-no-SSH-INT/join assertions. Fresh validation and new correction review remain pending; earlier passes/not-reproduced notes are historical. See report for artifacts and exact evidence. No production input-pump, dependency, T13 or publication changes.
+- **Test-only sequencing implementation/self-check:** extracted unchanged03→delivery→04 sequence first; deterministic held-ack RED observed early04 before shell acknowledgment. GREEN waits a later complete private PS1 generation, with initial prompt observed before03; escaped command/startup/kernel echoes and stale/partial/other-fixture prompts cannot satisfy it. One client EOT,10s exit, zero SSH-INT and actual endpoint/copy/request-drain/handler joins retained; production input/shell-command files unchanged. Stable normal full Go first and again, SSH/DB/agent/CLI normal/race, boundary race25, bounded420-case PTY race batch (60 Ctrl-C), vet and Windows compile-only PASS. Initial full attempts preserve `/tmp` quota and longer-TMPDIR AF_UNIX failures; final checks use TMPDIR=/var/tmp, private Go subdirectories/ordinary test umask. Exact RED/GREEN/commands/resources/limits in report. No production TTY bug or parent exact-syscall-order claim; fresh parent normal full run and new sequencing review remain pending.
+- [ ] Implement and verify T12 (prior P1/P2 review closed; test-only sequencing implementation/implementer checks evidenced; fresh parent validation and sequencing/independent/external acceptance pending).
+
+## T13: API redirects and untrusted terminal text cannot leak credentials or control the terminal
+
+- **Depends on:** T4's API credentials; preserve existing DB/proxy transport contracts.
+- **Files/components:** `internal/client/api/client*.go`, `internal/config/`, CLI constructor/callers and help tests; `internal/client/db/mysql*.go`, shared terminal helper if existing seam fits, not broad SSH stream rewriting.
+- **RED acceptance:** `TestAPIRedirectPolicyBeforeCredentialSend` normal **and injected** clients, cross-host/scheme/port/subdomain, HTTPS downgrade, same-origin redirect (refuse all if chosen), 301/302/303/307/308, redirected POST body; second server receives zero auth/body and injected client's shared configuration remains unchanged. Initial HTTP config rejected. `TestAPIErrorTerminalControlsEscaped` ESC/OSC/C0/C1/DEL/CRLF plus max-error-byte bound; `TestDBHeadersSanitizedInTableAndTSV` complements current cell sanitization and checks printable Unicode. Interactive SSH byte streams and binary transfer remain byte-for-byte intact.
+- **Checks:** hostile two-server HTTPS redirect tests, API/config/CLI/DB/terminal focused tests, inspect all CLI error render sites. A final-response URL check does not prove prevention of an already-followed redirect.
+- **Bounded implementation checkpoint (owner-authorized T13 at reviewed T12 HEAD `7c3adc0`):** T4 already refuses all API redirects using owned verified HTTPS transports; expanded normal/injected API and actual agent bearer/POST producer matrices are passing-existing characterizations, not invented production fixes. Every target is positively reachable with trusted roots/ordinary TCP routing; guarded requests reach the verified origin and produce zero target HTTP requests/auth/body bytes across 301/302/303/307/308, host/port/subdomain/downgrade/same-origin. Focused RED→GREEN adds diagnostic-only ESC/OSC/C0/C1/DEL/CRLF/invalid-UTF8 escaping with a 1,024 encoded-byte bound and safe truncation, preserves structured API error fields/typed classification, and sanitizes table headers with the existing DB cell sanitizer (TSV already passed). Real synthetic MySQL name-field producer/driver/Rows.Columns tests, CLI/agent relay and raw exec/interactive stream/status preservation, help RED→GREEN, full Go and full Go race, focused packages, redirect race10, output race25, vet and Windows compile-only PASS are in [the T13 report](../reports/2026-11-14-t13-client-output.md). No transport/allowlist/IPC/token-timeout policy, external DB/proxy TLS, SSH/binary stream, dependency/version, T14/T15 or publication changes. Independent T13 review and native/genuine PRF/production-trust/browser acceptance remain separate. Exact allowlisted review diff and changed-path manifest are delivered under `/var/tmp/warden-t13-review.*`; protected `mise.toml` remains untouched.
+- [ ] Implement and verify T13 (bounded implementation/self-check evidenced; independent/external acceptance separately pending).
+
+## T14: Upgrades/installers enforce HTTPS bounds while preserving state and service behavior
+
+- **Depends on:** T1 new initialization contract and T13 network-boundary lessons; no authorization to deploy or self-upgrade a real install.
+- **Files/components:** `internal/upgrade/{upgrade,replace_unix,replace_windows}.go`/tests, `cmd/warden-server/main_test.go`, `scripts/install-{client.sh,client.ps1,server.sh}`, `scripts/test-installers.sh`, deployment/service docs and fixtures.
+- **Contract:** HTTPS URLs and every redirect with verified TLS (release CDN HTTPS redirects may cross hosts), controlled network client even for injected updater transport, binary256MiB/checksum1MiB, connect/header10s/total5min including retries. Bounds enforced while streaming without trustworthy Content-Length. Before replacement verify exact checksum entry/digest; failure preserves binary/config/state/service. Server installer stops generating master.key and explains explicit init/fresh-storage process, never overwrites legacy artifacts to make upgrade work. Preserve systemd UMask/NoNewPrivileges/ProtectSystem/ReadWritePaths, user/system scopes, not-root safeguard, manual restart guide and Windows scheduled-replacement wording.
+- **RED acceptance:** `TestUpgradeHTTPSRedirectAndTransportPolicy` includes injected redirecting client and downgrade/CDN paths; `TestUpgradeStreamLimitsTimeoutChecksumAndRollback` oversized/slow/absent-content-length/truncated/bad checksum leaves original binary unchanged and temporary cleanup safe. Installer fixtures assert equivalent curl/PowerShell redirect/size/time enforcement, private temp files, interruption, existing config/DB/key untouched, initialized versus legacy guidance and no generated fallback key. Native Windows installer/replacement tests required; Linux mocks cannot prove Windows ACL/helper lifecycle.
+- **Checks:** upgrade/command tests, `bash -n` installers and offline `bash scripts/test-installers.sh`; isolated Windows PowerShell tests when available. Do not run actual installer/upgrade on this machine's Warden service. **Owner policy for this execution:** preserve intentional mutable same-version releases and executable-only upgrades, including service-managed installations, with manual restart/cutover. Stop for owner decision only if a needed remediation would change those policies; no such policy change was made.
+- **Bounded implementation checkpoint (T14 at reviewed T13 HEAD `d6c437d`):** owned verified-HTTPS updater transport permits cross-host CDN but rejects unsafe injected TLS/protocol hooks; shared 5-minute operation and 10-second connect/TLS/header bounds plus streamed binary256MiB/checksum1MiB limits precede exact SHA-256 verification and private replacement. Standalone shell download supervisors validate redirects before requests, count streams, supervise/join curl and preserve state; client settings and publication rollback have focused RED→GREEN evidence. Windows PowerShell 5.1/.NET Framework 4.7.2+ helper implements equivalent bounds/private ACLs and replacement rollback, but native execution is REQUIRED/PENDING. Server installer never generates/reads a master key, writes server config, initializes storage, executes downloaded code or invokes services; it preserves existing state/custom units and prints explicit manual init/fresh-cutover instructions. Full Go normal/race, upgrade race10, vet, shell/offline and actual curl verified-TLS fixtures PASS; Windows cross-builds are compile-only, ShellCheck unavailable. Exact chronology (including stream-test sequencing correction), evidence, limitations and review artifacts are in [the T14 report](../reports/2026-11-14-t14-upgrade-installers.md). No real install/deploy/upgrade, version/dependency change, native acceptance or T15 work.
+- **Independent-review P1 follow-up (same HEAD):** actual pre-fix regressions reproduced silent HTTP/HTTPS proxy CONNECT waiting for the longer operation budget and server unit-publication errors leaving changed/new binaries. The updater now holds one raw-socket abort timer across complete establishment through verified-origin `GotConn`, stopping/joining it before reuse without assuming socket-deadline support; 10-second default and five-minute total stay unchanged. The server prepares both files and private old/new inode snapshots before publication, uses exclusive `ln -T` for absent units, rolls back original bytes/mode or fresh absence, preserves competing file/symlink/directory units, and retains a diagnosed recovery directory if rollback I/O fails. Missing Python3 is explicitly tested to prevent downloads/publication. Final full Go normal/race, focused upgrade/CLI/server normal/race, upgrade race10, vet, offline failure matrices and real-curl tests PASS; cross-builds are compile-only. [The T14 report](../reports/2026-11-14-t14-upgrade-installers.md#independent-review-p1-follow-up--superseding-implementation-checkpoint) records exact RED/GREEN, additional directory-collision/nil-dial checks, the semantic TLS-timeout assertion correction, source preflight and fresh artifacts. P1 rereview/native Windows acceptance remain pending; no policy/version/dependency/T15 change.
+- [ ] Implement and verify T14 (bounded implementation and P1 corrections/self-check evidenced; independent rereview and native Windows acceptance pending).
+
+## T15: Dependency vulnerabilities are remediated with exposure evidence
+
+- **Depends on:** behavior tests established; no dependency changes in documentation phase.
+- **Files/components:** `go.mod`, `go.sum`, `web/package{,-lock}.json`, build/test scripts only as required for compatibility. Minimal compatible updates; no audit-force sweep.
+- **Before editing:** record dependency-only TDD exception; retain advisory/reachable-call evidence or failing vulnerability check as RED and exact Go/Node/tool versions. Fetch version-specific library docs/changelogs before adapting APIs. Reproduce govulncheck GO-2026-6354/6355 NewClientConn reachability and confirm minimal fixed x/crypto release and transitive/toolchain constraints; don't guess from version alone.
+- **Acceptance:** `govulncheck ./...` under recorded supported/pinned toolchain no longer reports those reachable paths; focused malicious SSH regression tests where upstream vector can be safely reproduced. For npm, retain audit JSON/advisory IDs and use `npm explain`/lockfile paths plus emitted production JS/CSS inspection to separate runtime, CLI/MCP build tools and dev-test exposure. shadcn CSS import prevents blind removal; evaluate compatible update or minimal CSS/tooling relocation with production asset tests. Do not accept a suggested major downgrade as automatic remediation. If a dependency has no compatible fix, document exact residual exposure and escalate a materially different dependency/removal/product choice rather than declaring clean.
+- **Checks:** clean disposable install `npm ci`, full tests/build/dist verification; `go test ./...`, `go vet ./...`, repeated SSH/cancellation and Warden-owned HTTPS/IPC TLS suites; fresh audit/govulncheck with reachable paths and remaining findings clearly reported. Verify lock diffs no unrelated churn. Supply-chain tools running in privileged build/publish context are not waived as dev-only.
+- **Historical blocked preflight at owner-authorized HEAD `c0e77b7` (superseded by resumption below):** fresh govulncheck v1.7.0, itself built and run with `GOTOOLCHAIN=local` Go1.25.14, reproduces both direct NewClientConn advisories and reports 15 symbol-level plus 5 module-only IDs; final source findings are unchanged. Build-matched CLI/server scans also fail the vulnerability gate. Official first-fixed x/crypto v0.56.0 requires **Go1.26.0**; a private-copy get rejects local1.25.14. Go1.25.14 is the final official1.25 patch and that line is no longer upstream-supported. Fresh stdlib findings require1.26.9–1.26.11; current x/net findings also have Go1.26-only fixes. No declared/runtime/toolchain raise, dependency/source/test change, downgrade, fork or backport was applied. Initial/final npm audit JSON is identical:20 affected packages (1critical/10high/8moderate/1low). Actual private source-map build/verifier and CSS-byte comparison narrow browser exposure, not build/publish risk; newest shadcn4 still retains unpatched deepmerge and an incompatible minimatch-fix path. [The T15 report](../reports/2026-11-14-t15-dependencies.md) records the pre-edit dependency-only TDD exception, official patches/constraints, complete advisory/path inventory, scan/build evidence and exact skipped remediation gates. **At that checkpoint, owner authorization for a new Go minimum/supported patch contract or explicit acceptance/deferment was required before resumption**; unresolved npm tooling removal/replacement also needs its stated capability decision. Native Windows/genuine PRF/production-trust/browser acceptance remain pending. Stop at documented blocker/self-review, not T15 completion or T16 authority.
+- **Owner-approved resumption / bounded implementation at the same HEAD:** minimum is now enforced as **Go1.26.11**, with explicit exact toolchain for every resumed Go build/test/scan; CI reads the patch from go.mod and build docs distinguish source hosts from binary runtime hosts. Minimal crypto0.55→0.56 only, no Go transitive sweep. Fresh pinned govulncheck1.9.0 before/after clears the two reachable SSH IDs; final source and build-matched CLI/server text gates exit0 with **0 symbol/package, 8 module-only IDs** retained explicitly. Exact upstream private-copy SSH vectors fail on0.55 and pass fixed race25; no fork/private-API production seam. Actual focused empty-response RED precedes skipping zero-length Write while preserving checked flush/lease; preserve POSIX terminal-dot spelling via its existing explicit test instead of Go1.26's newly cleaned filepath.Rel comparison. Full Go normal/race/vet, SSH auth/cancel/lifecycle race25, owned TLS/IPC/provider/HTTPS race10, upgrade race10 and Windows cross-compilation PASS (native NOT run). Initial whole-SSH race25 hit the PTY resource ceiling, reproduced with baselinecrypto0.55 under the same exact Go. Those historical failures are preserved; the separately authorized fixture-only correction below now attributes/fixes the growth rather than waiving it. Restricted-umask diagnostic failures are distinguished from final022 runs.
+- **npm measured partial remediation, not clean:** preserve historical20 separately from the later explicit-include-dev original-lock baseline **23** and updated **6 (0critical/2high/3moderate/1low)**. These are live advisory snapshots, not a same-snapshot include/omit control; observed omit=dev may contribute but is not proven the sole cause of20 versus23. The later **23 -> 6** comparison represents deepmerge/minimatch/zod advisories plus inherited shadcn/ts-morph/common rows.25 changed existing lock nodes, two direct Vite/Vitest patch pins; no overrides/additions/removals/unrelated churn or forced Undici major. Preserve shadcnCLI/MCP and CSS pending the owner's capability decision; actual SDK1/shadcn MCP initialize+seven-tool list passes. Prior clean private ci including dev, complete npm ls,279 frontend+13 verifier tests, TypeScript/Vite build and build-matched global Chromium journey PASS; all13 emitted files byte-identical, nine runtime assets complete, zero CSP/unexpected failures. No runtime-JS hits for audited packages is exposure evidence, not a build/publish waiver. Residual authoring-capability decision, eight Go module-only findings and independent/native/genuinePRF/production-trust acceptance remain explicit. See the superseding [T15 report](../reports/2026-11-14-t15-dependencies.md#superseding-resumption--approved-go12611-contract) and refreshed exact review diff/manifest.0.22.1 retained, no T16 or publication authority.
+- **Authorized fixture-only follow-up after review:** read-only FD targets/stacks attribute35 retained goroutines/19FDs to five generic jump/proxy fixtures, matching13x/14x original stress signatures; not a production Graph/agent/PTY defect. Actual EOF/join/accepted-connection RED precedes endpoint-close-before-join, tracked/cancellable accepted-handler ownership and request/session/forward drains. Accept loop joins before handler Wait; controlled late-Accept regression covers that boundary. Existing five paths assert natural joins before forced cleanup, with Linux resource snapshots supplemental. Exact Go1.26.11/umask022 focused fixture race25, **whole SSH/DB race25** (SSH100.486s, no raised180s bound), full Go normal/race/vet and Windows test compilation PASS. All25 whole-run snapshots have16 goroutines before/after and FD baseline6, post10-18; PTY512FD/512goroutine/256MiB and10s exit bounds unchanged. Production/dependency/frontend inputs unchanged; earlier scan/frontend/browser evidence retained, not rerun. P2 prose corrections explicitly distinguish request/CLOSE outbound vectors from DATA and never-accepted inbound EOF progress from normal establishment, plus audit snapshot causality above. Ledger appends qualifications without rewriting history. New fixture diff still requires review; no npm removal, T16 or acceptance authority.
+- **Latest owner-approved project-local tooling removal (supersedes retention/decision-pending statements above):** the verified local shadcn dependency is removed, retaining byte-exact4.19.0 CSS/full MIT notice/provenance under `web/vendor/shadcn-4.19.0/` with a direct CSS import and vendor source-discovery exclusion. Generated components/Base UI/Radix/aliases/components metadata and shared/global tooling are untouched. Necessary npm-produced pruning removes292 nodes, adds0, and updates39 retained dev/peer reachability flags without retained version/range/integrity changes; unrelated optional WASI metadata additions were excluded. Fresh private `ci --include=dev`, `ls --all --include=dev`, **audit --include=dev exit0 /zero findings**,279+13 tests/build/verifier and all13 emitted-file byte comparisons PASS. Fresh build-matched global Chromium HTTPS journey PASS (one journey/nine assets/zero CSP failures; synthetic PRF/test-only trust, not genuine acceptance). Fresh exact-Go full normal/race/vet and source/matching CLI/server scans PASS with0 symbol/0 package/**8 module-only IDs**. Prior completed whole SSH/DB race25 is reused against identical six fixture source hashes, not duplicated. The report and full original-baseline diff/manifest bind this new evidence separately from the historical cohorts. Release0.22.1 retained, no T16/staging/commit/publication.
+- [ ] Implement and verify T15 (bounded remediation/fixture validation/local removal/self-review complete; eight Go module-only risk dispositions, new independent review/native Windows/genuine PRF/production trust and overall acceptance pending).
+
+## T16: CI builds/tests without write privileges; publishing consumes bound artifacts
+
+- **Depends on:** T14 transport/build checks and T15 dependency compatibility.
+- **Files/components:** `.github/workflows/release.yml`, possible focused test workflow, `scripts/build-release.sh`, workflow/artifact verification fixtures/docs. No real release execution for acceptance.
+- **Before editing:** workflow/config TDD exception explained; add offline workflow/publishing fixtures checking security contracts before changing declarations. Fetch exact action/version/attestation docs and use verified full commit SHAs, not invented pins.
+- **Acceptance:** default contents-read; PR/test/build jobs have no publication/attestation secrets or write token. Tests include web tests (currently build alone), Go/race scopes, installers, vulnerability checks and available native Windows job. Build/dependency install cannot use contents-write/id-token-write. Isolated publish/provenance job downloads fixed artifacts, verifies source SHA/run identity/digests and generates provenance of **actual uploaded bytes**, with only necessary contents/attestations/id-token permissions; no npm/go dependency execution there. Same-version force-tag/clobber behavior must not change without owner decision. Check artifact substitution/fork/untrusted-workflow scenarios and serialize publisher as current concurrency does.
+- **Checks:** offline assertions/workflow lint, unprivileged build producing all expected assets/checksums and verifying provenance subject binding; dry-run/local fixture for publication logic, never `gh release`/tag writes. Native Windows CI evidence must actually execute the adversarial tests, not merely compile. Explicitly record hosted-job checks not runnable locally.
+- **Owner-confirmed policy:** intentional mutable same-version force-tag/clobber remains, with executable-only/manual restart unchanged. Isolation/provenance does not require changing that policy; do not reopen it or claim immutability/anti-rollback. Any future policy-changing work needs separate authority.
+- **Bounded implementation checkpoint (owner-authorized T16 at reviewed HEAD `96e2ed4`):** config-TDD exception recorded before edits and offline permission/pin/missing-web/integration/native/source-binding REDs precede workflow declarations. PR/reusable checks and build are contents-read only; exact Go1.26.11/Node26.12.1/npm11.20.0, web/full-Go/race/whole-SSH-DB25/installers/real-curl/signed-HTTPS/source-scan checks are wired. Fixed same-run artifact ID, separate trusted manifest/archive/upload digests, exact source/run/attempt/assets/minimum, safe data-only extraction, individual-byte attestation and generated-bundle source/subject guard isolate publisher-only contents/attestations/id-token write; no checkout/dependency/artifact-code execution there. Actual offline12-test contracts/fake-gh tampering and force/clobber paths, private3-target release build/checksums/upstream-generated unsigned subject/predicate binding,279+13 web tests/audit0, full Go/race/vet and whole SSH/DB race25 PASS. Required windows-latest Desktop5.1/.NET4.7.2+16-name discovery/pass/no-skip matrix includes explicit hosted-only CurrentUser-CA trusted-HTTPS C# fixture; cross-compilation PASS but all hosted/native outcomes **UNRUN**. Exact verified action SHAs/interfaces, failed conservative stripped-binary scans versus passing source/unstripped diagnostics, nonzero upstream action-lock audits and remaining genuinePRF/production-trust/native/independent acceptance are in [the T16 report](../reports/2026-11-14-t16-ci-publication.md) and ignored ledger. Release0.22.1 retained; no T17/publication/push/dispatch or acceptance claim.
+- **T16 same-writer reviewer follow-up:** actual fake-gh missing/wrong-repository RED precedes explicit `--repo` on every release edit/upload/create; inherited GH_REPO removed, six per-command wrong/missing mutations refused, force/clobber/no-checkout preserved. Independently resolved official direct attest v4.2.2 `1e69f48acb82d1966a394da916b4c1698aa569d6` replaces older nested attester after pin/default contract RED; actual shipped-dist default SLSA/glob/hash generation reproduces unsigned fixture and all real release-byte guards. Twelve extended offline contracts/lint PASS, compiled/build inputs unchanged. [Bounded shipped-runtime risk assessment](../reports/2026-11-14-t16-action-runtime-risk.md) distinguishes official OCI/brace/IP fixes from remaining enabled Undici trusted-service response risks, DSSE PAE limitation and disabled/lock-only findings; fresh action audits remain nonzero (current attest40), not waived. Hosted signing-only route is outline-only and separately approval-dependent; no new trigger/write, all16 native/artifact-service/OIDC evidence still UNRUN. No T17/version/publication operation.
+- **Owner residual-risk disposition:** explicitly accepted retaining the pinned official Actions while awaiting upstream fixes for the identified enabled Undici trusted-service/proxy risks and Sigstore DSSE/PAE type-binding limitation. This is not a blanket action-audit waiver. Repository-selection P1 and assessment review findings are closed; parent fresh 12 offline contracts and actionlint pass. Native Windows, hosted artifact/OIDC/signature and genuine PRF/production-trust evidence remain required, not waived. The risk decision does not authorize public verification attestations or a manual signing dispatch.
+- [ ] Implement and verify T16 (implementation reviewed; required hosted/native evidence remains pending).
+
+## T17: Integrated acceptance, recovery runbook and approved release version
+
+- **Depends on:** T1–T16 complete or explicitly blocked with residual risk; do not mark release ready while required native Windows or genuine PRF evidence, or an owner decision required by a needed policy-dependent change, is missing. Existing mutable-release and service-upgrade policies alone are not unconditional blockers.
+- **Files/components:** `docs/{security,deployment}.md`, README/help/install/service/export docs, `scripts/test.sh` (current unauthenticated HTTP/master-key flow must be replaced, not waived), source-named E2E fixtures; `web/package.json`, `web/package-lock.json` three release fields. Documents/version declarations are the stated TDD exception; validation must precede final claim.
+- **Run:** focused tests' RED/GREEN ledger; `go test ./...`; `go test -race ./internal/server/... ./internal/store ./internal/client/...`; `go vet ./...`; `npm --prefix web ci && npm --prefix web test && npm --prefix web run build`; updated disposable HTTPS `bash scripts/test.sh`; `bash scripts/test-installers.sh`; recorded govulncheck/npm audit. Repeat storage-preservation/import rollback and real PRF M1 workflow against built production assets, not a debug bypass. Race/CI/cross-compile logs do not replace native Windows tests.
+- **Named integrated acceptance:** `SecurityLifecycleHTTPS` covers setup -> single-use completion/exit -> login -> management -> logout versus lock -> restart locked -> PRF/recovery -> new passkey -> paired CLI -> server restart/token still valid -> SSH pool idle expiry/auth agent still alive -> agent restart/reapproval -> revoke -> fresh export/import into another initialized empty vault; hostile origin/Host/CSRF/rate/replay/error/no-store matrices remain green. `LegacyRefusalAndRollback` verifies synthetic old DB/config/key/WAL backup and zero implicit deletion, successful v1 import after fresh init, failed import retry and preservation of identity. `NativeWindowsSecurity` covers malicious pipe/ACL, traversal/private staging, installer/replacement/credential privacy; capture OS/tool versions and logs. Pending evidence is a blocker, not an assumed pass.
+- **Documentation:** clearly state auth is mandatory, public HTTPS/RP/proxy config, restart locked/manual unlock, recovery save/confirmation, pairing/revocation, memory-only per-user-agent API token/API requests with durable server verifier/revocation, reapproval after agent restart (not server restart or SSH pool idle expiry), no automatic client-token expiry/rotation/refresh, daemon with no timed/idle exit in any authentication/pool state (logout/revocation/outage/restart/lock keep it alive; external cancellation terminates cleanly), deterministic fake-clock lifetime acceptance, stolen-token-until-revocation residual risk, separate disk IPC trust/discovery material, protected local IPC, unchanged external DB/HTTP CONNECT transport behavior and scope-excluded plaintext-leg risks (including onward beyond SSH), retained version 1 export/import, plaintext export cautions/rollback artifacts, memory/live-compromise/backup and already-retrieved-credential limits. Explain no last-passkey/no-recovery bypass. Keep state/service safeguards and approved upgrade semantics.
+- **Version:** re-read latest approved `origin/main` version before PR/release preparation; if still 0.22.1 set all three fields to 0.23.0 without unrelated lock changes. If base moved incompatibly with that explicit approval, raise it rather than silently choosing another version. Verify plain SemVer equality and state old/new/breaking rationale. After the planning hold is lifted, implementation and commit/push/new-PR delivery follow the owner's existing new-PR authorization and scoped Git workflow. Merge, manual release/tag publication and deployment remain separately authorized; this plan does not authorize them.
+- **Final review:** inspect full diff, enumerate every acceptance item and residual dependency exposure, verify protected mise file untouched and no real migration/state changes. Review key-delivery authentication (PRF output not a signature), concurrent setup/lock/recovery/import, client audience and injected redirect clients, Warden-owned HTTPS/IPC TLS boundaries, unchanged external transport residuals, Windows proof and publisher privileges. Findings are verified claims; mark unrun checks/failures honestly. A security release is blocked by missing required proofs or policy-dependent unresolved changes, not by ordinary reversible implementation choices.
+- **Bounded local T17 implementation checkpoint:** actual current-source composed `TestSecurityLifecycleHTTPS` uses production init/serve/CLI executables, controlling PTY, private-CA HTTPS, real signed verifier and explicit synthetic PRF/clock/graph seams. Fixture subprocesses strip inherited WARDEN overrides, with actual subprocess RED→GREEN and deliberately conflicting disposable environment in the composition. `LegacyRefusalAndRollback` remains a separately run source-named preservation/fault aggregate; independent permanent-agent and real-SSH graph tests also run. Obsolete `scripts/test.sh` is replaced and used by read-only CI. Four runner contracts, build-mode and PTY cancellation RED→GREEN, full Go, required server/store/client race, whole SSH/DB race25, vet, frontend279+13/build/audit0, offline installers/curl, 19 network-gate and two real synthetic Chromium journeys PASS. The initial development-bundle browser failure is retained and root-cause-fixed without relaxing its gate; actual stripped production scans exit3, not PASS. Three release declarations alone change0.22.1→0.23.0; no dependency graph/publication change. Full requirement matrix, exact command timestamps/exits/skips, runbooks, complete original774ce3b-to-current patch/hashed manifest and append-only ledger are in [the T17 report](../reports/2026-11-14-t17-integration.md). Genuine PRF/production trust, NativeWindowsSecurity, hosted artifact/downstream/OIDC/signature evidence and parent independent review remain pending; Unix chown-dependent cross-owner fixture is also UNRUN. No stage/commit/push/dispatch/signing/release/live migration/service operation or protected-file access; stop at self-review.
+- **Parent local checkpoint:** independent review found no issues; parent freshly passed the actual disposable HTTPS runner (including include-dev frontend install/tests/build/audit0), full Go, required server/store/client race scope, vet, 12 CI contracts, actionlint, offline installers and exact-Go source scan (0 symbol/0 package/8 module-only). Parent matched all 18 task-file and 13 emitted-asset hashes and exact three-field 0.22.1→0.23.0-only delta; a fresh fetch confirms base0.22.1. See T17 report for logs. Local review is closed; authorized draft PR/hosted read-only CI is the next checkpoint. No merge/release or manual public signing authorization.
+- [ ] Implement and verify T17 (local implementation independently reviewed and freshly verified; required external/native acceptance remains pending).
+
+## Coverage and decision ledger
+
+| Requirement / finding | Owning task(s) | Completion evidence |
+| --- | --- | --- |
+| Init password, ready-time lifetime, bounded attempts, atomic exit, old-state refusal | T1, T5 | Terminal/log/socket/transaction/crash and artifact-preservation tests |
+| Mandatory passkeys/UV, replay/expiry/origin/ownership, locked auth, server sessions/CSRF | T1–T3, T6 | Signed fixtures, route matrix, cookie/CSRF, restart/race tests |
+| PRF follow-up, wrapping/AAD negatives, recovery saved proof, multiple wrappers, no raw key fallback | T1–T3 | Shared crypto vectors, genuine PRF demonstration, recovery/replacement tests |
+| Individually revocable CLI web pairing, no unauth data path | T4, T13 | Two-device HTTPS pairing/revocation/audience/redirect tests |
+| 50MiB deadlines, cross-origin text/plain/DNS rebinding/Host, vault GET/error no-store | T6 | Actual socket and header/error matrices |
+| Exponential duplicate graph expansion/cancel, validate before any secrets | T7 | Work-count/budget/order/decrypt-spy tests |
+| Raw validation audit leakage, UA/metadata bounds | T8 | Row/log adversarial fixtures |
+| Framing/CSP assets, fetch no-store, masking, Markdown images, secret late/reset | T9 | Production-browser network/CSP plus focused UI/API tests |
+| stat/open master-key TOCTOU | T1, T14, T17 | Legacy runtime/installer loader removed; any retained utility descriptor-validation race test |
+| AES256GCM per-field AAD, atomic legacy-shape import/rollback and backup guidance | T1, T5, T17 | Ciphertext swap/tamper fixtures, preserved old artifacts, documented version 1 round-trip/atomic tests |
+| Windows pipe impersonation/auth before bytes/private channel and IPC trust/discovery ACL (API token stays in agent memory) | T4, T10 | Adversarial protocol tests **and native Windows logs** |
+| Windows SFTP traversal/private exclusive staging both adapters | T11 | Malicious entry/real adapter/native Windows tests |
+| Agent forwarding default independent of auth; pooled lifecycle; second-hop/proxy CONNECT/DB tunnel cancel | T12 | Auth/no-forward request and stalled/late/pooled race fixtures, including unsupported deadlines |
+| External DB lacks explicit verified TLS; HTTP CONNECT can expose Basic credentials | Scope-excluded by owner; residual documented in T17 | Not fixed: preserve current behavior; direct plaintext legs and onward plaintext beyond SSH remain exposed. No new external TLS feature/profile/export contract or exception decision |
+| API injected redirect safety and terminal errors/DB headers, not SSH streams | T13 | Zero-byte hostile redirect and output preservation tests |
+| Release HTTPS including redirects, bounded updater/installers, state/service preservation | T14 | Streaming/rollback/offline installer/native Windows tests |
+| Reachable x/crypto and npm path/tooling vulnerability remediation | T15 | Exact-version docs, fresh scans/reachability/build evidence, residual ledger |
+| CI privilege/pins/isolation/provenance | T16 | Workflow fixtures, actual artifact/source/digest binding, unprivileged builds |
+| Mutable same-version publication policy | T16/T17; owner only if a needed change requires it | Preserve intentional policy; no immutability/anti-rollback claim; not an unconditional blocker |
+| Service-managed self-upgrade semantic changes | T14/T17; owner only if a needed change requires it | Preserve executable-only/manual-restart semantics; not an unconditional blocker |
+| Full release proof/version parity/native checks/real PRF | T17 | Final ledger; no claim of completion from this planning document |
+
+This plan and its linked specification were originally prepared without application changes. T1–T17 bounded implementation checkpoints are now separately recorded in their linked reports and chronological ledger; checkboxes remain unchecked while required acceptance is pending. Named acceptance intentions alone are not execution evidence: consult the current T17 matrix and each historical task report for exact implemented behavior, measured checks, substitutions, actual failures/skips and outstanding independent/native/external acceptance.
+
+### Bounded Unix resize validation follow-up — baseline df6d3aa, 2026-11-16
+
+The parent-held R3 checkpoint remains local/unpushed. Original broad race failure
+is preserved: real events send/close overlap plus a two-second SIGWINCH timeout.
+Controlled test-first regressions independently demonstrate loss when the receiver
+starts after signal consumption and closure/return before sender retirement.
+They fail on the old loop/Restore and pass after cancellation-aware forwarding
+and stop/join-before-close. Raw entry now supplies missing owned channels for
+partial test sessions; production buffered signal input/public unbuffered events,
+Session contract, Windows, SSH/input bytes, native R3 code and all bounds remain
+unchanged. Exact historical native scheduling of the lost event is not proven;
+no load explanation or older Ctrl-C fixture explanation is substituted.
+
+The [resize report](../reports/2026-11-16-terminal-resize.md) records deterministic
+RED/GREEN and fresh original broad race PASS342/one explicit wrong-owner skip,
+fullGo PASS797/three explicit skips, required server/store/client race656/three
+skips, CLI race59, entire terminal race25/325passes, whole SSH/DB race25/2275passes,
+vet, actual disposable production-assets/binaries HTTPS runner and offline
+installers PASS. Test-source cleanup rechecks and exact commands/inputs are
+separately recorded there. No acceptance checkbox changes: parent review/fresh
+verification, genuine PRF/production trust, native Windows16 zero-skip proof,
+privileged Unix and hosted artifact/OIDC/signature gates remain pending. Narrow
+T16 risk disposition is unchanged; no signing/dispatch/publication authority or
+live operation. The earlier failed broad log and all native evidence stay intact.
+
+### R6 continuation — required curl gate causally corrected, review checkpoint only
+
+Parent returned the same R6 bundle for systematic debugging, not a curl waiver or
+native action. Private `/var/tmp/ww6/curl` bounded actual-downloader/wire/socket/
+lifecycle comparisons identified Nagle-enabled accepted TLS sockets adding about
+40ms per response across four sequential CDN requests inside250ms. Case-local
+cleanup alone did not remove the stalls and was not changed. TCP_NODELAY preserves
+HTTP/1.1 persistence/TLS validation; no production bug inferred. A controlled
+identical20ms-before-spawn comparison on the original fixture reproduces exact
+fetch line64 TimeoutError with shared operation expired and per-hop headers still
+76ms available; only socket-local TCP_NODELAY makes that comparison succeed.
+Original host scheduling is not retrospectively asserted. Failed overlapping
+server-work probe and all earlier failures remain in the chronology/evidence.
+
+Minimal fixture correction: one `disable_nagle_algorithm=True` class attribute;
+new real accepted-socket/CDN response regression for both installers RED option0
+then GREEN option1. No changes to original four tests, 32 streaming scenarios,
+100ms/250ms fixture limits, 10s/300s production limits, actual curl, TLS/hostname,
+redirect/byte/checksum/rollback/state/security assertions. Fresh full5tests PASS
+plus predetermined five-suite stress25PASS/zero skips; related offline installers,
+12CI contracts and actionlint PASS. Exact previous-R6 source/log hashes justify
+REUSED fullGo806/3skips, affected race351/1skip, focused race25, vet and Windows
+compile/vet, not fresh continuation Go execution. Existing Go/production/workflow
+inputs unchanged; only fixture Python and chronological docs/ledger added here.
+
+Same d22e9ce, same branch, sole writer, empty index and all three0.23.0 versions.
+Entire R6 ledger delta from original pre-R6 prefix and original bundle preserved;
+refresh same review paths for independent parent review, not parent acceptance.
+Native no-action checkpoint unchanged/unrun; actual UI layout/identity UNKNOWN,
+latest15PASS/1FAIL/0SKIP; all16oncePASS/zero skips/all11real HTTPS/exact CA cleanup
+remain required. External PRF/production trust/privileged Unix/artifact-OIDC/
+signatures and signing authorization remain open. No worker publication, CI,
+staging/commit/push, trust, installer/service/global tool/signing/release action.
+
+### Linux blocked-flush checkpoint before queued Windows consent
+
+Current hosted run43831002522attempt1/head71b6c2a/merge02bccd2 failed Linux's first
+fullGo in `TestManagedResponseBlockedHTTPFlushTerminates/write-deadline` with
+unexpected EOF, not waived by earlier passes. Subsequent hosted full race/vet/
+SSHDB25/HTTPS/curl/CI/source-scan gates were not reached. Native16once15/1/0;
+R6 successfully observed public owned controls with NO ACTION, a prerequisite
+checkpoint, not functional consent/import proof. Consent remains queued, no
+Windows change in this separate boundary.
+
+The [blocked-flush report](../reports/2026-11-16-blocked-flush.md) records exact
+Go1.26.11 installed/official source, deterministic actual-pipe/HTTP RED and
+fixture-only correction. Server-wide50ms reached BOTH secret and lock sockets:
+secret Write50.3ms/zero bytes/timeout, actual lock HTTP200 Write53.7ms/zero bytes/
+timeout -> ReadResponse unexpected EOF. Exact historical CI scheduling unproven,
+but the mechanism is causally reproduced. Separate actual HTTP server/listener
+for write-deadline lock preserves shared authenticated plane/middleware with
+ordinary120s while first remains50ms; no deadline-rewriting wrapper, production
+change, fake Flush/lock, larger50ms/peer3s/waitDelivery3s bound or weaker200/no-secret
+assertion. Other two variants remain unchanged. Regression instrumentation and
+implementation ship together; both Serve lifetimes close/join.
+
+Fresh GREEN all3variants+regression; focused runtime delivery race25 covers14tests
+350top/775all-level PASS/zero skips. Fresh uncached fullGo807PASS/3existing skips,
+fullrace807PASS/3skips (required server/store/client657PASS/3skips), vet and actual
+production-binary HTTPS runner Go section/4contracts PASS. Frontend was not rerun;
+unchanged hosted279/build/audit is historical/borrowed, not fresh local proof.
+Whole SSHDB25/curl/CI/source scan not rerun here; no clean-module or complete
+hosted-pipeline claim. Native, genuine PRF/production trust, privileged Unix,
+artifact-OIDC/signature/public-signing gates remain open. All3versions0.23.0,
+HEAD/index/protected exclusions/frozen sources and ledger prefix retained.
+
+Deliver same-baseline `/var/tmp/warden-blocked-flush-review.{diff,json,sha256}`
+for independent parent review/fresh checks and LOCAL COMMIT before separate
+queued consent handoff. No push of Linux fix alone/repeated no-action CI; no
+worker stage/commit/push/PR/dispatch/GUI/trust/global tools/services/installers/
+signing/tag/release/merge/worktrees. Bounded checkpoint only, then STOP.
+
+### R7 queued Windows consent — implemented, native UNRUN (2026-11-16)
+
+Linux checkpoint is independently accepted and locally committed as238411d, NOT
+pushed; freeze its source/report. Separate approved fixture-consent outcome now
+implements one targeted Yes attempt only after exact observed combined English
+warning/4direct-control layout, immutable public DER/exact random CN/full UI SHA1,
+live pinned process creation/PID/TID/root/control revalidation. CRLF-only body
+normalization replaces the falsified standalone-field assumption, not identity.
+Actual R6 capture is a golden fixture with generated expected-identity substitution;
+historical expected DER was not logged and cannot retrospectively be proved.
+
+Bounded100ms specific-HWND BM_CLICK/SendMessageTimeout function result is dispatch
+only; no focus/global input/retry. Attempt consumed on failure/timeout. Helper0
+only after guarded dispatch; explicit no-action completion4 permits natural import
+only with actual normal certutil exit/context and unchanged exact-DER postcondition
+BEFORE Download. Wrong identity/action/observer error fails even after main exit0.
+Normal main completion no longer cancels a finishing observer; all owned process,
+output and cancellation/watchdog callbacks are joined before return/owned kill.
+Original argv/CurrentUser-only scope/absence-before-cleanup arming/exclusive public
+DER/random128 identity/120s total/reserve8s/child5s-parent6s/cleanup20s/all11 modes/
+normal and partial-failure cleanup/16native test list/security contracts remain.
+
+Actual guard/action/lifecycle RED→GREEN retained. Final focused race25 has6names
+each25=150top/2475all-level PASS/zero skips, including real exec/PID/Wait handshakes
+forcing import-exit-before-observer-final-report. Final fullGo/fullrace811PASS/
+3existing browser-owner skips; required server/store/client657PASS/3skips and
+affected upgrade/client355PASS/1skip included. Vet/Windows compile-vet/offline/
+actualcurl5/12CIcontracts/actionlint PASS. Fresh private production binaries and
+actual HTTPS runner Go section/4contracts PASS;13unchanged production assets
+hash-bound, no frontend/whole-test.sh/genuinePRF/production-trust claim. Every
+initial nonzero log causally dispositioned, not waived by rerun. Three0.23.0fields,
+HEAD/emptyindex/protected exclusions/full ledger prefix and frozen Linux/helper/
+production/Unix/storage/auth/crypto/module/workflow sources preserved.
+
+Deliver `/var/tmp/warden-windows-r7-review.{diff,json,sha256}` against238411d;
+parent independent review/fresh checks/LOCALCOMMIT only, then publish both accepted
+fixes together for ONE automatic CI. No worker stage/commit/push/PR/dispatch or
+live GUI/trust/install/service/global tools/signing/release/worktree. NativeR7
+UNRUN; current hosted15/1/0 and prior Linux failure remain historical authoritative
+results, not local passes. All16oncePASS/zero skips/all11verifiedHTTPS/exactcleanup
+and genuinePRF/productiontrust/privilegedUnix/hostedartifact-OIDC-signatures/public
+signing authorization remain open. See the existing native followup report's
+Round7 for API semantics, evidence/failures and acceptance boundary. STOP.
+
+### R8 cleanup diagnosis — bounded read-only checkpoint, not a removal fix
+
+Resume baseline39bdf67c1e34a0b0c1581ba7aa0117ddb6e82525 same branch/sole writer/
+initialHIGH/no override. R7+Linux published; actual run43848876542attempt1 proves
+one exact owned Yes/normal certutil completion/expected-vs-observed public CN/
+full SHA1+DER identity/import postcondition BEFORE all11 actual HTTPS modes PASS.
+16namesonce15PASS/1FAIL/0SKIP. Sole failure BOTH exact cleanup Remove calls hit
+existing120/20deadlines, neither removal completion nor absence proved. Observed
+counters10connections16payload1CRL2exact2CDN0forbiddenHTTP, final Go assertions
+NOT reached. Linux whole hosted pipeline genuinely PASS. Older failures retained.
+
+Compared main file-loadedCA vs independent fresh store-found exact-DERCA AFTER
+main process/output joined: both stall, falsifying either external-vs-store
+context or only live main-reference as sole sufficient cause, not ruling out
+UI/provider/global locks. Official.NET4.8.1/Win32docs+pinned family reference
+source traced FindExisting/Delete, but NOT exact serviced hosted binary/UI and
+NO documented safe noninteractive replacement established. No blindAPIvariant.
+Deliver permitted diagnostic-only outcome: separate PowerShellPID/creation pinned
+before Wait, same immutable publicCA; queries only after existing exact guarded
+Remove:begin marker; minimal R5read-only owned metadata visitor, no import handler.
+Bounded owned controls standardStatic/Button only under explicit owned#32770;
+no guessed removal-caption/layout/IDs/strings. Emit numeric metadata/expected
+public identity occurrence counts, never unknown control strings; counts are NOT
+identity/consent evidence. Missing/raced/incomplete data UNKNOWN. No GUI action,
+store mutation/flags/selector/retry/skip/timeout inflation. Reserve8s INSIDE120/20,
+observer6s/child5s/final2s kill-join reserve, operation112/12. All cancellation/
+process/output/callbacks joined; original exactly-once kill/result retained.
+
+Native-unavailable TDD exception recorded BEFORE edits. Four actual portable
+RED→GREEN guard/phase/lifecycle/incomplete-metadata proofs retained. Final fresh
+fullGo/fullrace817PASS3existing skips,1999all-levelPASS; required server/store/
+client657/3 and affectedupgrade/client361/1 included. New cleanup race25 sixnames
+150top/1100all-level PASS/zero skips, both actual process roles. Fullvet/Windows
+compile-vet/offline/actualcurl5/CI12/actionlint PASS. Native checkpoint UNRUN;
+compilation/source-freeze/simulation are NOT native acceptance. All original
+3PSprograms/Remove calls/bothabsence gates/all11modes/actualargv/finalcounter-byte-
+content assertions/R7 action/Linux source-report/production/Unix/helper/modules/
+workflows/three0.23.0 frozen;13currentdistribution assets bound, not freshnpm.
+
+Full details/API/source qualification/actual hosted identity/failure chronology
+in existing native followup Round8. Full original ledger prefix preserved and
+entireR8delta included. Deliver7task-path `/var/tmp/warden-windows-r8-review.
+{diff,json,sha256}` against39bdf67 then STOP for parent independent review/fresh
+checks/publication; no workerstagecommitpushPRCIrerun-dispatch/liveGUItrustinstall
+service/globaltools/signingtagreleasemerge/worktree. Import approval does NOT
+permit removal consent automation; new action needs owner decision based on
+actual evidence. Ultimate all16oncePASS/zero skips/all11verifiedHTTPS/finalcounters/
+bothexactcleanupabsence and genuinePRFproductiontrust/privilegedUnix/hostedartifact-
+OIDC-signatures/publicsigningauthority remain open. R8 is diagnosis ONLY.
+
+R8 packaging external verifier initially FAILed because3tool-created private
+scripts/notes were0664, not0600; root stayed0700. First bundle/logs retained under
+ww8/packaging-original. Controlled permission-ONLY change insideww8 with every
+first-manifest evidence byte hash unchanged made SAMEverifier/SAMEbundle PASS
+11:34:17Z BEFORE prose edits; not verifier weakening/rerunwaiver. Receipt and final
+rebundle include this separate required-failure disposition. No source/test/native
+status changed; final unchanged verifier must PASS after all prose updates.
+
+### Hosted import-toast query — bounded local test-only review checkpoint
+
+Baseline15c93b8, no publication. Actual R8 Linux second frontend278PASS/1FAIL
+found both real import-success toast and Radix accessibility announcer with
+role=status (rawlinux10925-11002); first frontend279PASS is not a waiver.
+Installed Radix1.2.23 confirms separate temporary announcer portal. Exact hosted
+scheduling is unknown; production/accessibility unchanged. Existing import test
+now awaits actual announcer, selects unique status within Notifications(F8),
+asserts exact message/title/toast visibility and announcer coexistence, retains
+all five loaders exactly twice. Controlled unscoped250msRED reproduces actual
+ambiguity; same-budget scopedGREEN passes. Default-budget observation passed by
+waiting for announcer removal and is retained, not counted as RED.
+
+Fresh predetermined25/25 focused invocations PASS; full frontend twice each
+17files279PASS plus13nodecontracts/zero suite skips; production build+include-dev
+audit0PASS; all13 emitted assets byte-identical. Private recorder SyntaxError and
+initial Go1.25.14-root/1.26.11-tool mismatch retained and corrected in harness only;
+explicit child GOROOT1.26.11 yields fresh actual-binary integrated Go remainder+
+4runnercontracts PASS. Whole scripts/test.sh verbatim UNRUN because npm ci install
+is forbidden; frontend/build/audit argv executed separately unchanged, suffix
+extracted unchanged. No fresh fullGo/fullrace/vet claim for TS-test-only scope.
+See ../reports/2026-11-16-import-toast-test.md and private /var/tmp/wft evidence.
+
+Four task paths include full append-only ignored ledger delta; private review
+bundle /var/tmp/warden-import-toast-review.{diff,json,sha256} binds baseline,
+source freeze, RED/GREEN, commands, outputs and assets. All runtime/Windows/
+workflows/modules/version0.23.0 fields frozen. Independent parent review pending;
+no stage/commit/push/PR/CI dispatch/install/global/service/trust/GUI/signing/release.
+Windows latest15/1/0, both cleanup absence proofs/final counters and all external
+acceptance gates remain open; R8 historical docs not rewritten. STOP for review.
+
+### 0.23.0 personal release — superseding owner decision
+
+The sole user/developer accepts a limited personal daily-use release now, with
+Windows validation owner-owned and genuine PRF/production trust, Unix cross-owner
+and release provenance validation deferred NOT PASS. This supersedes the earlier
+release/push hold as authority only; historical BLOCK/failure evidence remains.
+Existing normal public-attestation publication is authorized, no separate manual
+signing workflow needed. Parent owns publication/merge/push/release after review;
+worker performs no Git writes, dispatch, live install/migration/service cutover.
+
+Minimal test-first extraction moves the unchanged Windows job into owner-only
+workflow_dispatch test-windows.yml; automatic PR/reusable test.yml retains the
+byte-frozen Linux job. release.yml is byte-frozen. All 16 native names/harness,
+GUI/trust/cleanup/counter checks, pins, permissions, time bounds and retention
+remain unchanged. Native 15/1/0, both Root-removal absence proofs and final counters
+remain unproven. Reviewed local419dc58 fixes the previous Linux toast-test failure;
+parent hosted combined Linux checks remain pending. RED exposes missing manual
+workflow and existing automated Windows job; GREEN14 offline CI contracts and
+existing actionlint PASS, not native/external acceptance. No fresh fullGo needed
+for workflow-only change. Preserve three0.23.0 fields and breaking0.22.1→0.23.0
+release notes with old-release legacy-v1 export/fresh-init/import guidance.
+
+See ../reports/2026-11-16-personal-release-decision.md for the explicit exception,
+validation limits and publication handoff. Private bounded review bundle
+/var/tmp/warden-personal-release-review.{diff,json,sha256}; append-only ignored
+ledger retained. Stop for independent review; no Windows run started by worker.

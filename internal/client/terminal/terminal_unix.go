@@ -28,7 +28,7 @@ type unixSession struct {
 	state *term.State
 
 	stopResize chan struct{}
-	stopOnce   sync.Once
+	resizeDone chan struct{}
 	events     chan struct{}
 }
 
@@ -76,13 +76,14 @@ func (s *unixSession) Restore() error {
 		s.state = nil
 		s.raw = false
 	}
-	s.stopOnce.Do(func() {
+	if !s.done {
+		s.done = true
 		if s.stopResize != nil {
 			close(s.stopResize)
 		}
-	})
-	if !s.done {
-		s.done = true
+		if s.resizeDone != nil {
+			<-s.resizeDone
+		}
 		if s.events != nil {
 			close(s.events)
 		}
@@ -90,34 +91,40 @@ func (s *unixSession) Restore() error {
 	return err
 }
 
-// startResize forwards SIGWINCH notifications to the ResizeEvents
-// channel. The send is non-blocking so a slow consumer never stalls the
-// signal loop; Restore stops the goroutine via stopResize. The send is
-// also guarded against sending on a closed channel by checking s.done
-// under s.mu, which Restore holds while closing events.
+// startResize runs under mu. The worker never takes mu: Restore holds it
+// while stopping and joining the worker, including signal unsubscription,
+// before closing events. A pending delivery waits for a receiver or stop;
+// it must not disappear merely because the consumer is between receives.
 func (s *unixSession) startResize() {
+	if s.stopResize == nil {
+		s.stopResize = make(chan struct{})
+	}
+	if s.events == nil {
+		s.events = make(chan struct{})
+	}
 	ch := make(chan os.Signal, 1)
 	signal.Notify(ch, syscall.SIGWINCH)
+	s.resizeDone = make(chan struct{})
 	go func() {
+		defer close(s.resizeDone)
 		defer signal.Stop(ch)
-		for {
+		s.forwardResize(ch)
+	}()
+}
+
+func (s *unixSession) forwardResize(ch <-chan os.Signal) {
+	for {
+		select {
+		case <-ch:
 			select {
-			case <-ch:
-				s.mu.Lock()
-				done := s.done
-				s.mu.Unlock()
-				if done {
-					return
-				}
-				select {
-				case s.events <- struct{}{}:
-				default:
-				}
+			case s.events <- struct{}{}:
 			case <-s.stopResize:
 				return
 			}
+		case <-s.stopResize:
+			return
 		}
-	}()
+	}
 }
 
 // Size reports the terminal window size from the TIOCGWINSZ ioctl.

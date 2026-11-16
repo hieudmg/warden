@@ -22,6 +22,10 @@ type Filesystem interface {
 	Stat(string) (os.FileInfo, error)
 	ReadDir(string) ([]os.FileInfo, error)
 	Open(string) (io.ReadCloser, error)
+	// Create exclusively creates staging: local 0600 (Windows owner-only DACL)
+	// at creation, or remote handle chmod0600 before returning. Remote OPEN
+	// cannot set creation permissions; see docs/security.md for the accepted
+	// pre-chmod descriptor race. Errors never remove collisions.
 	Create(string) (io.WriteCloser, error)
 	MkdirAll(string, os.FileMode) error
 	Chmod(string, os.FileMode) error
@@ -31,6 +35,13 @@ type Filesystem interface {
 	Dir(string) string
 	Base(string) string
 	Rel(string, string) (string, error)
+	// CheckPath rejects symlink components in the original operand spelling,
+	// before lexical cleaning can erase a link followed by a parent component.
+	CheckPath(string) error
+	// Clean is only lexical normalization for comparison/containment: native
+	// local absolute paths, remote POSIX paths. Never replace a source operand
+	// with its result; neither symlinks nor missing components are resolved.
+	Clean(string) (string, error)
 }
 
 // Endpoint pairs a filesystem with a path on it. Identity distinguishes
@@ -75,7 +86,7 @@ func (localFilesystem) ReadDir(p string) ([]os.FileInfo, error) {
 
 func (localFilesystem) Open(p string) (io.ReadCloser, error) { return os.Open(p) }
 func (localFilesystem) Create(p string) (io.WriteCloser, error) {
-	return os.Create(p)
+	return createLocalStage(p)
 }
 func (localFilesystem) MkdirAll(p string, mode os.FileMode) error {
 	return os.MkdirAll(p, mode)
@@ -89,6 +100,31 @@ func (localFilesystem) Base(p string) string                   { return filepath
 func (localFilesystem) Rel(base, target string) (string, error) {
 	return filepath.Rel(base, target)
 }
+
+func (f localFilesystem) CheckPath(p string) error {
+	separators := "/"
+	if os.PathSeparator == '\\' {
+		separators = `/\`
+	}
+	if !filepath.IsAbs(p) {
+		// Resolve only the working directory/drive, not the operand's dot or
+		// parent components. Join or Abs(p) here could erase a symlink first.
+		volume := filepath.VolumeName(p)
+		cwd, err := filepath.Abs(volume + ".")
+		if err != nil {
+			return err
+		}
+		tail := p[len(volume):]
+		if len(tail) > 0 && strings.ContainsRune(separators, rune(tail[0])) {
+			p = filepath.VolumeName(cwd) + tail // Native Windows rooted path.
+		} else {
+			p = cwd + string(os.PathSeparator) + tail
+		}
+	}
+	return rejectSymlinkComponents(f, p, filepath.VolumeName(p), separators)
+}
+
+func (localFilesystem) Clean(p string) (string, error) { return filepath.Abs(p) }
 
 type remoteFilesystem struct {
 	client *pkgsftp.Client
@@ -106,7 +142,17 @@ func (r *remoteFilesystem) ReadDir(p string) ([]os.FileInfo, error) {
 }
 func (r *remoteFilesystem) Open(p string) (io.ReadCloser, error) { return r.client.Open(p) }
 func (r *remoteFilesystem) Create(p string) (io.WriteCloser, error) {
-	return r.client.Create(p)
+	file, err := r.client.OpenFile(p, os.O_WRONLY|os.O_CREATE|os.O_EXCL)
+	if err != nil {
+		return nil, err // No ownership: never remove a colliding file or symlink.
+	}
+	// File.Chmod uses FSETSTAT on this handle, not a path-based SETSTAT.
+	// This deliberately does not claim privacy at OPEN (the public API has no
+	// creation attributes). A pre-chmod open descriptor survives this change.
+	if err := file.Chmod(0o600); err != nil {
+		return nil, errors.Join(err, file.Close(), r.client.Remove(p))
+	}
+	return file, nil
 }
 
 // MkdirAll ignores mode because pkg/sftp's MkdirAll takes no mode; the copy
@@ -133,6 +179,10 @@ func (r *remoteFilesystem) Base(p string) string { return path.Base(p) }
 func (r *remoteFilesystem) Rel(base, target string) (string, error) {
 	return posixRel(base, target)
 }
+func (r *remoteFilesystem) CheckPath(p string) error {
+	return rejectSymlinkComponents(r, p, "", "/")
+}
+func (r *remoteFilesystem) Clean(p string) (string, error) { return path.Clean(p), nil }
 
 // posixRel returns a relative path from base to target using POSIX "/"
 // separators, mirroring filepath.Rel for the remote (SFTP) namespace, which
@@ -193,7 +243,9 @@ func posixRel(basePath, targPath string) (string, error) {
 			buf[n] = '/'
 			copy(buf[n+1:], targ[t0:])
 		}
-		return path.Clean(string(buf)), nil
+		// Retain the historical filepath.Rel terminal dot spelling ("a" ->
+		// "." is "../."). Go 1.26 cleans it; the remote contract stays intact.
+		return string(buf), nil
 	}
 	return targ[t0:], nil
 }

@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"crypto/tls"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -71,6 +72,7 @@ type Server struct {
 	pool     *Pool
 	runtime  *Runtime
 
+	api       apiOwner
 	closeOnce sync.Once
 	stop      chan struct{}
 }
@@ -96,19 +98,16 @@ func NewRuntimeServer(runtime *Runtime, pool *Pool) (*Server, error) {
 	if err != nil {
 		return nil, err
 	}
-	token, err := runtime.ReadToken()
-	if err != nil {
-		_ = listener.Close()
-		return nil, err
-	}
+	runtime.mu.Lock()
+	token := append([]byte(nil), runtime.credentials.Token...)
+	runtime.mu.Unlock()
 	server := NewServer(listener, token, pool)
 	server.Runtime = runtime
 	return server, nil
 }
 
-// Serve accepts authenticated local requests until ctx is canceled or the
-// pool has become empty after TTL cleanup. The initial empty pool is kept
-// alive so a freshly detached agent can accept its first client.
+// Serve accepts authenticated local requests until external cancellation or
+// listener failure. Graph expiry is resource eviction, never daemon expiry.
 func (s *Server) Serve(ctx context.Context) error {
 	if ctx == nil {
 		ctx = context.Background()
@@ -126,6 +125,8 @@ func (s *Server) Serve(ctx context.Context) error {
 		return errors.New("agent server token has invalid length")
 	}
 
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
 	s.stop = make(chan struct{})
 	var handlers sync.WaitGroup
 	watchDone := make(chan struct{})
@@ -134,9 +135,18 @@ func (s *Server) Serve(ctx context.Context) error {
 	defer func() {
 		close(watchDone)
 		<-watchStopped
+		cancel()
 		s.closeListener(listener)
+		pool.shutdown()
 		handlers.Wait()
-		_ = pool.Close()
+		s.api.mu.Lock()
+		for origin, auth := range s.api.authorizations {
+			auth.secret = ""
+			auth.poll = ""
+			auth.client.CloseIdleConnections()
+			delete(s.api.authorizations, origin)
+		}
+		s.api.mu.Unlock()
 		if runtime := s.serverRuntime(); runtime != nil {
 			_ = runtime.Cleanup()
 		}
@@ -225,28 +235,6 @@ func (s *Server) watchPool(ctx context.Context, listener net.Listener, pool *Poo
 	defer ticker.Stop()
 
 	for {
-		if pool.Used() {
-			signal := pool.EmptySignal()
-			if pool.Empty() {
-				s.closeListener(listener)
-				return
-			}
-			select {
-			case <-signal:
-				if pool.Empty() {
-					s.closeListener(listener)
-					return
-				}
-			case <-ticker.C:
-				pool.Expire()
-			case <-ctx.Done():
-				s.closeListener(listener)
-				return
-			case <-done:
-				return
-			}
-			continue
-		}
 		select {
 		case <-ticker.C:
 			pool.Expire()
@@ -266,17 +254,43 @@ func (s *Server) handleConn(ctx context.Context, conn net.Conn, token []byte) {
 	if conn == nil {
 		return
 	}
-	defer conn.Close()
-	connectionDone := make(chan struct{})
-	defer close(connectionDone)
-	go func() {
-		select {
-		case <-ctx.Done():
+	defer func() {
+		// The protocol's final frame terminates an operation. Never wait on
+		// close_notify when an unauthenticated or stalled peer stops reading.
+		if secured, ok := conn.(*tls.Conn); ok {
+			_ = secured.NetConn().Close()
+		}
+		_ = conn.Close()
+	}()
+	cancelDone := make(chan struct{})
+	stopCancel := context.AfterFunc(ctx, func() {
+		if secured, ok := conn.(*tls.Conn); ok {
+			_ = secured.NetConn().Close()
+		} else {
 			_ = conn.Close()
-		case <-connectionDone:
+		}
+		close(cancelDone)
+	})
+	defer func() {
+		if !stopCancel() {
+			<-cancelDone
 		}
 	}()
 
+	secured, ok := conn.(*tls.Conn)
+	if !ok {
+		return // Private IPC has no plaintext compatibility mode.
+	}
+	if err := conn.SetDeadline(time.Now().Add(agentHandshakeTimeout)); err != nil {
+		return
+	}
+	handshakeCtx, stopHandshake := context.WithTimeout(ctx, agentHandshakeTimeout)
+	err := secured.HandshakeContext(handshakeCtx)
+	stopHandshake()
+	if err != nil {
+		_ = secured.NetConn().Close()
+		return
+	}
 	frame, err := ReadAuthenticatedFrame(conn, token)
 	if err != nil {
 		// A token failure receives a stable, non-secret final frame. Framing
@@ -291,6 +305,9 @@ func (s *Server) handleConn(ctx context.Context, conn net.Conn, token []byte) {
 		return
 	}
 
+	if err := conn.SetDeadline(time.Time{}); err != nil {
+		return
+	}
 	request, err := requestFromFrame(frame)
 	if err != nil {
 		_ = writeFinal(conn, Response{Error: "invalid agent request"})
@@ -300,6 +317,8 @@ func (s *Server) handleConn(ctx context.Context, conn net.Conn, token []byte) {
 	requestCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	switch request.Operation {
+	case operationAPI:
+		s.handleAPI(requestCtx, conn, request)
 	case operationSSH:
 		s.handleSSH(requestCtx, conn, request)
 	case operationCopy, operationCP:
@@ -501,7 +520,7 @@ func (s *Server) handleDB(ctx context.Context, conn net.Conn, request Request) {
 	}
 
 	dbAddr := net.JoinHostPort(bundle.Host, strconv.Itoa(bundle.Port))
-	tunnel := clientdb.NewBorrowedTunnelDialer(lease.Target(), dbAddr)
+	tunnel := clientdb.NewBorrowedTunnelDialer(lease, dbAddr)
 	dbWriter := (&frameWriter{w: conn}).stream(FrameStdout)
 	err = runQueryWithDialContext(ctx, bundle, request.SQL, dbWriter, tunnel.DialContext, clientdb.QueryOptions{
 		NonInteractive: request.DBNonInteractive,

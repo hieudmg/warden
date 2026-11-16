@@ -180,7 +180,8 @@ func TestRunCommandCancellation(t *testing.T) {
 	defer cancel()
 
 	start := time.Now()
-	err := runCommand(ctx, model.SSHBundle{Target: target}, "sleep 30", Streams{}, testOptions())
+	// exec keeps the synthetic sleeper in the fixture's owned process slot.
+	err := runCommand(ctx, model.SSHBundle{Target: target}, "exec sleep 30", Streams{}, testOptions())
 	if err == nil {
 		t.Fatal("runCommand succeeded, want cancellation error")
 	}
@@ -190,6 +191,7 @@ func TestRunCommandCancellation(t *testing.T) {
 	if time.Since(start) > 5*time.Second {
 		t.Fatalf("cancellation took %v, want prompt return", time.Since(start))
 	}
+	srv.listener.waitClosed(t)
 }
 
 func TestRunCommandJumpChain(t *testing.T) {
@@ -218,6 +220,8 @@ func TestRunCommandJumpChain(t *testing.T) {
 	if strings.TrimSpace(stdout.String()) != "through-jump" {
 		t.Fatalf("stdout = %q, want through-jump", stdout.String())
 	}
+	jump.listener.waitClosed(t)
+	target.listener.waitClosed(t)
 }
 
 func TestRunCommandThroughHTTPProxy(t *testing.T) {
@@ -244,6 +248,8 @@ func TestRunCommandThroughHTTPProxy(t *testing.T) {
 	if got := proxy.sawConnect(); got != srv.addr {
 		t.Fatalf("proxy CONNECT target = %q, want %q", got, srv.addr)
 	}
+	proxy.listener.waitClosed(t)
+	srv.listener.waitClosed(t)
 }
 
 func TestRunCommandThroughProxyWithAuth(t *testing.T) {
@@ -264,6 +270,8 @@ func TestRunCommandThroughProxyWithAuth(t *testing.T) {
 	if err != nil {
 		t.Fatalf("runCommand: %v", err)
 	}
+	proxy.listener.waitClosed(t)
+	srv.listener.waitClosed(t)
 }
 
 func TestDialTargetFailsWhenJumpUnreachable(t *testing.T) {
@@ -316,6 +324,8 @@ func TestRunCommandThroughHTTPProxyCoalescedBanner(t *testing.T) {
 	if got := proxy.sawConnect(); got != srv.addr {
 		t.Fatalf("proxy CONNECT target = %q, want %q", got, srv.addr)
 	}
+	proxy.listener.waitClosed(t)
+	srv.listener.waitClosed(t)
 }
 
 // TestProxyConnectStuckProxyBoundedByDeadline verifies the CONNECT
@@ -328,20 +338,10 @@ func TestProxyConnectStuckProxyBoundedByDeadline(t *testing.T) {
 	if err != nil {
 		t.Fatalf("listen: %v", err)
 	}
-	defer ln.Close()
-	go func() {
-		for {
-			conn, err := ln.Accept()
-			if err != nil {
-				return
-			}
-			// Hold the connection open without ever replying.
-			go func(c net.Conn) {
-				time.Sleep(30 * time.Second)
-				c.Close()
-			}(conn)
-		}
-	}()
+	newSSHFixtureListener(t, ln, func(ctx context.Context, _ net.Conn) {
+		// Never reply, but let fixture shutdown cancel and join the handler.
+		<-ctx.Done()
+	})
 
 	host, portStr, _ := net.SplitHostPort(ln.Addr().String())
 	node := model.SSHNode{Name: "stuck", ProxyHost: host, ProxyPort: mustAtoi(portStr)}
@@ -367,6 +367,7 @@ type testProxy struct {
 
 	mu          sync.Mutex
 	connectAddr string
+	listener    *sshFixtureListener
 }
 
 func startTestProxy(t *testing.T, wantAuth string) *testProxy {
@@ -380,20 +381,13 @@ func startTestProxy(t *testing.T, wantAuth string) *testProxy {
 	host, portStr, _ := net.SplitHostPort(ln.Addr().String())
 	p.host, p.port = host, mustAtoi(portStr)
 
-	go func() {
-		for {
-			conn, err := ln.Accept()
-			if err != nil {
-				return
-			}
-			go p.handle(conn, wantAuth)
-		}
-	}()
-	t.Cleanup(func() { ln.Close() })
+	p.listener = newSSHFixtureListener(t, ln, func(ctx context.Context, conn net.Conn) {
+		p.handle(ctx, conn, wantAuth)
+	})
 	return p
 }
 
-func (p *testProxy) handle(conn net.Conn, wantAuth string) {
+func (p *testProxy) handle(ctx context.Context, conn net.Conn, wantAuth string) {
 	defer conn.Close()
 
 	br := bufio.NewReader(conn)
@@ -429,19 +423,15 @@ func (p *testProxy) handle(conn net.Conn, wantAuth string) {
 	p.connectAddr = parts[1]
 	p.mu.Unlock()
 
-	upstream, err := net.Dial("tcp", parts[1])
+	dialer := net.Dialer{}
+	upstream, err := dialer.DialContext(ctx, "tcp", parts[1])
 	if err != nil {
 		io.WriteString(conn, "HTTP/1.1 502 Bad Gateway\r\n\r\n")
 		return
 	}
+	defer closeFixtureConnOnCancel(ctx, upstream)()
 	io.WriteString(conn, "HTTP/1.1 200 Connection Established\r\n\r\n")
-
-	var wg sync.WaitGroup
-	wg.Add(2)
-	go func() { defer wg.Done(); io.Copy(conn, upstream) }()
-	go func() { defer wg.Done(); io.Copy(upstream, conn) }()
-	wg.Wait()
-	upstream.Close()
+	relaySSHFixture(conn, upstream)
 }
 
 func (p *testProxy) sawConnect() string {
@@ -464,20 +454,13 @@ func startCoalescingProxy(t *testing.T) *testProxy {
 	host, portStr, _ := net.SplitHostPort(ln.Addr().String())
 	p.host, p.port = host, mustAtoi(portStr)
 
-	go func() {
-		for {
-			conn, err := ln.Accept()
-			if err != nil {
-				return
-			}
-			go p.handleCoalesced(conn)
-		}
-	}()
-	t.Cleanup(func() { ln.Close() })
+	p.listener = newSSHFixtureListener(t, ln, func(ctx context.Context, conn net.Conn) {
+		p.handleCoalesced(ctx, conn)
+	})
 	return p
 }
 
-func (p *testProxy) handleCoalesced(conn net.Conn) {
+func (p *testProxy) handleCoalesced(ctx context.Context, conn net.Conn) {
 	defer conn.Close()
 
 	br := bufio.NewReader(conn)
@@ -503,12 +486,14 @@ func (p *testProxy) handleCoalesced(conn net.Conn) {
 	p.connectAddr = parts[1]
 	p.mu.Unlock()
 
-	upstream, err := net.Dial("tcp", parts[1])
+	dialer := net.Dialer{}
+	upstream, err := dialer.DialContext(ctx, "tcp", parts[1])
 	if err != nil {
 		io.WriteString(conn, "HTTP/1.1 502 Bad Gateway\r\n\r\n")
 		return
 	}
 	defer upstream.Close()
+	defer closeFixtureConnOnCancel(ctx, upstream)()
 
 	// The SSH server writes its banner immediately on accept, before
 	// reading the client version. Capture it so the 200 response and
@@ -524,11 +509,7 @@ func (p *testProxy) handleCoalesced(conn net.Conn) {
 		return
 	}
 
-	var wg sync.WaitGroup
-	wg.Add(2)
-	go func() { defer wg.Done(); io.Copy(conn, upstream) }()
-	go func() { defer wg.Done(); io.Copy(upstream, conn) }()
-	wg.Wait()
+	relaySSHFixture(conn, upstream)
 }
 
 func mustAtoi(s string) int {

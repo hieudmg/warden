@@ -3,6 +3,7 @@ import userEvent from "@testing-library/user-event"
 import { useState } from "react"
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest"
 import { App, Notifications } from "./app"
+import { invalidateSecurity } from "./auth/session"
 import { api } from "@/api/client"
 import type { SSHConnection, DBConnection, Group, KeyPairSummary, Project } from "./api/types"
 
@@ -126,6 +127,45 @@ beforeEach(() => {
 })
 
 describe("App", () => {
+  test('global auth epoch detaches profile secrets and resets reveal state, not only visible DOM',async()=>{
+    const user=userEvent.setup();render(<App />)
+    await user.click(screen.getByRole('button',{name:'New connection'}))
+    await user.type(screen.getByLabelText('Password',{selector:'input'}),'synthetic-profile-secret')
+    await user.click(screen.getByRole('button',{name:'Reveal password'}))
+    act(()=>invalidateSecurity())
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+    await user.click(screen.getByRole('button',{name:'New connection'}))
+    expect(screen.getByLabelText('Password',{selector:'input'})).toHaveValue('')
+    expect(screen.getByLabelText('Password',{selector:'input'})).toHaveAttribute('type','password')
+  })
+  test('late import completion from a closed dialog cannot reload or close its replacement',async()=>{
+    let resolve!:()=>void
+    mockedAPI.importData.mockImplementationOnce(()=>new Promise<void>(r=>{resolve=r}))
+    const user=userEvent.setup();render(<App />)
+    await user.click(screen.getByRole('button',{name:'Import data'}))
+    await user.upload(screen.getByLabelText('Export file'),new File(['{}'],'data.json',{type:'application/json'}))
+    await user.click(screen.getByRole('button',{name:'Import'}))
+    await user.click(screen.getByRole('button',{name:'Close'}))
+    await user.click(screen.getByRole('button',{name:'Export data'}))
+    await act(async()=>resolve())
+    expect(screen.getByRole('dialog')).toHaveTextContent('Export data')
+    expect(mockedAPI.listSSH).toHaveBeenCalledTimes(1)
+  })
+  test.each(['close', 'epoch', 'unmount'])("late export cannot download after %s", async reset => {
+    let resolve!: (blob: Blob) => void
+    mockedAPI.exportData.mockImplementationOnce(() => new Promise(r => { resolve = r }))
+    const create = vi.fn(() => 'blob:synthetic'), revoke = vi.fn()
+    vi.stubGlobal('URL', class extends URL { static createObjectURL = create; static revokeObjectURL = revoke })
+    const user = userEvent.setup(), view = render(<App />)
+    await user.click(screen.getByRole('button', { name: 'Export data' }))
+    await user.click(within(await screen.findByRole('dialog')).getByRole('button', { name: 'Export' }))
+    if (reset === 'close') await user.click(screen.getByRole('button', { name: 'Close' }))
+    else if (reset === 'epoch') act(() => invalidateSecurity())
+    else view.unmount()
+    await act(async () => resolve(new Blob(['synthetic secret'])))
+    expect(create).not.toHaveBeenCalled()
+    vi.unstubAllGlobals()
+  })
   test("normalizes root path to SSH route", async () => {
     render(<App />)
 
@@ -392,7 +432,22 @@ describe("Data transfer", () => {
     await user.upload(within(dialog).getByLabelText(/export file/i), file)
     await user.click(within(dialog).getByRole("button", { name: "Import" }))
 
-    expect(await screen.findByRole("status")).toHaveTextContent(/imported/i)
+    // Exercise the real Radix announcer alongside the visible toast, rather
+    // than relying on whether the assertion wins its animation-frame race.
+    const announcer = await screen.findByText("Notification SuccessImported data successfully.", {
+      selector: "span",
+    })
+    expect(announcer).toHaveAttribute("role", "status")
+
+    // Resolve before the announcer's one-second lifetime ends, so retrying
+    // until it disappears cannot conceal an ambiguous toast query.
+    const notifications = screen.getByRole("region", { name: "Notifications (F8)" })
+    expect(notifications).not.toContainElement(announcer)
+    const toast = await within(notifications).findByRole("status", undefined, { timeout: 250 })
+    expect(toast).toBeVisible()
+    expect(within(toast).getByText("Imported data successfully.")).toBeVisible()
+    expect(within(toast).getByText("Success")).toBeVisible()
+    expect(announcer).toBeInTheDocument()
     for (const loader of [
       mockedAPI.listSSH,
       mockedAPI.listDB,

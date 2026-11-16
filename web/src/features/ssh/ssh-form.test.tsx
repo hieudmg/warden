@@ -349,15 +349,24 @@ describe("SSHForm", () => {
     )
   })
 
-  test("uses plain text inputs for credentials and disables browser autoComplete", async () => {
+  test("masks credentials by default with explicit reveal and disables browser autoComplete", async () => {
     const user = userEvent.setup()
     renderForm()
     const form = screen.getByRole("button", { name: "Save" }).closest("form")
     expect(form).not.toBeNull()
     expect(form!.getAttribute("autocomplete")).toBe("off")
-    expect(document.getElementById("ssh-password")!.getAttribute("type")).toBeNull()
+    expect(screen.getByLabelText("Password", { selector: "input" })).toHaveAttribute("type", "password")
+    await user.click(screen.getByRole("button", { name: "Reveal password" }))
+    expect(screen.getByLabelText("Password", { selector: "input" })).toHaveAttribute("type", "text")
+    await user.click(screen.getByRole("button", { name: "Hide password" }))
+    expect(screen.getByLabelText("Password", { selector: "input" })).toHaveAttribute("type", "password")
     await user.click(screen.getByRole("button", { name: /Server Passthrough/ }))
-    expect(document.getElementById("ssh-proxy-password")!.getAttribute("type")).toBeNull()
+    expect(screen.getByLabelText("Proxy password")).toHaveAttribute("type", "password")
+    await user.click(screen.getByRole("button", { name: "Reveal proxy password" }))
+    expect(screen.getByLabelText("Proxy password")).toHaveAttribute("type", "text")
+    await user.click(screen.getByRole("button", { name: /Server Passthrough/ }))
+    await user.click(screen.getByRole("button", { name: /Server Passthrough/ }))
+    expect(screen.getByLabelText("Proxy password")).toHaveAttribute("type", "password")
   })
 
   test("renders a group selector listing None and the available groups", async () => {

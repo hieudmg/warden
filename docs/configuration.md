@@ -13,13 +13,22 @@ Default config path:
 
 ```json
 {
-  "api_base_url": "http://127.0.0.1:8080",
+  "api_base_url": "https://warden.example",
   "timeout": "30s"
 }
 ```
 
-`api_base_url` accepts only `http` or `https` URLs without query strings or
-fragments. `timeout` uses Go duration syntax and must be positive.
+`api_base_url` must be an HTTPS origin, with no userinfo, management path, query
+or fragment. This also applies to loopback; direct client HTTP is refused. The
+built-in default is `https://127.0.0.1:8080` and requires a matching trusted
+certificate. `timeout` uses Go duration syntax and must be positive.
+
+Optional `ca_certificate` is a **public** PEM certificate path for private-CA
+trust, in addition to system roots. Relative paths are resolved in the invoking
+CLI's working directory before IPC, not in the long-lived agent's directory. Certificate/hostname verification
+cannot be disabled. No API or polling secret belongs in configuration or env;
+run `warden login` for fresh web approval, and `warden logout` to clear memory
+and attempt revocation. See [CLI enrollment](cli.md#login-logout-and-status).
 
 Environment overrides:
 

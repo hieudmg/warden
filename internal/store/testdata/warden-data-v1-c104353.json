@@ -1,0 +1,204 @@
+{
+  "format": "warden-data",
+  "version": 1,
+  "exported_at": "2026-11-14T12:00:00Z",
+  "groups": [
+    {
+      "id": 11,
+      "name": "production",
+      "created_at": "2025-08-21T01:02:03.123456789Z",
+      "updated_at": "2026-11-02T04:05:06.987654321Z"
+    },
+    {
+      "id": 19,
+      "name": "staging",
+      "created_at": "2025-08-21T01:02:03.123456789Z",
+      "updated_at": "2026-11-02T04:05:06.987654321Z"
+    }
+  ],
+  "key_pairs": [
+    {
+      "id": 23,
+      "name": "deploy-key",
+      "public_key": "synthetic-public",
+      "private_key": "synthetic-private\nnot-a-real-key",
+      "private_key_passphrase": "synthetic-passphrase",
+      "created_at": "2025-08-21T01:02:03.123456789Z",
+      "updated_at": "2026-11-02T04:05:06.987654321Z"
+    },
+    {
+      "id": 29,
+      "name": "empty-key",
+      "public_key": "",
+      "private_key": "",
+      "private_key_passphrase": "",
+      "created_at": "2025-08-21T01:02:03.123456789Z",
+      "updated_at": "2026-11-02T04:05:06.987654321Z"
+    }
+  ],
+  "ssh_connections": [
+    {
+      "id": 31,
+      "name": "password-host",
+      "host": "ssh.invalid",
+      "port": 2222,
+      "username": "deploy",
+      "password": "synthetic-ssh-password",
+      "proxy_host": "proxy.invalid",
+      "proxy_port": 3128,
+      "proxy_username": "proxy-user",
+      "proxy_password": "synthetic-proxy-password",
+      "jump_connection_ids": "[]",
+      "default_dir": "/srv/app",
+      "group_id": 11,
+      "key_pair_id": 0,
+      "created_at": "2025-08-21T01:02:03.123456789Z",
+      "updated_at": "2026-11-02T04:05:06.987654321Z"
+    },
+    {
+      "id": 37,
+      "name": "key-host",
+      "host": "key.invalid",
+      "port": 22,
+      "username": "root",
+      "password": "",
+      "proxy_host": "",
+      "proxy_port": 0,
+      "proxy_username": "",
+      "proxy_password": "",
+      "jump_connection_ids": "[31, 31]",
+      "default_dir": "/opt/app",
+      "group_id": 19,
+      "key_pair_id": 23,
+      "archived": true,
+      "created_at": "2025-08-21T01:02:03.123456789Z",
+      "updated_at": "2026-11-02T04:05:06.987654321Z"
+    },
+    {
+      "id": 41,
+      "name": "dangling-host",
+      "host": "missing.invalid",
+      "port": 22,
+      "username": "user",
+      "password": "",
+      "proxy_host": "",
+      "proxy_port": 0,
+      "proxy_username": "",
+      "proxy_password": "",
+      "jump_connection_ids": "[31, 999, 31]",
+      "default_dir": "",
+      "group_id": 999,
+      "key_pair_id": 999,
+      "created_at": "2025-08-21T01:02:03.123456789Z",
+      "updated_at": "2026-11-02T04:05:06.987654321Z"
+    }
+  ],
+  "db_connections": [
+    {
+      "id": 43,
+      "name": "multi-db",
+      "host": "db.invalid",
+      "port": 3306,
+      "username": "app",
+      "password": "synthetic-db-password",
+      "databases": [
+        {
+          "name": "app",
+          "is_default": false
+        },
+        {
+          "name": "analytics",
+          "is_default": true
+        }
+      ],
+      "ssh_connection_id": 31,
+      "group_id": 19,
+      "archived": true,
+      "created_at": "2025-08-21T01:02:03.123456789Z",
+      "updated_at": "2026-11-02T04:05:06.987654321Z"
+    },
+    {
+      "id": 47,
+      "name": "dangling-db",
+      "host": "other.invalid",
+      "port": 3307,
+      "username": "reader",
+      "password": "synthetic-other-db-password",
+      "databases": [
+        {
+          "name": "archive",
+          "is_default": true
+        }
+      ],
+      "ssh_connection_id": 999,
+      "group_id": 999,
+      "created_at": "2025-08-21T01:02:03.123456789Z",
+      "updated_at": "2026-11-02T04:05:06.987654321Z"
+    }
+  ],
+  "projects": [
+    {
+      "id": 53,
+      "name": "alpha"
+    },
+    {
+      "id": 59,
+      "name": "empty-project"
+    }
+  ],
+  "reports": [
+    {
+      "id": 61,
+      "project_id": 53,
+      "title": "Synthetic report",
+      "summary": "## Synthetic summary\n\nNo real secrets.",
+      "agent_model": "synthetic-model",
+      "created_at": "2025-08-21T01:02:03.123456789Z"
+    },
+    {
+      "id": 67,
+      "project_id": 53,
+      "title": "Second report",
+      "summary": "Preserve relationships.",
+      "agent_model": "other-model",
+      "created_at": "2026-11-02T04:05:06.987654321Z"
+    }
+  ],
+  "connection_notes": [
+    {
+      "connection_type": "",
+      "connection_id": 0,
+      "note": "empty type"
+    },
+    {
+      "connection_type": "db",
+      "connection_id": 43,
+      "note": "database note"
+    },
+    {
+      "connection_type": "db",
+      "connection_id": 999,
+      "note": "orphan DB"
+    },
+    {
+      "connection_type": "legacy",
+      "connection_id": -7,
+      "note": "unknown type"
+    },
+    {
+      "connection_type": "ssh",
+      "connection_id": 31,
+      "note": "primary SSH\\nUnicode: 雪"
+    },
+    {
+      "connection_type": "ssh",
+      "connection_id": 37,
+      "note": ""
+    },
+    {
+      "connection_type": "ssh",
+      "connection_id": 999,
+      "note": ""
+    }
+  ]
+}

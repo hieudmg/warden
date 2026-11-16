@@ -1,0 +1,12 @@
+You are about to install a certificate from a certification authority (CA) claiming to represent:
+
+Warden T16 isolated fixture 76e72f39bac686f832194ed75b840093
+
+Windows cannot validate that the certificate is actually from "Warden T16 isolated fixture 76e72f39bac686f832194ed75b840093". You should confirm its origin by contacting "Warden T16 isolated fixture 76e72f39bac686f832194ed75b840093". The following number will assist you in this process:
+
+Thumbprint (sha1): D0BB49C3 88ACCE50 F9C5FA06 2BCA2116 4866AFDB
+
+Warning:
+If you install this root certificate, Windows will automatically trust any certificate issued by this CA. Installing a certificate with an unconfirmed thumbprint is a security risk. If you click "Yes" you acknowledge this risk.
+
+Do you want to install this certificate?

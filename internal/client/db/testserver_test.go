@@ -287,8 +287,14 @@ type tunnelSSHServer struct {
 	hostKey ssh.PublicKey
 	ln      net.Listener
 
-	mu   sync.Mutex
-	open int
+	mu          sync.Mutex
+	open        int
+	accepted    int
+	completed   int
+	changed     chan struct{}
+	connections map[net.Conn]struct{}
+	handlers    sync.WaitGroup
+	acceptDone  chan struct{}
 }
 
 func newTunnelSSHServer(t *testing.T, password string) *tunnelSSHServer {
@@ -310,44 +316,71 @@ func newTunnelSSHServer(t *testing.T, password string) *tunnelSSHServer {
 		t.Fatalf("ssh listen: %v", err)
 	}
 	srv := &tunnelSSHServer{
-		addr:    ln.Addr().String(),
-		hostKey: hostSigner.PublicKey(),
-		ln:      ln,
+		addr:        ln.Addr().String(),
+		hostKey:     hostSigner.PublicKey(),
+		ln:          ln,
+		changed:     make(chan struct{}, 1),
+		connections: make(map[net.Conn]struct{}),
+		acceptDone:  make(chan struct{}),
 	}
 	go func() {
+		defer close(srv.acceptDone)
 		for {
 			conn, err := ln.Accept()
 			if err != nil {
 				return
 			}
+			srv.mu.Lock()
+			srv.open++
+			srv.accepted++
+			srv.connections[conn] = struct{}{}
+			srv.mu.Unlock()
+			srv.handlers.Add(1)
 			go srv.handleConn(conn, cfg)
 		}
 	}()
-	t.Cleanup(func() { ln.Close() })
+	t.Cleanup(func() {
+		ln.Close()
+		<-srv.acceptDone
+		srv.mu.Lock()
+		for c := range srv.connections {
+			c.Close()
+		}
+		srv.mu.Unlock()
+		srv.handlers.Wait()
+	})
 	return srv
 }
 
 func (s *tunnelSSHServer) handleConn(conn net.Conn, cfg *ssh.ServerConfig) {
-	sconn, chans, reqs, err := ssh.NewServerConn(conn, cfg)
-	if err != nil {
-		conn.Close()
-		return
-	}
-	s.mu.Lock()
-	s.open++
-	s.mu.Unlock()
+	defer s.handlers.Done()
 	defer func() {
-		sconn.Close()
+		conn.Close()
 		s.mu.Lock()
 		s.open--
+		s.completed++
+		delete(s.connections, conn)
 		s.mu.Unlock()
+		select {
+		case s.changed <- struct{}{}:
+		default:
+		}
 	}()
-	go ssh.DiscardRequests(reqs)
+	sconn, chans, reqs, err := ssh.NewServerConn(conn, cfg)
+	if err != nil {
+		return
+	}
+	requestsDone := make(chan struct{})
+	go func() { defer close(requestsDone); ssh.DiscardRequests(reqs) }()
+	defer func() { sconn.Close(); <-requestsDone }()
+	var forwards sync.WaitGroup
+	defer forwards.Wait()
 
 	for newCh := range chans {
 		switch newCh.ChannelType() {
 		case "direct-tcpip":
-			go forwardDirectTCPIP(newCh)
+			forwards.Add(1)
+			go func() { defer forwards.Done(); forwardDirectTCPIP(newCh) }()
 		default:
 			newCh.Reject(ssh.UnknownChannelType, "unsupported channel type")
 		}
@@ -360,17 +393,26 @@ func (s *tunnelSSHServer) openConns() int {
 	return s.open
 }
 
-// waitClosed polls until no SSH connections remain, failing after timeout.
+// waitClosed includes forwarding workers, not just the SSH mux observer.
 func (s *tunnelSSHServer) waitClosed(t *testing.T) {
 	t.Helper()
-	deadline := time.Now().Add(5 * time.Second)
-	for time.Now().Before(deadline) {
-		if s.openConns() == 0 {
+	timer := time.NewTimer(5 * time.Second)
+	defer timer.Stop()
+	for {
+		s.mu.Lock()
+		balanced := s.open == 0 && s.accepted == s.completed
+		s.mu.Unlock()
+		if balanced {
 			return
 		}
-		time.Sleep(10 * time.Millisecond)
+		select {
+		case <-s.changed:
+		case <-timer.C:
+			s.mu.Lock()
+			defer s.mu.Unlock()
+			t.Fatalf("ssh server still has %d open connections (accepted=%d completed=%d)", s.open, s.accepted, s.completed)
+		}
 	}
-	t.Fatalf("ssh server still has %d open connections", s.openConns())
 }
 
 // forwardDirectTCPIP forwards a direct-tcpip channel to the requested host,
@@ -396,16 +438,22 @@ func forwardDirectTCPIP(newCh ssh.NewChannel) {
 		upstream.Close()
 		return
 	}
-	go ssh.DiscardRequests(reqs)
-	go func() {
-		defer ch.Close()
-		defer upstream.Close()
-		var wg sync.WaitGroup
-		wg.Add(2)
-		go func() { defer wg.Done(); io.Copy(ch, upstream) }()
-		go func() { defer wg.Done(); io.Copy(upstream, ch) }()
-		wg.Wait()
-	}()
+	requestsDone := make(chan struct{})
+	go func() { defer close(requestsDone); ssh.DiscardRequests(reqs) }()
+	relayTunnelFixture(ch, upstream)
+	<-requestsDone
+}
+
+// relayTunnelFixture is kept separate so EOF ordering can be controlled without
+// relying on the SSH connection observer's scheduling.
+func relayTunnelFixture(ch io.ReadWriteCloser, upstream net.Conn) {
+	defer ch.Close()
+	defer upstream.Close()
+	var wg sync.WaitGroup
+	wg.Add(2)
+	go func() { defer wg.Done(); io.Copy(ch, upstream); ch.Close(); upstream.Close() }()
+	go func() { defer wg.Done(); io.Copy(upstream, ch); upstream.Close(); ch.Close() }()
+	wg.Wait()
 }
 
 func newTestSigner(t *testing.T) ssh.Signer {

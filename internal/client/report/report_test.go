@@ -26,15 +26,15 @@ const reportJSON = `{
 }`
 
 func TestListProjectsPathAndDecode(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodGet || r.URL.Path != "/api/v1/projects" {
-			t.Errorf("got %s %s, want GET /api/v1/projects", r.Method, r.URL.Path)
+	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet || r.URL.Path != "/api/v1/client/projects" {
+			t.Errorf("got %s %s, want GET /api/v1/client/projects", r.Method, r.URL.Path)
 		}
 		w.Write([]byte(`[{"id":1,"name":"alpha"},{"id":2,"name":"beta"}]`))
 	}))
 	defer srv.Close()
 
-	cl := New(api.New(srv.URL, nil))
+	cl := New(api.New(srv.URL, srv.Client()))
 	projects, err := cl.ListProjects(context.Background())
 	if err != nil {
 		t.Fatalf("ListProjects: %v", err)
@@ -46,9 +46,9 @@ func TestListProjectsPathAndDecode(t *testing.T) {
 
 func TestCreateProjectSendsName(t *testing.T) {
 	var gotBody map[string]any
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodPost || r.URL.Path != "/api/v1/projects" {
-			t.Errorf("got %s %s, want POST /api/v1/projects", r.Method, r.URL.Path)
+	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost || r.URL.Path != "/api/v1/client/projects" {
+			t.Errorf("got %s %s, want POST /api/v1/client/projects", r.Method, r.URL.Path)
 		}
 		if err := json.NewDecoder(r.Body).Decode(&gotBody); err != nil {
 			t.Fatalf("decode request body: %v", err)
@@ -58,7 +58,7 @@ func TestCreateProjectSendsName(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	cl := New(api.New(srv.URL, nil))
+	cl := New(api.New(srv.URL, srv.Client()))
 	p, err := cl.CreateProject(context.Background(), "demo")
 	if err != nil {
 		t.Fatalf("CreateProject: %v", err)
@@ -73,9 +73,9 @@ func TestCreateProjectSendsName(t *testing.T) {
 
 func TestCreateReportPathAndDecode(t *testing.T) {
 	var gotBody map[string]any
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodPost || r.URL.Path != "/api/v1/reports" {
-			t.Errorf("got %s %s, want POST /api/v1/reports", r.Method, r.URL.Path)
+	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost || r.URL.Path != "/api/v1/client/reports" {
+			t.Errorf("got %s %s, want POST /api/v1/client/reports", r.Method, r.URL.Path)
 		}
 		if err := json.NewDecoder(r.Body).Decode(&gotBody); err != nil {
 			t.Fatalf("decode request body: %v", err)
@@ -85,7 +85,7 @@ func TestCreateReportPathAndDecode(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	cl := New(api.New(srv.URL, nil))
+	cl := New(api.New(srv.URL, srv.Client()))
 	r, err := cl.CreateReport(context.Background(), model.ReportRequest{
 		Project:    "demo-app",
 		Title:      "v2.0.0 shipped",
@@ -108,15 +108,15 @@ func TestCreateReportPathAndDecode(t *testing.T) {
 }
 
 func TestListReportsPathAndDecode(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodGet || r.URL.Path != "/api/v1/projects/demo/reports" {
-			t.Errorf("got %s %s, want GET /api/v1/projects/demo/reports", r.Method, r.URL.Path)
+	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet || r.URL.Path != "/api/v1/client/projects/demo/reports" {
+			t.Errorf("got %s %s, want GET /api/v1/client/projects/demo/reports", r.Method, r.URL.Path)
 		}
 		w.Write([]byte(`[` + reportJSON + `]`))
 	}))
 	defer srv.Close()
 
-	cl := New(api.New(srv.URL, nil))
+	cl := New(api.New(srv.URL, srv.Client()))
 	reports, err := cl.ListReports(context.Background(), "demo")
 	if err != nil {
 		t.Fatalf("ListReports: %v", err)
@@ -127,13 +127,13 @@ func TestListReportsPathAndDecode(t *testing.T) {
 }
 
 func TestJSONErrorSurfacesAPIError(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusBadRequest)
 		w.Write([]byte(`{"code":"validation_error","message":"title must be 1-200 bytes"}`))
 	}))
 	defer srv.Close()
 
-	cl := New(api.New(srv.URL, nil))
+	cl := New(api.New(srv.URL, srv.Client()))
 	_, err := cl.CreateReport(context.Background(), model.ReportRequest{
 		Project: "p", Title: "", Summary: "s", AgentModel: "a",
 	})
@@ -150,13 +150,13 @@ func TestJSONErrorSurfacesAPIError(t *testing.T) {
 }
 
 func TestStrictDecodingRejectsUnknownFields(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		w.Write([]byte(`{"id":1,"name":"a","unexpected":true}`))
 	}))
 	defer srv.Close()
 
-	cl := New(api.New(srv.URL, nil))
+	cl := New(api.New(srv.URL, srv.Client()))
 	if _, err := cl.ListProjects(context.Background()); err == nil {
 		t.Fatal("ListProjects accepted unknown response field")
 	}

@@ -3,6 +3,8 @@ package ssh
 import (
 	"bytes"
 	"context"
+	"net"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -57,6 +59,38 @@ func TestDialGraph(t *testing.T) {
 	}
 	for i, client := range clients {
 		waitForClientClosed(t, i, client)
+	}
+	jump.listener.waitClosed(t)
+	target.listener.waitClosed(t)
+}
+
+type graphCloseRecorder struct {
+	net.Conn
+	name  string
+	order *[]string
+}
+
+func (c *graphCloseRecorder) Close() error { *c.order = append(*c.order, c.name); return nil }
+
+func TestGraphClosesAgentsAndTransportsReverseOrderExactlyOnce(t *testing.T) {
+	var order []string
+	root := &onceConn{Conn: &graphCloseRecorder{name: "root", order: &order}}
+	var chain []*golangssh.Client
+	for _, name := range []string{"root", "jump", "target"} {
+		raw := root
+		if name != "root" {
+			raw = &onceConn{Conn: &graphCloseRecorder{name: name, order: &order}}
+		}
+		ag := &onceConn{Conn: &graphCloseRecorder{name: "agent-" + name, order: &order}}
+		chain = append(chain, &golangssh.Client{Conn: &ownedClientConn{raw: raw, root: root, agentConn: ag}})
+	}
+	g := &Graph{target: chain[2], chain: chain}
+	g.Close()
+	g.Close()
+	g.Abort()
+	want := []string{"agent-target", "target", "agent-jump", "jump", "agent-root", "root"}
+	if !reflect.DeepEqual(order, want) {
+		t.Errorf("close order=%v; want %v", order, want)
 	}
 }
 

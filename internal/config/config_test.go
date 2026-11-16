@@ -127,7 +127,7 @@ func TestLoadClientRejectsInvalidAPIBaseURL(t *testing.T) {
 	if err == nil {
 		t.Fatal("LoadClient() error = nil, want error")
 	}
-	if !strings.Contains(err.Error(), "api base") {
+	if !strings.Contains(err.Error(), "HTTPS origin") {
 		t.Fatalf("LoadClient() error = %v, want API base URL validation error", err)
 	}
 }
@@ -137,7 +137,7 @@ func TestLoadClientParsesTimeoutWithEnvOverride(t *testing.T) {
 
 	configPath := filepath.Join(t.TempDir(), "client.json")
 	writeTestFile(t, configPath, `{
-  "api_base_url": "http://warden.internal:8080",
+  "api_base_url": "https://warden.internal:8080",
   "timeout": "10s"
 }`)
 
