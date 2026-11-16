@@ -283,10 +283,10 @@ try {
 	// Reserve its bounded output-pipe join within, not beyond, the matrix budget.
 	deadline, _ := matrixCtx.Deadline()
 	importCtx, cancelImport := context.WithDeadline(matrixCtx, deadline.Add(-time.Second))
-	cmd := exec.CommandContext(importCtx, certutil, "-user", "-addstore", "Root", caFile)
+	cmd := certutilFixtureImportCommand(importCtx, certutil, caFile)
 	cmd.Env = env
 	cmd.WaitDelay = time.Second
-	t.Log("native HTTPS CurrentUser unique-CA-import:begin")
+	t.Log("native HTTPS CurrentUser unique-CA-import:begin candidate=force-overwrite; UI behavior unverified")
 	importErr := runPowerShellFixtureCommand(cmd, func(line string) { t.Logf("native HTTPS certutil: %s", line) })
 	importContextErr := importCtx.Err()
 	cancelImport()

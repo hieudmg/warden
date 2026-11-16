@@ -98,6 +98,39 @@ scope stay unchanged. No manual signing/dispatch/publication/production authorit
 or completed checkbox. This is a source-supported helper correction plus bounded
 CA evaluation, not accepted native GREEN or a fully green local checkpoint.
 
+### Native Windows round 4 — helper verified;15/16, one CA-import failure
+
+At parent-reviewed df07a75 (R3native fix plus separately fixed/reviewed Unix
+resize), run43801723735 attempt1 checked out merge `b0ac0f7ca10a0c0bd7e08cf501472b6c3f501c65`
+into basec104353. Linux133083319416 whole-pipeline SUCCESS; Windows133083319948
+FAIL. Actual three JSONL streams reconcile16unique top names each once:
+**15PASS/one FAIL/zero skips**. Helper all4ordinary/metacharacter positive/locked
+subcases PASS, including actual sharing IOExceptionHRESULT-2147024864; helper
+native defect CLOSED, do not edit further. Sole failure is trusted-HTTPS matrix:
+no-force certutil stalls after Signature matches Public Key, no network or main
+postcondition/modes, independent exact-CA absence PASS. UI cause unproven.
+
+Official full certutil global Options define **-f = Force overwrite**, not a
+noninteractive promise. Parent supersedes no-force restriction only for one
+bounded unique-CA CurrentUserRoot `-user -f -addstore Root CAfile` candidate.
+R4 extracts the actual fixed test-only Cmd.Args builder and observes missing-f
+RED→GREEN, retaining preexistence before cleanup arming/exact DER before Download,
+direct Go ownership/checked exit/bounded join/shared120s+cleanup20s/all11modes.
+Native effect pending; optional owned main-window snapshot omitted with explicit
+attribution/reliability/lifecycle limitation, not a fabricated UI-cause claim.
+[Chronological R4 report](../reports/2026-11-16-native-windows-followup.md#round-4--helper-native-green-sole-ca-import-gate-2026-11-16)
+binds fresh fullGo798PASS/3existing skips, affected race343PASS/1skip, focused/
+vet/installers/actualcurl/12contracts/actionlint and compile-only Windows. Prior
+Unix required-race/race25/HTTPS-runner proofs reused against unchanged source,
+not new executions or a passing-rerun waiver of historical R3failure.
+
+Parent independent review/fresh checks before possible ONE candidate push;
+all16nativeoncePASS/zero skips still required. Keep0.23.0 and every production
+security boundary; no helper/Unix/crypto/TLS/policy change. If candidate also
+stalls, stop for new bounded evidence/decision, not blind retry or budget growth.
+External genuinePRF/production-trust/privilegedUnix/hosted provenance gates and
+manual signing authorization remain open/unanswered. No checkbox completed.
+
 ## Execution, dependencies, and evidence discipline
 
 - Repository `/var/www/code/go/warden`, branch `hieudmg/security-hardening`, inspected HEAD/fetched `origin/main` both `c104353` on 2026-11-14. Only one writer in this checkout. A controller may assign sequential workers one task at a time; no parallel writers/worktrees. Each handoff names changed paths, red/green commands, remaining failures and next dependency. Preserve unrelated work, particularly protected untracked `mise.toml` (do not read/change/stage).

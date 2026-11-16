@@ -599,3 +599,163 @@ artifact/OIDC/signature gates remain open. No T16 residual acceptance waiver,
 manual signing/dispatch/public attestations/transparency writes, service/global
 policy operations or publication authority. No checkbox completed. Stop at this
 bounded self-review/report; parent controls the next step.
+
+## Round 4 — helper native GREEN; sole CA-import gate (2026-11-16)
+
+Resumed sole writer at `df07a756ae213be8f3650313387301ac12ef4729`, containing
+reviewed R3native fixdf6d3aa and the separately reviewed Unix resize correction.
+No model/thinking override/fallback attempted. Protected content and unrelated
+cache/evidence remain untouched; version0.23.0 and all authority limits remain.
+Private evidence `/var/tmp/ww4.8oX2`, ledger original prefix `ledger.before.md`.
+Actual `/var/tmp/warden-pr45-final-native/` logs/three native JSONL files and
+metadata were copied as data and independently reconciled, not merely trusting
+scout arithmetic. Run43801723735 attempt1 pull_request headdf07a75, actual merge
+`b0ac0f7ca10a0c0bd7e08cf501472b6c3f501c65` into basec104353: Linux133083319416
+SUCCESS, Windows133083319948 FAIL. **16 unique top-level names each run once:
+15PASS, one FAIL, zero skips.** Only trusted-HTTPS matrix fails. All four helper
+ordinary/metacharacter success/locked subcases PASS; both locks show actual
+System.IO.IOException sharing HRESULT-2147024864, with bytes/stage cleanup/
+inventory/join assertions. This **closes the helper native defect**; do not edit
+helper or Unix source further. Stale Hindsight claims that null binding remained
+unconfirmed were corrected with actual evidence. Earlier failures remain history.
+
+Remaining failure: preflight absence PASS and direct Go-owned **no-force**
+certutil starts, prints Root store and `Signature matches Public Key`, then is
+killed/joined with deadline error (matrix119.70s). Independent exact-DER CA
+absence cleanup PASS/normal close/join. All connection/payload/CRL/exact/CDN/
+forbiddenHTTP counts0; no import end, store postcondition or main HTTPS matrix
+runs. C# compilation in the *earlier* process was proven; no HTTPS mode executed
+in this latest run. UI consent versus other interaction is still **unproven**.
+
+**Before R4 code edits: native TDD exception.** No local powershell.exe/pwsh or
+native certutil; actual missing-import hosted RED is symptom evidence, not local
+native candidate RED→GREEN. Add a portable contract against the actual shared
+command builder's Cmd.Args, observe old missing-`-f` RED, then the minimal fixed
+argument list GREEN. This establishes literal argv/current-user/root/file scope,
+not import or TLS runtime success. All16 native tests once PASS/zero skips,
+11actual HTTPS modes/good bytes/full negatives/postconditions/absence remain
+required after parent review and at most the authorized next candidate push.
+
+Full official Microsoft certutil page was read through global Options (metadata
+commit `4282dd47a285a65de44c1512e8e9abd2384582a8`): -addstore lists -f/-user;
+`-f | Force overwrite.` and -user targets HKEY_CURRENT_USER certificate store.
+This corrects the earlier section-only omission, **not** proof that -f suppresses
+UI or guarantees noninteractive operation. Parent explicitly supersedes the
+previous no-force restriction only for one bounded **`-user -f -addstore Root
+<unique private CAfile>`** fixture candidate. Keep random128-bit serial/CN and
+thumbprint preexisting-absence guard before cleanup arming, exact DER/thumbprint
+postcondition before any Download, partial-failure cleanup, direct owned child/
+checked exit/kill+join/WaitDelay inside shared120s and independent20s cleanup.
+No evidence in this documented single-InFile operation indicates unrelated-root
+replacement; no broad store overwrite, policy/elevation/LocalMachine/registry/
+TLS validation change is authorized. Abort/escalate if contrary evidence appears.
+
+Optional owned-window diagnostic was considered, **not implemented**. Official
+Framework4.8.1 MainWindowHandle docs describe only a graphical main window,
+cached state requiring Refresh, zero for absent/hidden windows, and startup
+coordination. A negative snapshot cannot identify/exclude the cause of this
+headless console stall; reliable modal-window attribution would add process/
+window orchestration disproportionate to this minimal one-variable candidate.
+No P/Invoke/UI framework, global enumeration/screenshot, title collection,
+button click/sendkeys/autoapproval or extra diagnostic subprocess was added.
+Limitation is explicit: if this one -f candidate also blocks, existing streamed
+phase/output/context/cleanup evidence still cannot prove UI causation. That
+result falsifies the missing-force-switch-alone hypothesis and requires a new
+bounded evidence/decision checkpoint, not another blind retry or timeout change.
+Manual public signing remains unanswered/unauthorized; external gates unwaived.
+
+### Round-4 implementation, portable RED→GREEN and local checks
+
+`installer_https_source_test.go` is the small shared **test-only** command builder
+used by the actual Windows fixture. It fixes exactly `executable, -user, -f,
+-addstore, Root, CAfile`; no caller-selected operation/store/flags, shell or
+fallback. Its portable Cmd.Args test includes spaces, percent, ampersand,
+apostrophe and brackets in the literal CA path and requires context cancellation
+ownership. First extracted the old exact no-force argv into this actual builder:
+`args-red.log`,04:21:15UTC exit1, prints old missing-`-f` argv versus expected
+list. Then added only -f: `args-green.log`,04:22:23UTC exit0. Nothing executed
+certutil locally; an argument-construction proof is not native import GREEN.
+Windows caller changes only from inline command to builder plus an explicit
+`candidate=force-overwrite; UI behavior unverified` phase label. Existing
+preflight/ownership arming/DER/cleanup/WaitDelay/deadlines/all11 modes and their
+assertions are byte-preserved; all production/helper/Unix code stays unchanged.
+
+All fresh commands use exactGo1.26.11/TMPDIR=/var/tmp and bytecode-off Python.
+`commands.jsonl` records argv/UTC/exit/environment; `test-summary.json` records
+actual top-level counts/skips, with no failing test waived or passing rerun.
+
+| Current-source command / evidence | UTC start→end, 2026-11-16 | Result |
+| --- | --- | --- |
+| `go test ./internal/upgrade -run '^TestCertutilFixtureImportCommandArguments$' -count=1 -v` (`args-red.log`) | 04:21:15→04:21:16 | expected RED on old exact argv, exit1 |
+| Same command after adding -f (`args-green.log`) | 04:22:23→04:22:23 | portable argv GREEN, exit0 |
+| `go test -race ./internal/upgrade -run '^(TestCertutilFixtureImportCommandArguments\|TestPowerShellFixture)' -count=1 -v` (`focused-race.log`) | 04:22:23→04:22:26 | PASS literal argv and existing bounded process/exit/cancel contracts |
+| Windows/amd64/CGO0 `go test -c -o /var/tmp/ww4.8oX2/upgrade.test.exe ./internal/upgrade` (`windows-compile.log`) | 04:22:26→04:22:26 | PASS **compile only**, binary never executed |
+| `go test -json ./... -count=1 -timeout=180s` (`full-go.log`) | 04:22:42→04:23:09 | PASS798 top-level tests, three existing explicit skips |
+| `go test -race -json ./internal/upgrade ./internal/client/... -count=1 -timeout=180s` (`upgrade-client-race.log`) | 04:22:42→04:23:01 | PASS343 top-level tests, one existing wrong-owner skip |
+| `go vet ./...` (`vet.log`) | 04:23:01→04:23:01 | PASS |
+| `bash scripts/test-installers.sh` (`installers.log`) | 04:22:42→04:22:49 | PASS offline wrappers only |
+| `python3 scripts/installers_test.py` (`installer-https.log`) | 04:22:49→04:22:52 | PASS four actual-curl/private verified-TLS matrices |
+| `python3 -m unittest discover -s scripts/ci -v` (`ci-contracts.log`) | 04:22:52→04:22:54 | PASS12 offline contracts; fake publication only |
+| Existing private actionlint1.7.12, optional analyzers disabled (`actionlint.log`) | 04:22:54→04:22:54 | PASS; shellcheck/pyflakes unavailable, not claimed |
+
+Full-suite skips remain the two opt-in browser fixture servers and Unix
+wrong-owner; affected race skips only wrong-owner. No added skip or relaxed
+assertion. The one new portable argument test explains798 versus797, not native
+acceptance. Prior Unix failures remain historical and were causally corrected
+in the separately reviewed df07a75 work, not waived by this fresh pass. Parent's
+required server/store/client race, whole terminal race25 and production HTTPS
+integration proofs are **reused for unchanged source, not rerun in R4**;
+`reuse-evidence.json` binds their source/log hashes. No frontend/browser/build/
+scan/privileged cross-owner/PRF/signing run was newly claimed here. Latest hosted
+Linux whole-pipeline success is independent, and does not turn15/16 into16/16.
+
+### Round-4 self-review and required next evidence
+
+Complete **originaldf07a75→current** review bundle is
+`/var/tmp/warden-windows-r4-review.diff`, `.json`, `.sha256`, including the new
+source-named test builder, two-line native caller change, this chronological
+report, plan checkpoint and entire new ignored-ledger delta. Manifest binds
+baseline/current safe source inputs, unchanged production/helper/Unix/actual C#,
+actual supplied native JSON and job logs, official full documentation bytes,
+source-only native programs/CLI argv, current compile-only binary/runtime metadata,
+new and reused evidence, ledger prefix/full/delta. Protected content is excluded
+**before** reads/copies/hashes; unrelated cache/prior evidence is preserved.
+Formatting/whitespace, version0.23.0×3, unchanged HEAD/index, report/ledger prefix,
+reverse-patch check and checksums are verified for bounded self-review, not
+independent acceptance. No stage/commit/push/PR/CI operation or runtime trust
+mutation performed by this worker.
+
+**One authorized -f candidate implemented, native effect UNVERIFIED.** Parent
+independent review/fresh checks precede any possible one automatic-PR candidate
+push. Require import successful exit/join, exact-CA store postcondition before
+network, all11 real HTTPS modes/good bytes/negative outcomes with unchanged chain/
+hostname/revocation checks, byte caps/redirect/digest/duplicate/truncation/header
+assertions, exact removal/
+absence and all16 named tests once PASS/zero skips. Do not reopen the natively
+verified helper or edit Unix code. If import still stalls, stop with actual
+phase/output/deadline/cleanup evidence and explicit lack of UI attribution; no
+blind repeat, longer budget or unsupported policy workaround. Genuine PRF with
+production trust, privileged Unix owner and hosted artifact/OIDC/signature gates
+remain open. Manual public signing remains unanswered/unauthorized; narrow T16
+risk acceptance is not a waiver. No checkbox or final release accepted. Stop at
+this bounded report; parent alone controls the next step.
+
+Self-review command04:31:55→04:31:56UTC exit0 (`self-review.log`), including
+all5task paths/462safe tracked inputs plus one new source file (463total),
+unchanged production/helper/Unix/source programs, version/prefix/reverse checks.
+No runtime source changed after checks. ExactGo1.26.11 Cmd docs (`go-api-doc.log`)
+also confirm existing command/cancellation construction. Final bundle is refreshed
+**after** the recorder closes, binding immutable command/output hashes rather
+than an in-flight log. `verify.py` checks all463input/5task/42evidence/reused-log
+hashes plus the bundle digests, actual command exits/counts, unchanged HEAD/index
+and nonapplying reverse patch. This is bounded self-review, not parent approval.
+
+### R4 parent local acceptance checkpoint
+
+Independent reviewer `01a1e1ea-4a07-7503-b4c7-e7dc96ff6f22` found no issues in the exact bounded R4 patch against `df07a75`; review inspected stored evidence and did not execute tests or native operations. Parent independently verified all 5 task, 463 input and 42 evidence hashes, inspected the actual builder and unchanged certificate ownership/budget checks, then freshly ran:
+
+- `GOTOOLCHAIN=go1.26.11 TMPDIR=/var/tmp go test -race ./internal/upgrade ./internal/client/...`: PASS, `/var/tmp/warden-windows-r4-parent-race.log`.
+- `go vet ./...` under the same toolchain/environment: PASS, `/var/tmp/warden-windows-r4-parent-vet.log`.
+- Windows amd64 upgrade-test cross-compilation: PASS, `/var/tmp/warden-r4-upgrade-windows.test.exe`; **not native execution**.
+
+Reviewed task hashes still matched before this documentation-only append. Fresh fetched approved base remains `0.22.1`; the existing three `0.23.0` fields remain unchanged. These checks accept only the test-only candidate for the authorized PR update. They do not establish successful import, UI causality, any download-mode success or all16 native acceptance. The next checkpoint is the existing automatic read-only PR CI after push, not manual dispatch, public signing, merge or release.
