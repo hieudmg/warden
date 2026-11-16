@@ -759,3 +759,176 @@ Independent reviewer `01a1e1ea-4a07-7503-b4c7-e7dc96ff6f22` found no issues in t
 - Windows amd64 upgrade-test cross-compilation: PASS, `/var/tmp/warden-r4-upgrade-windows.test.exe`; **not native execution**.
 
 Reviewed task hashes still matched before this documentation-only append. Fresh fetched approved base remains `0.22.1`; the existing three `0.23.0` fields remain unchanged. These checks accept only the test-only candidate for the authorized PR update. They do not establish successful import, UI causality, any download-mode success or all16 native acceptance. The next checkpoint is the existing automatic read-only PR CI after push, not manual dispatch, public signing, merge or release.
+
+## Round 5 — force hypothesis falsified; owned observation only (2026-11-16)
+
+Baseline `9a12611e6cf4dc9b244628448fb17f9361f8bae4`, same sole-writer branch;
+inherited initial HIGH retained, no override/fallback attempted. Parent independently
+reviewed R4 without issues and freshly checked affected race/vet/Windows compile
+before the authorized push. Actual run43805627542 attempt1 checked out merge
+`2335af14279e4fa2d89a14c439da7a447ee2b506` into basec104353. Independent parsing
+of all three supplied JSONL streams in `/var/tmp/warden-pr45-native-r4/` proves
+16 unique names each run once: **15PASS/one FAIL/zero skips**, only trusted-HTTPS
+matrix fails. All4helper cases still PASS, including genuine sharing HRESULT
+-2147024864. Linux entire pipeline PASS including full race and SSH/DB race25.
+The R4 **`-user -f -addstore Root CAfile`** import prints Signature matches Public
+Key, then119.37s deadline/exit1/join. No import-end, DER postcondition/main cleanup/
+download; all6network counters0. Independent exact-CA absence PASS and joined.
+**Missing-f-alone hypothesis is FALSIFIED. UI cause is still UNKNOWN.** Earlier
+13/3,14/2 and15/1 runs remain history; no helper or Unix change is permitted.
+Private evidence `/var/tmp/ww5`; complete ledger prefix saved before edits.
+
+**Before R5 code edits: native TDD exception and bounded design.** No local
+Windows runtime, PowerShell or C# compiler. Official Microsoft Win32 signatures,
+callback convention/return semantics, cross-process GetWindowTextW caption limits
+and supported OS versions were read before coding; Go1.26.11 Cmd/NewCallback docs
+and exact pinned x/sys/windows v0.47.0 bindings were also checked (Context7 plus
+installed source). Native UI/capability proof is unavailable; strongest feasible
+proof is portable actual-cancel wiring RED→GREEN, real owned fake child processes
+including failures/deadlines/joins, exact source guards and Windows cross-compile.
+This is one **diagnostic-only** candidate, not another functional import attempt.
+R4 argv stays byte-identical, one unique absent-owned CA/CurrentUser Root only,
+exact DER guard before network,120s total and independent20s cleanup unchanged.
+
+Choose one directly owned **Go test subprocess** for the snapshot instead of a
+PowerShell/Add-Type observer: existing compiled test executable avoids a nested
+PowerShell/compiler lifecycle, needs no install and allows cross-compiling the
+actual Win32 call sites. Win32 Toolhelp read-only THREAD snapshot is documented
+as a system numeric thread table; filter OwnerProcessID to certutil **before any
+logging or window query**, and never retain/report foreign thread data. Enumerate
+only those owned thread IDs with EnumThreadWindows (nonchild windows, no global
+window enumeration/visibility heuristic). Recheck GetWindowThreadProcessId equals
+owned PID/thread before **each** class/caption read, reject observer's own PID,
+use fixed buffers/quoted output, and inspect only presence of dialog IDs6/7
+without messages/actions. PID/session/thread IDs/class/title are fixture-public
+metadata only. No WCT/custom ABI/stack/memory/debugger/suspension/remote injection,
+no foreign text, global screenshot, environment/key dump, SendMessage, button
+click, autoapproval, elevation, policy, registry, LocalMachine or TLS change.
+Categorical thread wait reasons are **UNKNOWN/not queried**, not guessed.
+
+Reserve8s **within** existing120s: import cancellation112s, snapshot at most6s
+also ending no later than matrix deadline minus2s, then1s snapshot WaitDelay and
+1s original import WaitDelay. Wrap Cmd.Cancel only: Go calls it after Start has
+set Process; read PID there, synchronously run/join bounded snapshot, always
+invoke original Cancel/Kill afterward, and preserve its result. Cmd.Run joins
+watchCtx/output before returning, so no Process pointer read race, detached
+logger or observation after test end. No repeated probes or import retry.
+Missing APIs, races, empty/partial snapshot or deadline are explicitly UNKNOWN;
+a positive owned window may identify a dialog but is not automatic proof of
+causality or consent authority. If empty/unavailable, owner needs interactive
+Windows evidence, not a new workaround. Any consent/scope change requires owner
+decision. All16oncePASS/zero skips and all11actual verified-HTTPS modes remain
+required; no runtime success or release acceptance is inferred from observation.
+
+### Round-5 implementation and measured verification
+
+`certutil_diagnostic_test.go` provides only the fixture import context, Cancel
+observer and private snapshot-command constructor plus portable tests.
+`certutil_diagnostic_windows_test.go` is the private subprocess entry and scoped
+Win32 snapshot. The native caller uses these seams without changing R4 argv,
+preflight/arming/DER/store/cleanup programs or any11mode assertion. No source in
+production, helper, Unix, native16name list, installer C# or release fields changes.
+Snapshot uses pinned library-provided THREADENTRY32 and typed owner/class/session
+bindings; only EnumThreadWindows, GetWindowTextW and GetDlgItem use primitive
+stdcall DLL calls with official signatures. There is **no custom native struct,
+WCT or reflective/PInvoke framework**, PowerShell child or compiler subprocess.
+Toolhelp THREAD-only handle closes; PID/owner/thread checks precede each text
+read, observer PID is rejected, UTF16buffers64(class)/128(caption),32owned threads/
+16window callbacks, quoted captions and existing1024-byte partial-line cap bound
+output. Availability, owner-query failure/rejection, traversal errors, cap hits,
+empty/false enumeration and partial caption are explicit, inconclusive metadata.
+No thread-wait category is inferred; all results are observation-only.
+
+Portable RED extracted the old1s import reservation and join behavior into the
+actual seams **without** the observer. `diagnostic-red.log`,05:14:13→05:14:14UTC,
+exit1: budget expected8s but got1s; five cancellation cases show kill-import then
+import-joined with PID0/no snapshot, while normal exit already passes. Then the
+minimal Cancel observer/reservation implementation gives `diagnostic-green.log`,
+05:18:02→05:18:09 exit0. The same budget/lifecycle tests are GREEN; additional
+command/source-scope and original-Cancel-error tests are characterizations, not
+falsely claimed as their own observed RED. Actual owned Go children exercise
+snapshot success, exit7, blocking until6s cancellation, unavailable factory,
+start failure and normal import. Assertions require snapshot/output join BEFORE
+original kill BEFORE import join, checked owned PID/deadlines, original cancel
+result, no snapshot on normal exit,1s each WaitDelay and no lingering callbacks.
+This is actual shared wiring and process lifecycle, not only source substring
+proof. Windows API/runtime/UI observation remains unexecuted locally.
+
+| Check / evidence | UTC start→end, 2026-11-16 | Result |
+| --- | --- | --- |
+| Focused portable diagnostic GREEN (`diagnostic-green.log`) | 05:18:02→05:18:09 | PASS; includes actual prior RED regressions |
+| `go test -race ./internal/upgrade -run '^(TestCertutilFixture\|TestPowerShellFixture)' -count=1 -v` (`diagnostic-race.log`) | 05:18:09→05:18:20 | PASS real cancellation/kill/join/failure paths |
+| `go test -json ./... -count=1 -timeout=180s` (`full-go.log`) | 05:21:14→05:21:41 | PASS802 top-level tests,3existing skips |
+| `go test -race -json ./internal/upgrade ./internal/client/... -count=1 -timeout=180s` (`upgrade-client-race.log`) | 05:21:14→05:21:33 | PASS347 top-level tests,1existing skip |
+| `go vet ./...` (`vet.log`) | 05:21:33→05:21:33 | PASS |
+| `bash scripts/test-installers.sh` (`installers.log`) | 05:21:14→05:21:21 | PASS offline fixtures, not live installation |
+| `python3 scripts/installers_test.py` (`installer-https.log`) | 05:21:21→05:21:24 | PASS four actual-curl/private verified-TLS matrices |
+| `python3 -m unittest discover -s scripts/ci -v` (`ci-contracts.log`) | 05:21:24→05:21:26 | PASS12offline contracts/fake publication only |
+| Existing private actionlint1.7.12 (`actionlint.log`) | 05:21:26→05:21:26 | PASS; optional shellcheck/pyflakes unavailable, disabled |
+| Final source scope contract (`final-scope.log`) | 05:25:15→05:25:15 | PASS |
+| Windows/amd64/CGO0 upgrade-test cross-compile (`windows-compile-current.log`) | 05:25:15→05:25:15 | PASS actual Go Win32 call sites, **not execution** |
+| Windows/amd64/CGO0 `go vet ./internal/upgrade` (`windows-vet-current.log`) | 05:25:16→05:25:16 | PASS |
+
+All tests use exactGo1.26.11/TMPDIRvar-tmp/bytecode-off; argv/UTC/exits/environment
+are in `commands.jsonl`, actual top-level counts/skips in `test-summary.json`.
+Four new portable top-level tests explain802versus798. Existing skips are the two
+opt-in browser fixture servers and privileged Unix wrong-owner; affected race
+skips only wrong-owner. No added skip, assertion relaxation, passing-rerun waiver,
+production delay change or total budget increase. Bounded self-review added only
+Win-only owner-query failure/rejection counters after the full/race runs; Linux
+build inputs were unchanged, final source contract and Windows compile/vet were
+freshly checked. Earlier compile/vet also passed; never executed the Windows binary.
+Previous parent whole terminal race25/required server-store-client race/production
+HTTPS integration proofs are explicitly **reused**, not new R5 runs, with unchanged
+source/log hashes in `reuse-evidence.json`. Latest hosted Linux entire-pipeline
+success is separate and does not establish native matrix success. Initial read-only
+hosted parser shadowed built-in `all` with a list and errored before repo edits;
+corrected parsing and the failure note are retained, no faulty result accepted.
+
+### Round-5 review boundary and next observation
+
+Complete **original9a12611→current** bundle:
+`/var/tmp/warden-windows-r5-review.diff`, `.json`, `.sha256`. Includes all6task
+paths/two new Go files and the **whole new ignored-ledger delta**, baseline/current
+safe input hashes, actual hosted JSON/logs/metadata, official API bytes/versioned
+binding evidence, final diagnostic sources/runtime args and budgets, compile-only
+binary/tool metadata, measured commands and reused proofs. Protected `mise.toml`
+content is excluded **before** reads/copies/hashes; unrelated cache/private
+evidence preserved. Report/ledger prefix, exact original baseline/HEAD/index,
+version0.23.0×3, formatting/whitespace, unchanged production/helper/Unix/C#/
+all preflight+main+cleanup programs, native names, hashes and nonapplying reverse
+patch are verified in bounded self-review, not independent acceptance.
+
+**Diagnostic candidate implemented; native observation still UNKNOWN/UNRUN.**
+No root operation performed locally. Parent independent review/fresh checks before
+at most one new **observational** automatic-PR run. No new import mechanism,
+arg variant, retry, timeout inflation or functional candidate. If owned class/
+caption/ID6/7 evidence suggests a consent dialog, owner MUST decide before any
+scope/GUI change; this worker has no autoapproval authority. If unavailable/
+empty/ambiguous, report UNKNOWN/need interactive Windows evidence, not no-UI or
+another workaround. All16nativeoncePASS/zero skips, successful owned import/DER
+postcondition before network, actual11mode good bytes/full negatives/CDN/request/
+forbiddenHTTP assertions and exact CA removal/absence remain mandatory. Genuine
+PRF/production trust, privileged Unix owner, hosted artifact/OIDC/signatures and
+manual signing authority remain open/unanswered; narrow T16 risk is no waiver.
+No staging/commit/push/PR/CI/manual dispatch/global tool/service/install/deploy/
+signing/merge/release action. Stop after self-review; parent controls next step.
+
+Closing self-review05:33:28UTC exit0 (`self-review.log`):6task paths,
+463safe tracked inputs plus2new Go sources=465total, format/link/version/prefix/
+byte-preservation/nonapplying reverse checks PASS. Full45KB patch read in bounded
+self-review. Closing prose only after runtime checks; no runtime source change.
+Final package refreshed after recorder closes to bind immutable logs/commands;
+`verify.py` verifies465inputs/6tasks/69evidence files/reused hashes, complete ledger
+delta/prefix, expected RED-only nonzero exit, counts, HEAD/index and bundle digests.
+No self-review result is independent approval or native runtime acceptance.
+
+### R5 parent local acceptance checkpoint
+
+Independent reviewer `01a1e1ea-4a07-7503-b4c7-e7dc96ff6f22` found no issues in the bounded diagnostic patch against `9a12611`. Review inspected the retained evidence; it did not execute tests, replay RED or perform native operations. Parent inspected both new sources and integration, verified all 6 task/465 input/69 evidence hashes, and freshly executed:
+
+- `TMPDIR=/var/tmp GOTOOLCHAIN=go1.26.11 go test -count=1 -race ./internal/upgrade ./internal/client/...`: PASS, `/var/tmp/warden-windows-r5-parent-fresh-race.log`. The earlier `/var/tmp/warden-windows-r5-parent-race.log` reused client-package cache; the explicit `-count=1` run is the fresh execution proof.
+- Full `go vet ./...`: PASS, `/var/tmp/warden-windows-r5-parent-vet.log`.
+- Windows amd64 upgrade-test compilation and Windows-target upgrade vet: PASS, `/var/tmp/warden-r5-upgrade-windows.test.exe` and `/var/tmp/warden-windows-r5-parent-windows-vet.log`; **neither is native execution**.
+
+Reviewed task hashes still matched before this prose-only append. Fresh fetched approved base remains `0.22.1`; existing release `0.23.0` remains unchanged. This accepts only the diagnostic candidate for one authorized automatic PR observation. Native metadata, root cause, functional import, all eleven download modes and all16 acceptance remain unproven. Empty or unavailable metadata remains UNKNOWN. Any consent evidence requires an owner decision before GUI action or trust-scope changes. No manual dispatch, signing, merge or release is authorized.

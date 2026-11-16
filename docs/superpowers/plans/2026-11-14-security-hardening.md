@@ -131,6 +131,47 @@ stalls, stop for new bounded evidence/decision, not blind retry or budget growth
 External genuinePRF/production-trust/privilegedUnix/hosted provenance gates and
 manual signing authorization remain open/unanswered. No checkbox completed.
 
+### Native Windows round 5 — force hypothesis falsified; diagnostic only
+
+Reviewed R4 committed/pushed as9a12611; run43805627542attempt1 merge2335af14279e4fa2d89a14c439da7a447ee2b506
+into basec104353 independently reconciles16unique names once **15PASS/1FAIL/0SKIP**.
+Helper all4cases remain native PASS/genuine sharing HRESULT-2147024864; freeze
+helper and Unix. Linux entire pipeline PASS/fullrace/SSHDBrace25. Sole HTTPS
+matrix failure: -user -f -addstore Root still stalls119.37s after Signature
+matches Public Key; no importend/DERpostcondition/mainmodes/network, independent
+exact-CA absence PASS/join. **Missing-f-alone FALSIFIED, UI cause UNKNOWN.**
+
+Parent authorizes ONE owned read-only diagnostic candidate, no import change or
+unchanged retry. R5 keeps exact R4 argv and preflight/DER/cleanup/all11modes,
+reserves8s inside existing120s, wraps Cmd.Cancel after Start to synchronously
+run/join one current-Go-test subprocess at most6s/end by matrix-minus2s, then
+original kill/result plus reserved1s each WaitDelay. Windows snapshot uses official
+Toolhelp numeric thread table filtered to owned PID BEFORE logging/window query,
+EnumThreadWindows only owned threads, repeated PID/thread checks before bounded
+class/caption/presence reads. No global window enumeration/foreigntext/messages/
+UI action, WCT/custom ABI, memory/stack/debugger, policy/trust/TLS change. No
+PowerShell/compiler observer child. Empty/capability/raced data UNKNOWN, never
+no-UI or consent approval; categorical wait reason not queried.
+
+[Chronological R5 report](../reports/2026-11-16-native-windows-followup.md#round-5--force-hypothesis-falsified-owned-observation-only-2026-11-16)
+records pre-edit native exception, official/version-matched API inspection,
+actual shared cancellation/budget RED→GREEN, owned helper success/exit7/block/
+unavailable/start-failure/normal/error-result checks, fresh focused race/fullGo
+802PASS3existing skips/affected race347PASS1skip/vet/installers/actualcurl/
+12contracts/actionlint, final Windows cross-compile/vet **not execution**.
+Previous unchanged Unix/component proofs reused explicitly, not new R5 execution.
+Bundle `/var/tmp/warden-windows-r5-review.{diff,json,sha256}` covers original9a12611
+through all6task paths/two new Go files and entire new ignored-ledger delta.
+
+Parent independent review/fresh checks then at most ONE new observational autoPR
+run; native diagnostic remains UNRUN/UNKNOWN, bug NOT resolved. Positive owned
+security-window evidence requires owner decision before any GUI/scope change;
+empty/unavailable needs interactive Windows evidence, no workaround. All16once
+PASS/zero skips/all11verified-HTTPS modes/exact CA absence still required.
+Version0.23.0/security contracts and external PRF/production-trust/privilegedUnix/
+hosted provenance/signatures remain open, manual signing authority unanswered.
+No staging/commit/push/CI/dispatch/install/deploy/service/trust/publication authority.
+
 ## Execution, dependencies, and evidence discipline
 
 - Repository `/var/www/code/go/warden`, branch `hieudmg/security-hardening`, inspected HEAD/fetched `origin/main` both `c104353` on 2026-11-14. Only one writer in this checkout. A controller may assign sequential workers one task at a time; no parallel writers/worktrees. Each handoff names changed paths, red/green commands, remaining failures and next dependency. Preserve unrelated work, particularly protected untracked `mise.toml` (do not read/change/stage).

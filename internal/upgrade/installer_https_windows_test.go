@@ -278,14 +278,15 @@ try {
 			t.Errorf("exact current-user certificate cleanup: %v", err)
 		}
 	}()
-	// Documented test-only CurrentUser CLI alternative; noninteractive behavior
-	// remains a native-CI question. Go owns certutil directly, never via PS.
-	// Reserve its bounded output-pipe join within, not beyond, the matrix budget.
-	deadline, _ := matrixCtx.Deadline()
-	importCtx, cancelImport := context.WithDeadline(matrixCtx, deadline.Add(-time.Second))
+	// Import argv is unchanged. Observe only the stalled owned certutil before
+	// killing it; snapshot and both output joins reserve 8s inside the same
+	// matrix deadline. A missing/empty snapshot cannot establish absence of UI.
+	importCtx, cancelImport := certutilFixtureImportContext(matrixCtx)
 	cmd := certutilFixtureImportCommand(importCtx, certutil, caFile)
 	cmd.Env = env
-	cmd.WaitDelay = time.Second
+	attachCertutilFixtureDiagnostic(matrixCtx, cmd, func(ctx context.Context, pid int) (*exec.Cmd, error) {
+		return certutilFixtureSnapshotCommand(ctx, pid, env)
+	}, func(line string) { t.Logf("native HTTPS diagnostic: %s", line) })
 	t.Log("native HTTPS CurrentUser unique-CA-import:begin candidate=force-overwrite; UI behavior unverified")
 	importErr := runPowerShellFixtureCommand(cmd, func(line string) { t.Logf("native HTTPS certutil: %s", line) })
 	importContextErr := importCtx.Err()
