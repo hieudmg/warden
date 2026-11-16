@@ -341,3 +341,28 @@ CA evaluation, not accepted native GREEN or a fully green local checkpoint.
 | Full release proof/version parity/native checks/real PRF | T17 | Final ledger; no claim of completion from this planning document |
 
 This plan and its linked specification were originally prepared without application changes. T1–T17 bounded implementation checkpoints are now separately recorded in their linked reports and chronological ledger; checkboxes remain unchecked while required acceptance is pending. Named acceptance intentions alone are not execution evidence: consult the current T17 matrix and each historical task report for exact implemented behavior, measured checks, substitutions, actual failures/skips and outstanding independent/native/external acceptance.
+
+### Bounded Unix resize validation follow-up — baseline df6d3aa, 2026-11-16
+
+The parent-held R3 checkpoint remains local/unpushed. Original broad race failure
+is preserved: real events send/close overlap plus a two-second SIGWINCH timeout.
+Controlled test-first regressions independently demonstrate loss when the receiver
+starts after signal consumption and closure/return before sender retirement.
+They fail on the old loop/Restore and pass after cancellation-aware forwarding
+and stop/join-before-close. Raw entry now supplies missing owned channels for
+partial test sessions; production buffered signal input/public unbuffered events,
+Session contract, Windows, SSH/input bytes, native R3 code and all bounds remain
+unchanged. Exact historical native scheduling of the lost event is not proven;
+no load explanation or older Ctrl-C fixture explanation is substituted.
+
+The [resize report](../reports/2026-11-16-terminal-resize.md) records deterministic
+RED/GREEN and fresh original broad race PASS342/one explicit wrong-owner skip,
+fullGo PASS797/three explicit skips, required server/store/client race656/three
+skips, CLI race59, entire terminal race25/325passes, whole SSH/DB race25/2275passes,
+vet, actual disposable production-assets/binaries HTTPS runner and offline
+installers PASS. Test-source cleanup rechecks and exact commands/inputs are
+separately recorded there. No acceptance checkbox changes: parent review/fresh
+verification, genuine PRF/production trust, native Windows16 zero-skip proof,
+privileged Unix and hosted artifact/OIDC/signature gates remain pending. Narrow
+T16 risk disposition is unchanged; no signing/dispatch/publication authority or
+live operation. The earlier failed broad log and all native evidence stay intact.

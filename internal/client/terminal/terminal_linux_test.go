@@ -7,6 +7,7 @@ import (
 	"os"
 	"syscall"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"golang.org/x/sys/unix"
@@ -256,6 +257,135 @@ func TestResizeEventsPropagate(t *testing.T) {
 	case <-s.ResizeEvents():
 	case <-time.After(2 * time.Second):
 		t.Fatal("no resize event after SIGWINCH")
+	}
+}
+
+// TestUnixResizeWaitsForReceiver isolates delivery from native signal scheduling:
+// the worker has consumed SIGWINCH before the consumer starts receiving.
+func TestUnixResizeWaitsForReceiver(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		s := &unixSession{
+			stopResize: make(chan struct{}),
+			resizeDone: make(chan struct{}),
+			events:     make(chan struct{}),
+		}
+		ch := make(chan os.Signal)
+		go func() {
+			defer close(s.resizeDone)
+			s.forwardResize(ch)
+		}()
+		defer s.Restore()
+		for i := 0; i < 3; i++ {
+			ch <- syscall.SIGWINCH
+			synctest.Wait()
+			select {
+			case <-s.ResizeEvents():
+			case <-time.After(2 * time.Second):
+				t.Fatal("consumed SIGWINCH was lost before receiver became ready")
+			}
+		}
+	})
+}
+
+// Restore must wait through worker unsubscription before closing events, even
+// with a pending delivery and no consumer. The gate models signal.Stop's tail.
+func TestUnixRestoreJoinsResizeBeforeClosingEvents(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		s := &unixSession{
+			stopResize: make(chan struct{}),
+			resizeDone: make(chan struct{}),
+			events:     make(chan struct{}),
+		}
+		ch := make(chan os.Signal)
+		unsubscribe := make(chan struct{})
+		go func() {
+			defer close(s.resizeDone)
+			s.forwardResize(ch)
+			<-unsubscribe
+		}()
+		ch <- syscall.SIGWINCH
+		synctest.Wait()
+		restored := make(chan struct{})
+		go func() {
+			if err := s.Restore(); err != nil {
+				t.Errorf("Restore: %v", err)
+			}
+			close(restored)
+		}()
+		synctest.Wait()
+		select {
+		case <-restored:
+			t.Error("Restore returned before resize worker unsubscribed and exited")
+		default:
+		}
+		select {
+		case _, ok := <-s.ResizeEvents():
+			if !ok {
+				t.Error("events closed before resize worker exited")
+			}
+		default:
+		}
+		close(unsubscribe)
+		select {
+		case <-restored:
+		case <-time.After(2 * time.Second):
+			t.Fatal("Restore did not join worker with no resize consumer")
+		}
+		if _, ok := <-s.ResizeEvents(); ok {
+			t.Fatal("events still open after Restore")
+		}
+		if err := s.Restore(); err != nil {
+			t.Fatal(err)
+		}
+	})
+}
+
+func TestUnixResizeLifecycle(t *testing.T) {
+	for _, initialized := range []bool{false, true} {
+		for _, enter := range []bool{false, true} {
+			t.Run(fmt.Sprintf("initialized=%v/raw=%v", initialized, enter), func(t *testing.T) {
+				_, slave := newPtyPair(t)
+				s := &unixSession{in: slave}
+				defer s.Restore()
+				if initialized {
+					s.stopResize = make(chan struct{})
+					s.events = make(chan struct{})
+				}
+				if enter {
+					if err := s.EnterRaw(); err != nil {
+						t.Fatal(err)
+					}
+					done := s.resizeDone
+					if done == nil || s.stopResize == nil || s.ResizeEvents() == nil {
+						t.Fatal("raw session missing owned resize resources")
+					}
+					if err := s.EnterRaw(); err != nil || s.resizeDone != done {
+						t.Fatalf("repeated EnterRaw changed worker: %v", err)
+					}
+				}
+				if err := s.Restore(); err != nil {
+					t.Fatal(err)
+				}
+				if s.resizeDone != nil {
+					select {
+					case <-s.resizeDone:
+					default:
+						t.Fatal("Restore left resize worker running")
+					}
+				}
+				if s.events != nil {
+					if _, ok := <-s.ResizeEvents(); ok {
+						t.Fatal("events not closed")
+					}
+				}
+				if err := s.Restore(); err != nil {
+					t.Fatal(err)
+				}
+				if err := s.EnterRaw(); err == nil {
+					t.Fatal("EnterRaw succeeded after Restore")
+				}
+			})
+		}
 	}
 }
 
