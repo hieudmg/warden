@@ -1,0 +1,106 @@
+name: Security checks
+
+on:
+  pull_request:
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  linux:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    env:
+      GOTOOLCHAIN: go1.26.11
+      TMPDIR: /var/tmp
+      NODE_ENV: test
+      PYTHONDONTWRITEBYTECODE: '1'
+    steps:
+      - name: Check out test source (PR merge source for pull requests)
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Set up pinned Node.js and bundled npm
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: '26.12.1'
+          package-manager-cache: false
+      - name: Set up the complete minimum Go patch
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: false
+      - name: Verify actual compiler and frontend runtime
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(go env GOVERSION)" = go1.26.11
+          test "$(node --version)" = v26.12.1
+          test "$(npm --version)" = 11.20.0
+      - name: Install, test, build and audit ALL frontend dependencies
+        run: |
+          npm --prefix web ci --include=dev
+          npm --prefix web test
+          npm --prefix web run build
+          npm --prefix web audit --include=dev
+      - name: Full Go checks and bounded whole SSH/DB stress
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 022
+          go test ./... -count=1 -timeout=180s
+          go test -race ./... -count=1 -timeout=180s
+          go vet ./...
+          go test -race ./internal/client/ssh ./internal/client/db -count=25 -timeout=180s -failfast -v
+      - name: Offline installers, real curl HTTPS matrix and signed HTTPS restart integration
+        run: |
+          bash scripts/test-installers.sh
+          python3 scripts/installers_test.py
+          go test ./internal/server/runtime -run '^TestHTTPSRuntimeSubprocessRestartAuthentication$' -count=1 -timeout=180s -v
+      - name: Workflow lint, offline publication contracts and source vulnerability gate
+        shell: bash
+        run: |
+          set -euo pipefail
+          /usr/bin/python3.12 -m venv "$RUNNER_TEMP/ci-python"
+          export PATH="$RUNNER_TEMP/ci-python/bin:$PATH"
+          python3 -m pip install --only-binary=:all: --require-hashes -r scripts/ci/requirements.txt
+          python3 -m unittest discover -s scripts/ci -v
+          export GOBIN="$RUNNER_TEMP/ci-bin"
+          go install github.com/rhysd/actionlint/cmd/actionlint@914e7df21a07ef503a81201c76d2b11c789d3fca
+          "$GOBIN/actionlint" -shellcheck= -pyflakes=
+          go install golang.org/x/vuln/cmd/govulncheck@v1.9.0
+          go version -m "$GOBIN/govulncheck"
+          "$GOBIN/govulncheck" ./...
+
+  windows:
+    runs-on: windows-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    env:
+      GOTOOLCHAIN: go1.26.11
+      WARDEN_NATIVE_HTTPS_FIXTURE: '1'
+    steps:
+      - name: Check out native test source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Set up complete Go patch for native Windows execution
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: false
+      - name: Execute nonempty named IPC, ACL, traversal and PowerShell HTTPS fixtures
+        shell: powershell
+        run: ./scripts/ci/test-windows.ps1
+      - name: Retain native named-test evidence even on failure
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: native-security-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/native-security-logs/
+          if-no-files-found: warn
+          retention-days: 7

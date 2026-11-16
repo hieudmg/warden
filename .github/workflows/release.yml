@@ -1,59 +1,244 @@
 name: Release
 
 on:
-  # A merged pull request updates main and emits this same push event.
+  # Preserve the existing post-merge push-to-main publication contract.
   push:
     branches:
       - main
 
 permissions:
-  contents: write
+  contents: read
 
 concurrency:
   group: release-main
   cancel-in-progress: false
 
 jobs:
-  release:
-    runs-on: ubuntu-latest
+  checks:
+    permissions:
+      contents: read
+    uses: ./.github/workflows/test.yml
+
+  build:
+    needs: checks
+    if: github.repository == 'hieudmg/warden' && github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    env:
+      GOTOOLCHAIN: go1.26.11
+      TMPDIR: /var/tmp
+    outputs:
+      artifact-id: ${{ steps.upload.outputs.artifact-id }}
+      artifact-digest: ${{ steps.upload.outputs.artifact-digest }}
+      manifest-sha: ${{ steps.bundle.outputs.manifest-sha }}
+      archive-sha: ${{ steps.bundle.outputs.archive-sha }}
+      source-sha: ${{ steps.bundle.outputs.source-sha }}
+      run-id: ${{ steps.bundle.outputs.run-id }}
+      run-attempt: ${{ steps.bundle.outputs.run-attempt }}
+      version: ${{ steps.bundle.outputs.version }}
     steps:
-      - name: Check out main
-        uses: actions/checkout@v4
+      - name: Check out the triggering source only
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          fetch-depth: 1
-
+          ref: ${{ github.sha }}
+          persist-credentials: false
       - name: Set up Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
-          node-version: 24
-          cache: npm
-          cache-dependency-path: web/package-lock.json
-
-      - name: Set up Go
-        uses: actions/setup-go@v5
+          node-version: '26.12.1'
+          package-manager-cache: false
+      - name: Set up Go from the complete minimum patch
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
-          go-version-file: 'go.mod'
-          cache: true
-
-      - name: Read release version
-        id: version
+          go-version-file: go.mod
+          cache: false
+      - name: Build release artifacts without publication credentials
         shell: bash
         run: |
-          version="$(node -p "require('./web/package.json').version")"
-          if [[ ! "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-            echo "web/package.json version is not valid semver: $version" >&2
-            exit 1
-          fi
-          echo "version=$version" >> "$GITHUB_OUTPUT"
-          echo "tag=v$version" >> "$GITHUB_OUTPUT"
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          bash scripts/build-release.sh
+          git diff --exit-code
+          git diff --cached --exit-code
+          test -z "$(git ls-files --others --exclude-standard)"
+      - name: Bind identity and exact asset bytes
+        id: bundle
+        shell: bash
+        run: |
+          set -euo pipefail
+          export RELEASE_VERSION
+          RELEASE_VERSION="$(node -p "require('./web/package.json').version")"
+          export MINIMUM_GO
+          MINIMUM_GO="$(awk '$1 == "go" { print $2 }' go.mod)"
+          python3 scripts/ci/release_bundle.py dist "$RUNNER_TEMP/release.zip"
+      - name: Upload one immutable-ID data handoff
+        id: upload
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: release-${{ github.run_id }}-${{ github.run_attempt }}.zip
+          path: ${{ runner.temp }}/release.zip
+          archive: false
+          if-no-files-found: error
+          retention-days: 7
 
-      - name: Build release artifacts
-        run: bash scripts/build-release.sh
-
-      - name: Create or update GitHub release
+  publish:
+    needs: build
+    if: github.repository == 'hieudmg/warden' && github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: write
+      attestations: write
+      id-token: write
+    steps:
+      # No checkout, package installation, repo helper, or artifact code execution.
+      # With no github-token/findBy override this action is scoped to THIS run.
+      - name: Download the build's fixed artifact ID as raw data
+        id: download
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          artifact-ids: ${{ needs.build.outputs.artifact-id }}
+          path: incoming
+          skip-decompress: true
+          digest-mismatch: error
+      - name: Validate trusted identity and bytes before attestation or writes
+        id: validate
+        env:
+          SOURCE_SHA: ${{ needs.build.outputs.source-sha }}
+          RUN_ID: ${{ needs.build.outputs.run-id }}
+          RUN_ATTEMPT: ${{ needs.build.outputs.run-attempt }}
+          MANIFEST_SHA: ${{ needs.build.outputs.manifest-sha }}
+          ARCHIVE_SHA: ${{ needs.build.outputs.archive-sha }}
+          ARTIFACT_DIGEST: ${{ needs.build.outputs.artifact-digest }}
+          ARTIFACT_ID: ${{ needs.build.outputs.artifact-id }}
+          RELEASE_VERSION: ${{ needs.build.outputs.version }}
+          MINIMUM_GO: '1.26.11'
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import hashlib, json, os, pathlib, re, stat, zipfile
+          def require(ok, message):
+              if not ok: raise SystemExit(message)
+          def sha(data): return hashlib.sha256(data).hexdigest()
+          e = os.environ
+          expected = dict(schema=1, repository='hieudmg/warden', source_sha=e['GITHUB_SHA'],
+                          event='push', ref='refs/heads/main',
+                          workflow_ref='hieudmg/warden/.github/workflows/release.yml@refs/heads/main',
+                          run_id=e['GITHUB_RUN_ID'], run_attempt=e['GITHUB_RUN_ATTEMPT'],
+                          release_version=e['RELEASE_VERSION'], minimum_go=e['MINIMUM_GO'])
+          for key, value in [('GITHUB_REPOSITORY', expected['repository']), ('GITHUB_EVENT_NAME', 'push'),
+                             ('GITHUB_REF', expected['ref']), ('GITHUB_WORKFLOW_REF', expected['workflow_ref']),
+                             ('SOURCE_SHA', expected['source_sha']), ('RUN_ID', expected['run_id']),
+                             ('RUN_ATTEMPT', expected['run_attempt'])]:
+              require(e[key] == value, 'untrusted source/run/workflow: '+key)
+          require(re.fullmatch(r'[0-9a-f]{40}', e['SOURCE_SHA']), 'source SHA')
+          require(re.fullmatch(r'[1-9][0-9]*', e['ARTIFACT_ID']), 'artifact ID')
+          require(re.fullmatch(r'[0-9]+\.[0-9]+\.[0-9]+', e['RELEASE_VERSION']), 'release version')
+          require(e['MINIMUM_GO'] == '1.26.11', 'build minimum')
+          for key in ['MANIFEST_SHA', 'ARCHIVE_SHA', 'ARTIFACT_DIGEST']:
+              require(re.fullmatch(r'[0-9a-f]{64}', e[key]), 'missing trusted digest: '+key)
+          incoming = list(pathlib.Path('incoming').iterdir())
+          require(len(incoming) == 1 and incoming[0].is_file() and not incoming[0].is_symlink(), 'one regular handoff required')
+          archive = incoming[0]
+          require(archive.stat().st_size <= (769 << 20), 'oversize archive')
+          with archive.open('rb') as f: archive_hash = hashlib.file_digest(f, 'sha256').hexdigest()
+          require(archive_hash == e['ARCHIVE_SHA'] == e['ARTIFACT_DIGEST'], 'archive/service/build digest mismatch')
+          binaries = ['warden-linux-amd64', 'warden-server-linux-amd64', 'warden.exe']
+          names = sorted(binaries + ['SHA256SUMS'])
+          limits = {n: (256 << 20) for n in binaries}
+          limits.update({'SHA256SUMS': 1 << 20, 'manifest.json': 65536})
+          content = {}
+          with zipfile.ZipFile(archive) as z:
+              entries = z.infolist()
+              require(len(entries) == len(limits) and {i.filename for i in entries} == set(limits), 'missing/extra/unsafe archive entry')
+              for i in entries:
+                  require(i.compress_type == zipfile.ZIP_STORED and not i.flag_bits & 1 and
+                          not stat.S_ISLNK(i.external_attr >> 16) and 0 < i.file_size <= limits[i.filename], 'invalid archive entry')
+                  content[i.filename] = z.read(i)
+          require(sha(content['manifest.json']) == e['MANIFEST_SHA'], 'manifest not bound to trusted build output')
+          def unique(pairs):
+              result = {}
+              for k, v in pairs:
+                  require(k not in result, 'duplicate manifest key')
+                  result[k] = v
+              return result
+          manifest = json.loads(content['manifest.json'], object_pairs_hook=unique)
+          require(set(manifest) == set(expected) | {'assets'}, 'manifest fields')
+          for k, v in expected.items(): require(manifest[k] == v, 'manifest identity mismatch: '+k)
+          assets = manifest['assets']
+          require(isinstance(assets, list) and len(assets) == len(names), 'asset count')
+          require([a['name'] for a in assets] == names, 'asset names/order')
+          for a in assets:
+              require(set(a) == {'name', 'size', 'sha256'} and type(a['size']) is int and
+                      a['size'] == len(content[a['name']]) and a['sha256'] == sha(content[a['name']]), 'asset digest/size')
+          sums = ''.join(sha(content[n])+'  ./'+n+'\n' for n in binaries)
+          require(content['SHA256SUMS'].decode('ascii') == sums, 'checksums do not match release bytes')
+          # No extraction until ALL inputs pass; never extract a path from JSON/ZIP.
+          pathlib.Path('dist').mkdir(mode=0o700)
+          for name in names:
+              with open('dist/'+name, 'xb') as f: f.write(content[name])
+          with open(e['GITHUB_OUTPUT'], 'a') as f: f.write('tag=v'+e['RELEASE_VERSION']+'\n')
+          print('Validated source, run, attempt, fixed artifact ID, manifest and all four release-byte subjects.')
+          PY
+      - name: Attest the individual verified uploaded bytes, not their ZIP
+        id: attest
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2; default SLSA build provenance
+        env:
+          NODE_OPTIONS: --max-http-header-size=32768
+        with:
+          push-to-registry: false
+          create-storage-record: false
+          subject-path: |
+            dist/warden-server-linux-amd64
+            dist/warden-linux-amd64
+            dist/warden.exe
+            dist/SHA256SUMS
+      - name: Check generated provenance subjects and source before publication
+        id: provenance
+        env:
+          PROVENANCE_BUNDLE: ${{ steps.attest.outputs.bundle-path }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import base64, hashlib, json, os, pathlib
+          def require(ok, message):
+              if not ok: raise SystemExit(message)
+          e = os.environ
+          p = pathlib.Path(e['PROVENANCE_BUNDLE'])
+          require(p.is_file() and p.stat().st_size <= (16 << 20), 'provenance bundle size')
+          envelope = json.loads(p.read_bytes())['dsseEnvelope']
+          require(envelope['payloadType'] == 'application/vnd.in-toto+json', 'provenance payload type')
+          statement = json.loads(base64.b64decode(envelope['payload'], validate=True))
+          require(statement['_type'] == 'https://in-toto.io/Statement/v1' and
+                  statement['predicateType'] == 'https://slsa.dev/provenance/v1', 'provenance statement type')
+          names = ['SHA256SUMS', 'warden-linux-amd64', 'warden-server-linux-amd64', 'warden.exe']
+          subjects = statement['subject']
+          require(len(subjects) == len(names) and sorted(s['name'] for s in subjects) == names, 'wrong release subjects')
+          for s in subjects:
+              with open('dist/'+s['name'], 'rb') as f: digest = hashlib.file_digest(f, 'sha256').hexdigest()
+              require(s['digest'] == {'sha256': digest}, 'provenance does not describe uploaded bytes')
+          definition = statement['predicate']['buildDefinition']
+          repository = 'https://github.com/hieudmg/warden'
+          require(definition['buildType'] == 'https://actions.github.io/buildtypes/workflow/v1', 'build type')
+          require(definition['externalParameters']['workflow'] == {
+              'ref': 'refs/heads/main', 'repository': repository, 'path': '.github/workflows/release.yml'}, 'provenance workflow')
+          require(definition['internalParameters']['github']['event_name'] == 'push', 'provenance event')
+          require(definition['resolvedDependencies'] == [{
+              'uri': 'git+'+repository+'@refs/heads/main', 'digest': {'gitCommit': e['GITHUB_SHA']}}], 'provenance source')
+          details = statement['predicate']['runDetails']
+          require(details['builder']['id'] == repository+'/.github/workflows/release.yml@refs/heads/main', 'provenance builder')
+          require(details['metadata']['invocationId'] == repository+'/actions/runs/'+e['GITHUB_RUN_ID']+'/attempts/'+e['GITHUB_RUN_ATTEMPT'], 'provenance run/attempt')
+          print('Generated provenance binds all individual uploaded bytes and the exact main source/run/attempt.')
+          PY
+      - name: Preserve mutable same-version tag and clobber policy
+        id: publish
         env:
           GH_TOKEN: ${{ github.token }}
-          RELEASE_TAG: ${{ steps.version.outputs.tag }}
+          RELEASE_TAG: ${{ steps.validate.outputs.tag }}
         shell: bash
         run: |
           set -euo pipefail
@@ -61,56 +246,22 @@ jobs:
           tag_response="$(mktemp)"
           release_response="$(mktemp)"
           trap 'rm -f "$notes" "$tag_response" "$release_response"' EXIT
-          cat > "$notes" <<EOF
-          ## Changes
-          Automated release for version ${RELEASE_TAG#v}.
-
-          ## Artifacts
-          - Linux server and client
-          - Windows client
-          - SHA-256 checksums
-          EOF
-
-          assets=(
-            dist/warden-server-linux-amd64
-            dist/warden-linux-amd64
-            dist/warden.exe
-            dist/SHA256SUMS
-          )
-
+          printf '## Changes\nAutomated release for version %s.\n\n## Artifacts\nLinux server and client, Windows client, SHA-256 checksums.\n' "${RELEASE_TAG#v}" > "$notes"
+          assets=(dist/warden-server-linux-amd64 dist/warden-linux-amd64 dist/warden.exe dist/SHA256SUMS)
           tag_ref="repos/${GITHUB_REPOSITORY}/git/refs/tags/${RELEASE_TAG}"
           if gh api --include "$tag_ref" >"$tag_response" 2>&1; then
-            gh api \
-              --method PATCH \
-              "$tag_ref" \
-              -f "sha=${GITHUB_SHA}" \
-              -F force=true
+            gh api --method PATCH "$tag_ref" -f "sha=${GITHUB_SHA}" -F force=true
           elif grep -Eq '^HTTP/[0-9.]+[[:space:]]+404([[:space:]]|$)' "$tag_response"; then
-            gh api \
-              --method POST \
-              "repos/${GITHUB_REPOSITORY}/git/refs" \
-              -f "ref=refs/tags/${RELEASE_TAG}" \
-              -f "sha=${GITHUB_SHA}"
+            gh api --method POST "repos/${GITHUB_REPOSITORY}/git/refs" -f "ref=refs/tags/${RELEASE_TAG}" -f "sha=${GITHUB_SHA}"
           else
-            cat "$tag_response" >&2
-            exit 1
+            cat "$tag_response" >&2; exit 1
           fi
-
           release_api="repos/${GITHUB_REPOSITORY}/releases/tags/${RELEASE_TAG}"
           if gh api --include "$release_api" >"$release_response" 2>&1; then
-            gh release edit "$RELEASE_TAG" \
-              --target "$GITHUB_SHA" \
-              --title "$RELEASE_TAG" \
-              --notes-file "$notes" \
-              --latest
-            gh release upload "$RELEASE_TAG" "${assets[@]}" --clobber
+            gh release edit "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --title "$RELEASE_TAG" --notes-file "$notes" --latest
+            gh release upload "$RELEASE_TAG" "${assets[@]}" --repo "$GITHUB_REPOSITORY" --clobber
           elif grep -Eq '^HTTP/[0-9.]+[[:space:]]+404([[:space:]]|$)' "$release_response"; then
-            gh release create "$RELEASE_TAG" "${assets[@]}" \
-              --target "$GITHUB_SHA" \
-              --title "$RELEASE_TAG" \
-              --notes-file "$notes" \
-              --latest
+            gh release create "$RELEASE_TAG" "${assets[@]}" --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --title "$RELEASE_TAG" --notes-file "$notes" --latest
           else
-            cat "$release_response" >&2
-            exit 1
+            cat "$release_response" >&2; exit 1
           fi
