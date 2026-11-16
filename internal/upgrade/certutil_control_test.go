@@ -102,12 +102,15 @@ func certutilFixtureControlCommand(ctx context.Context, target certutilFixtureCo
 	return cmd, nil
 }
 
-// No action contract is known yet. A live import is stopped after the single
-// observer completes, even when its identity-only evidence matches. A naturally
-// completed import still has to pass the fixture's exact-DER store postcondition.
-func runCertutilFixtureControlObservation(matrixCtx context.Context, cmd *exec.Cmd, observer func(context.Context, int) (*exec.Cmd, error), logLine func(string)) error {
+const certutilFixtureImportCompletedExit = 4
+
+var errCertutilFixtureImportCompleted = errors.New("owned import completed before consent; no action")
+
+// Dispatch is not import acceptance: await normal certutil exit within its
+// original context, then the caller must verify the exact CurrentUser DER.
+func runCertutilFixtureConsentImport(matrixCtx context.Context, cmd *exec.Cmd, observer func(context.Context, int) (*exec.Cmd, error), logLine func(string)) error {
 	matrixDeadline, ok := matrixCtx.Deadline()
-	if !ok || matrixCtx.Err() != nil || cmd.Cancel == nil || observer == nil {
+	if !ok || matrixCtx.Err() != nil || cmd.Cancel == nil || observer == nil || logLine == nil {
 		return errors.New("bounded context-owned import and observer required")
 	}
 	deadline := time.Now().Add(6 * time.Second)
@@ -150,7 +153,9 @@ func runCertutilFixtureControlObservation(matrixCtx context.Context, cmd *exec.C
 		err := cmd.Wait()
 		stdout.flush()
 		stderr.flush()
-		cancelObserver() // a normal/early exit must not leave an observer behind
+		// Normal exit can precede the helper's final report after BM_CLICK.
+		// Do not cancel it: its own deadline still bounds process and output.
+		log(fmt.Sprintf("owned certutil import joined: error=%v", err))
 		mainDone <- err
 	}()
 	if probeErr == nil && probe == nil {
@@ -160,16 +165,23 @@ func runCertutilFixtureControlObservation(matrixCtx context.Context, cmd *exec.C
 		probe.WaitDelay = time.Second
 		probeErr = runPowerShellFixtureCommand(probe, log)
 	}
-	log(fmt.Sprintf("owned controls observer joined: error=%v context=%v; NO ACTION; native layout unverified", probeErr, obsCtx.Err()))
+	log(fmt.Sprintf("owned controls observer joined: error=%v context=%v; dispatch alone is not import acceptance", probeErr, obsCtx.Err()))
 	close(observerDone)
-	select {
-	case err := <-mainDone:
-		return err
-	default:
-		_ = cmd.Cancel()
-		err := <-mainDone
-		return fmt.Errorf("unverified consent contract; NO ACTION; observer=%v; import=%v", probeErr, err)
+	cancelObserver()
+	var exit *exec.ExitError
+	completed := errors.Is(probeErr, errCertutilFixtureImportCompleted) || errors.As(probeErr, &exit) && exit.ExitCode() == certutilFixtureImportCompletedExit
+	if probeErr != nil && !completed {
+		_ = cmd.Cancel() // guard/action errors fail closed, even after main exit0
 	}
+	mainErr := <-mainDone
+	if completed && mainErr == nil {
+		log("owned import completed naturally; no consent claimed; exact DER postcondition required")
+		return nil
+	}
+	if probeErr != nil || mainErr != nil {
+		return fmt.Errorf("owned consent/import failed: observer=%v; import=%v", probeErr, mainErr)
+	}
+	return nil
 }
 
 type certutilFixtureControl struct {
@@ -189,7 +201,7 @@ type certutilFixtureDialog struct {
 	Controls       []certutilFixtureControl
 }
 
-// Identity evidence is NOT consent eligibility: labels/layout are unobserved.
+// Exact observed English producer contract; three CN references describe one CA.
 func certutilFixtureControlIdentityEvidence(target certutilFixtureControlTarget, dialogs []certutilFixtureDialog) error {
 	if err := target.validate(); err != nil {
 		return err
@@ -201,62 +213,77 @@ func certutilFixtureControlIdentityEvidence(target certutilFixtureControlTarget,
 	if !d.Complete || d.HWND == 0 || d.PID != uint32(target.PID) || d.TID == 0 || d.Creation != target.Creation || d.Class != "#32770" || d.Caption != "Security Warning" {
 		return errors.New("unexpected/incomplete owned dialog identity")
 	}
-	cnCount, thumbCount := 0, 0
-	seen := map[uint64]bool{}
+	expected := map[int32]struct{ class, text string }{
+		6: {"Button", "&Yes"}, 7: {"Button", "&No"}, 20: {"Static", ""},
+		65535: {"Static", certutilFixtureWarningBody(target.CA)},
+	}
+	if len(d.Controls) != len(expected) {
+		return errors.New("unexpected/incomplete owned control layout")
+	}
+	seen := map[uint64]bool{d.HWND: true}
 	for _, c := range d.Controls {
-		if !c.Complete || c.HWND == 0 || c.ID == 0 || seen[c.HWND] || c.Parent != d.HWND || c.PID != d.PID || c.TID != d.TID || c.Class != "Static" && c.Class != "Button" {
-			return errors.New("unexpected/incomplete owned control identity")
+		want, known := expected[c.ID]
+		if !known || !c.Complete || c.HWND == 0 || seen[c.HWND] || c.Parent != d.HWND || c.PID != d.PID || c.TID != d.TID || c.Class != want.class || strings.ReplaceAll(c.Text, "\r\n", "\n") != want.text {
+			return errors.New("unexpected/incomplete owned control identity, body or layout")
 		}
 		seen[c.HWND] = true
-		if c.Class != "Static" {
-			continue
-		}
-		if c.Text == target.CA.CN {
-			cnCount++
-		}
-		// Whole field only: do not extract a tempting substring from a label,
-		// warning, abbreviated identity or otherwise unrecognized native layout.
-		compact := strings.NewReplacer(" ", "", "\t", "", "\r", "", "\n", "").Replace(c.Text)
-		if len(compact) != 40 {
-			continue
-		}
-		thumb, err := hex.DecodeString(compact)
-		if err != nil {
-			continue
-		}
-		if strings.ToUpper(hex.EncodeToString(thumb)) != target.CA.Thumbprint {
-			return errors.New("conflicting full UI thumbprint")
-		}
-		thumbCount++
+		delete(expected, c.ID)
 	}
-	if cnCount != 1 || thumbCount != 1 {
-		return errors.New("full standalone CN/thumbprint missing or duplicated; native layout UNKNOWN")
-	}
-	return nil // identity evidence only; NEVER authorizes or performs an action
+	return nil // only the single-attempt dispatcher may act after a fresh match
 }
 
 func TestCertutilFixtureControlIdentityEvidence(t *testing.T) {
 	ca := certutilFixtureControlTestCA(t)
 	target := certutilFixtureControlTarget{PID: 1234, Creation: 5678, CA: ca}
-	// Sanitized, synthetic whole-field Static/Button values following documented
-	// WM_GETTEXT semantics. These IDs/text placements are NOT a native contract.
-	good := certutilFixtureDialog{HWND: 10, PID: 1234, TID: 42, Creation: 5678, Class: "#32770", Caption: "Security Warning", Complete: true,
-		Controls: []certutilFixtureControl{
-			{HWND: 11, Parent: 10, PID: 1234, TID: 42, ID: 101, Class: "Static", Text: ca.CN, Complete: true},
-			{HWND: 12, Parent: 10, PID: 1234, TID: 42, ID: 102, Class: "Static", Text: ca.Thumbprint, Complete: true},
-		}}
-	for _, name := range []string{"exact", "spaced full thumbprint", "no dialog", "duplicate dialog", "wrong PID", "wrong TID", "wrong process", "wrong parent", "wrong dialog class", "unexpected caption", "incomplete dialog", "incomplete control", "foreign control", "reused control", "missing control ID", "unexpected control class", "missing CN", "partial CN", "wrong CN", "missing thumbprint", "partial thumbprint", "malformed thumbprint", "wrong thumbprint", "conflicting thumbprint", "duplicate thumbprint", "duplicate CN"} {
+	good := certutilFixtureCapturedDialog(t, target)
+	for _, name := range []string{"exact", "CRLF only", "no dialog", "duplicate dialog", "wrong PID", "wrong TID", "wrong process", "wrong parent", "wrong dialog class", "unexpected caption", "incomplete dialog", "incomplete control", "foreign control", "reused control", "missing control ID", "unexpected control class", "missing CN", "partial CN", "wrong CN", "missing thumbprint", "partial thumbprint", "malformed thumbprint", "wrong thumbprint", "conflicting thumbprint", "duplicate thumbprint", "duplicate CN", "unknown control", "extra dialog", "missing Yes", "wrong Yes ID", "wrong Yes text", "wrong No text", "nonempty icon", "body prefix", "body suffix", "body truncation", "body translation", "bare CR", "unspaced fingerprint", "substring fingerprint", "repeated fingerprint", "one wrong CN", "root reused as child"} {
 		t.Run(name, func(t *testing.T) {
 			d := good
 			d.Controls = slices.Clone(good.Controls)
 			dialogs := []certutilFixtureDialog{d}
 			switch name {
-			case "spaced full thumbprint":
-				var parts []string
-				for i := 0; i < 40; i += 2 {
-					parts = append(parts, strings.ToLower(ca.Thumbprint[i:i+2]))
+			case "CRLF only":
+				d.Controls[3].Text = strings.ReplaceAll(d.Controls[3].Text, "\n", "\r\n")
+			case "unknown control":
+				c := d.Controls[2]
+				c.HWND = 99
+				c.ID = 99
+				d.Controls = append(d.Controls, c)
+			case "extra dialog":
+				dialogs = append(dialogs, d)
+			case "missing Yes":
+				d.Controls = d.Controls[1:]
+			case "wrong Yes ID":
+				d.Controls[0].ID = 7
+			case "wrong Yes text":
+				d.Controls[0].Text = "Yes"
+			case "wrong No text":
+				d.Controls[1].Text = "No"
+			case "nonempty icon":
+				d.Controls[2].Text = ca.CN
+			case "body prefix":
+				d.Controls[3].Text = ca.CN + d.Controls[3].Text
+			case "body suffix":
+				d.Controls[3].Text += "another certificate"
+			case "body truncation":
+				d.Controls[3].Text = d.Controls[3].Text[:len(d.Controls[3].Text)-1]
+			case "body translation":
+				d.Controls[3].Text = strings.ReplaceAll(d.Controls[3].Text, "Warning:", "Avertissement:")
+			case "bare CR":
+				d.Controls[3].Text = strings.ReplaceAll(d.Controls[3].Text, "\n", "\r")
+			case "unspaced fingerprint", "substring fingerprint", "repeated fingerprint":
+				thumb := ca.Thumbprint
+				if name == "substring fingerprint" {
+					thumb = "AA" + certutilFixtureTestThumb(ca.Thumbprint) + "FF"
 				}
-				d.Controls[1].Text = strings.Join(parts, " ")
+				if name == "repeated fingerprint" {
+					thumb = certutilFixtureTestThumb(ca.Thumbprint) + " " + certutilFixtureTestThumb(ca.Thumbprint)
+				}
+				d.Controls[3].Text = strings.ReplaceAll(d.Controls[3].Text, certutilFixtureTestThumb(ca.Thumbprint), thumb)
+			case "one wrong CN":
+				d.Controls[3].Text = strings.Replace(d.Controls[3].Text, ca.CN, ca.CN+"foreign", 1)
+			case "root reused as child":
+				d.Controls[0].HWND = d.HWND
 			case "no dialog":
 				dialogs = nil
 			case "duplicate dialog":
@@ -286,37 +313,37 @@ func TestCertutilFixtureControlIdentityEvidence(t *testing.T) {
 			case "unexpected control class":
 				d.Controls[1].Class = "Edit"
 			case "missing CN":
-				d.Controls[0].Text = ""
+				d.Controls[3].Text = strings.ReplaceAll(d.Controls[3].Text, ca.CN, "")
 			case "partial CN":
-				d.Controls[0].Text = ca.CN[:len(ca.CN)-1]
+				d.Controls[3].Text = strings.ReplaceAll(d.Controls[3].Text, ca.CN, ca.CN[:len(ca.CN)-1])
 			case "wrong CN":
-				d.Controls[0].Text += "0"
-			case "missing thumbprint":
-				d.Controls[1].Text = ""
-			case "partial thumbprint":
-				d.Controls[1].Text = ca.Thumbprint[:38]
-			case "malformed thumbprint":
-				d.Controls[1].Text = ca.Thumbprint[:38] + "ZZ"
-			case "wrong thumbprint":
-				d.Controls[1].Text = strings.Repeat("0", 40)
+				d.Controls[3].Text = strings.ReplaceAll(d.Controls[3].Text, ca.CN, ca.CN+"0")
+			case "missing thumbprint", "partial thumbprint", "malformed thumbprint", "wrong thumbprint":
+				thumb := map[string]string{"missing thumbprint": "", "partial thumbprint": ca.Thumbprint[:38], "malformed thumbprint": ca.Thumbprint[:38] + "ZZ", "wrong thumbprint": strings.Repeat("0", 40)}[name]
+				d.Controls[3].Text = strings.ReplaceAll(d.Controls[3].Text, certutilFixtureTestThumb(ca.Thumbprint), thumb)
 			case "conflicting thumbprint", "duplicate thumbprint", "duplicate CN":
-				c := d.Controls[1]
-				if name == "duplicate CN" {
-					c = d.Controls[0]
-				}
-				c.HWND = 13
+				extra := certutilFixtureTestThumb(ca.Thumbprint)
 				if name == "conflicting thumbprint" {
-					c.Text = strings.Repeat("0", 40)
+					extra = strings.Repeat("0", 40)
 				}
-				d.Controls = append(d.Controls, c)
+				if name == "duplicate CN" {
+					extra = ca.CN
+				}
+				d.Controls[3].Text += extra
 			}
 			if len(dialogs) > 0 {
 				dialogs[0] = d
 			}
 			err := certutilFixtureControlIdentityEvidence(target, dialogs)
-			wantMatch := name == "exact" || name == "spaced full thumbprint"
+			wantMatch := name == "exact" || name == "CRLF only"
 			if (err == nil) != wantMatch {
-				t.Errorf("identity-only match=%v want=%v error=%v", err == nil, wantMatch, err)
+				t.Errorf("compound identity match=%v want=%v error=%v", err == nil, wantMatch, err)
+			}
+			var state certutilFixtureConsentState
+			actions := 0
+			err = state.dispatch(context.Background(), target, dialogs, func() ([]certutilFixtureDialog, error) { return dialogs, nil }, func(certutilFixtureDialog) error { actions++; return nil })
+			if (err == nil) != wantMatch || actions != map[bool]int{true: 1, false: 0}[wantMatch] {
+				t.Errorf("guarded action: err=%v actions=%d wantMatch=%v", err, actions, wantMatch)
 			}
 		})
 	}
@@ -422,6 +449,8 @@ func TestCertutilFixtureControlObservationLifecycle(t *testing.T) {
 		os.Exit(0)
 	case "normal":
 		os.Exit(0)
+	case "completed":
+		os.Exit(certutilFixtureImportCompletedExit)
 	case "complete":
 		fmt.Println("owned-controls:complete; NO ACTION")
 		os.Exit(0)
@@ -462,9 +491,16 @@ func TestCertutilFixtureControlObservationLifecycle(t *testing.T) {
 			var observedPID int
 			var factoryAfterCancel bool
 			// This independent test watchdog terminates the old cancel-only baseline.
-			watchdog := time.AfterFunc(400*time.Millisecond, cancelImport)
-			defer watchdog.Stop()
-			err := runCertutilFixtureControlObservation(matrixCtx, cmd, func(ctx context.Context, pid int) (*exec.Cmd, error) {
+			watchdogDone := make(chan struct{})
+			watchdog := time.AfterFunc(400*time.Millisecond, func() { defer close(watchdogDone); cancelImport() })
+			stopWatchdog := func() {
+				if watchdog.Stop() {
+					close(watchdogDone)
+				}
+				<-watchdogDone
+			}
+			defer stopWatchdog()
+			err := runCertutilFixtureConsentImport(matrixCtx, cmd, func(ctx context.Context, pid int) (*exec.Cmd, error) {
 				add("observer-start")
 				observedPID = pid
 				factoryAfterCancel = importCtx.Err() != nil
@@ -488,13 +524,16 @@ func TestCertutilFixtureControlObservationLifecycle(t *testing.T) {
 				}
 				observer = exec.CommandContext(ctx, path, "-test.run=^TestCertutilFixtureControlObservationLifecycle$")
 				observerRole := scenario
-				if scenario == "normal" || scenario == "cancel" || scenario == "early failure" || scenario == "observer deadline" {
+				if scenario == "cancel" || scenario == "early failure" || scenario == "observer deadline" {
 					observerRole = "block"
+				}
+				if scenario == "normal" {
+					observerRole = "completed"
 				}
 				observer.Env = append(os.Environ(), roleEnv+"="+observerRole, "GORACE=atexit_sleep_ms=0")
 				return observer, nil
 			}, add)
-			watchdog.Stop()
+			stopWatchdog()
 			add("import-joined")
 			if scenario == "import start failure" {
 				if err == nil || cmd.Process != nil || observer != nil || observedPID != 0 {
@@ -540,18 +579,18 @@ func TestCertutilFixtureControlObservationScopeAndCancelOwnership(t *testing.T) 
 		t.Fatal(err)
 	}
 	text := string(source)
-	for _, required := range []string{`windows.NewLazySystemDLL("user32.dll")`, "entry.OwnerProcessID == uint32(target.PID)", "creation == target.Creation", "root == 0", "attempt < 32", "entries > 4096", "threads > 32", "callbacks > 16", "len(d.Controls) == 32", "var text [1024]uint16", "getText.Call(hwnd, 0x000D,", "0x23, 100,", "currentParent != parent", "currentID != id", "currentClass != class", "os.Exit(3)", "target.validate()"} {
+	for _, required := range []string{`windows.NewLazySystemDLL("user32.dll")`, "entry.OwnerProcessID == uint32(target.PID)", "creation != target.Creation", "root == 0", "attempt < 32", "entries > 4096", "threads > 32", "callbacks > 16", "len(d.Controls) == 32", "var text [1024]uint16", "sendMessageTimeout.Call(hwnd, 0x000D,", "0x23, 100,", "currentParent != parent", "currentID != id", "currentClass != class", "os.Exit(3)", "target.validate()"} {
 		if !strings.Contains(text, required) {
 			t.Errorf("native observation guard absent: %s", required)
 		}
 	}
-	for _, forbidden := range []string{`NewProc("EnumWindows")`, `NewProc("PostMessage`, "BM_CLICK", "SendKeys", "InvokePattern", "ReadProcessMemory", "SuspendThread", "PROCESS_ALL_ACCESS", "SMTO_NOTIMEOUTIFNOTHUNG"} {
+	for _, forbidden := range []string{`NewProc("EnumWindows")`, `NewProc("PostMessage`, "SetActiveWindow", "SetForegroundWindow", "AttachThreadInput", "SendKeys", "InvokePattern", "ReadProcessMemory", "SuspendThread", "PROCESS_ALL_ACCESS", "SMTO_NOTIMEOUTIFNOTHUNG"} {
 		if strings.Contains(text, forbidden) {
 			t.Errorf("out-of-scope API/action: %s", forbidden)
 		}
 	}
-	if strings.Count(text, "getText.Call(") != 1 || strings.Index(text, "if entry.OwnerProcessID == uint32(target.PID)") > strings.Index(text, "enumThread.Call(") {
-		t.Error("only one literal WM_GETTEXT target read, after owner filtering, is authorized")
+	if strings.Count(text, "sendMessageTimeout.Call(") != 2 || strings.Count(text, "0x00F5, 0, 0, 0x3, 100,") != 1 || strings.Index(text, "if entry.OwnerProcessID == uint32(target.PID)") > strings.Index(text, "enumThread.Call(") {
+		t.Error("exactly one bounded literal WM_GETTEXT and one bounded Yes-dispatch site, after owner filtering, are authorized")
 	}
 	exe, err := os.Executable()
 	if err != nil {
@@ -565,7 +604,15 @@ func TestCertutilFixtureControlObservationScopeAndCancelOwnership(t *testing.T) 
 	kill := cmd.Cancel
 	var kills int
 	cmd.Cancel = func() error { kills++; _ = kill(); return want }
-	err = runCertutilFixtureControlObservation(ctx, cmd, func(probeCtx context.Context, pid int) (*exec.Cmd, error) {
+	watchdogDone := make(chan struct{})
+	watchdog := time.AfterFunc(100*time.Millisecond, func() { defer close(watchdogDone); cancel() })
+	defer func() {
+		if watchdog.Stop() {
+			close(watchdogDone)
+		}
+		<-watchdogDone
+	}()
+	err = runCertutilFixtureConsentImport(ctx, cmd, func(probeCtx context.Context, pid int) (*exec.Cmd, error) {
 		probe := exec.CommandContext(probeCtx, exe, "-test.run=^TestCertutilFixtureControlObservationLifecycle$")
 		probe.Env = append(os.Environ(), "WARDEN_TEST_CONTROL_ROLE=complete", "GORACE=atexit_sleep_ms=0")
 		return probe, nil
@@ -574,7 +621,7 @@ func TestCertutilFixtureControlObservationScopeAndCancelOwnership(t *testing.T) 
 		t.Fatalf("original cancel result/exactly-once owned kill lost: process=%v kills=%d", err, kills)
 	}
 	unbounded := exec.CommandContext(context.Background(), exe)
-	if err := runCertutilFixtureControlObservation(context.Background(), unbounded, nil, func(string) {}); err == nil || unbounded.Process != nil {
+	if err := runCertutilFixtureConsentImport(context.Background(), unbounded, nil, func(string) {}); err == nil || unbounded.Process != nil {
 		t.Error("unbounded/missing observer started a process")
 	}
 }

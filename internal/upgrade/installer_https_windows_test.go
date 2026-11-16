@@ -278,9 +278,9 @@ try {
 			t.Errorf("exact current-user certificate cleanup: %v", err)
 		}
 	}()
-	// Same import argv and total deadline. The proactive owned-control checkpoint
-	// deliberately performs NO ACTION until an actual native identity/layout
-	// contract is observed. A warning requiring consent must fail closed here.
+	// Same argv/total deadline. One known owned warning may receive one guarded
+	// Yes dispatch; normal certutil exit AND exact CurrentUser DER are still
+	// mandatory before any Download. Ambiguous identity/action fails closed.
 	identity := certutilFixtureCAIdentity{File: caFile, CN: ca.Subject.CommonName, Thumbprint: thumbprint, DERSHA256: sha256.Sum256(rootDER)}
 	if err := identity.validateCertificate(); err != nil {
 		t.Fatalf("generated public CA DER/CN/thumbprint preflight: %v", err)
@@ -288,8 +288,9 @@ try {
 	importCtx, cancelImport := certutilFixtureImportContext(matrixCtx)
 	cmd := certutilFixtureImportCommand(importCtx, certutil, caFile)
 	cmd.Env = env
-	t.Log("native HTTPS CurrentUser unique-CA-import:begin candidate=owned-controls checkpoint; NO ACTION; native consent contract UNKNOWN")
-	importErr := runCertutilFixtureControlObservation(matrixCtx, cmd, func(ctx context.Context, pid int) (*exec.Cmd, error) {
+	t.Logf("native HTTPS expected generated public CA: CN=%q SHA1=%s DER-SHA256=%x", identity.CN, identity.Thumbprint, identity.DERSHA256)
+	t.Log("native HTTPS CurrentUser unique-CA-import:begin candidate=one guarded owned Yes; dispatch is not acceptance")
+	importErr := runCertutilFixtureConsentImport(matrixCtx, cmd, func(ctx context.Context, pid int) (*exec.Cmd, error) {
 		return certutilFixtureOwnedControlCommand(ctx, pid, identity, env)
 	}, func(line string) { t.Logf("native HTTPS certutil: %s", line) })
 	importContextErr := importCtx.Err()

@@ -565,3 +565,47 @@ for independent parent review/fresh checks and LOCAL COMMIT before separate
 queued consent handoff. No push of Linux fix alone/repeated no-action CI; no
 worker stage/commit/push/PR/dispatch/GUI/trust/global tools/services/installers/
 signing/tag/release/merge/worktrees. Bounded checkpoint only, then STOP.
+
+### R7 queued Windows consent — implemented, native UNRUN (2026-11-16)
+
+Linux checkpoint is independently accepted and locally committed as238411d, NOT
+pushed; freeze its source/report. Separate approved fixture-consent outcome now
+implements one targeted Yes attempt only after exact observed combined English
+warning/4direct-control layout, immutable public DER/exact random CN/full UI SHA1,
+live pinned process creation/PID/TID/root/control revalidation. CRLF-only body
+normalization replaces the falsified standalone-field assumption, not identity.
+Actual R6 capture is a golden fixture with generated expected-identity substitution;
+historical expected DER was not logged and cannot retrospectively be proved.
+
+Bounded100ms specific-HWND BM_CLICK/SendMessageTimeout function result is dispatch
+only; no focus/global input/retry. Attempt consumed on failure/timeout. Helper0
+only after guarded dispatch; explicit no-action completion4 permits natural import
+only with actual normal certutil exit/context and unchanged exact-DER postcondition
+BEFORE Download. Wrong identity/action/observer error fails even after main exit0.
+Normal main completion no longer cancels a finishing observer; all owned process,
+output and cancellation/watchdog callbacks are joined before return/owned kill.
+Original argv/CurrentUser-only scope/absence-before-cleanup arming/exclusive public
+DER/random128 identity/120s total/reserve8s/child5s-parent6s/cleanup20s/all11 modes/
+normal and partial-failure cleanup/16native test list/security contracts remain.
+
+Actual guard/action/lifecycle RED→GREEN retained. Final focused race25 has6names
+each25=150top/2475all-level PASS/zero skips, including real exec/PID/Wait handshakes
+forcing import-exit-before-observer-final-report. Final fullGo/fullrace811PASS/
+3existing browser-owner skips; required server/store/client657PASS/3skips and
+affected upgrade/client355PASS/1skip included. Vet/Windows compile-vet/offline/
+actualcurl5/12CIcontracts/actionlint PASS. Fresh private production binaries and
+actual HTTPS runner Go section/4contracts PASS;13unchanged production assets
+hash-bound, no frontend/whole-test.sh/genuinePRF/production-trust claim. Every
+initial nonzero log causally dispositioned, not waived by rerun. Three0.23.0fields,
+HEAD/emptyindex/protected exclusions/full ledger prefix and frozen Linux/helper/
+production/Unix/storage/auth/crypto/module/workflow sources preserved.
+
+Deliver `/var/tmp/warden-windows-r7-review.{diff,json,sha256}` against238411d;
+parent independent review/fresh checks/LOCALCOMMIT only, then publish both accepted
+fixes together for ONE automatic CI. No worker stage/commit/push/PR/dispatch or
+live GUI/trust/install/service/global tools/signing/release/worktree. NativeR7
+UNRUN; current hosted15/1/0 and prior Linux failure remain historical authoritative
+results, not local passes. All16oncePASS/zero skips/all11verifiedHTTPS/exactcleanup
+and genuinePRF/productiontrust/privilegedUnix/hostedartifact-OIDC-signatures/public
+signing authorization remain open. See the existing native followup report's
+Round7 for API semantics, evidence/failures and acceptance boundary. STOP.

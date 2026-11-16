@@ -1226,6 +1226,69 @@ same review paths only after recorder closure; preserve previous bundle in
 no worker staging/commit/push/dispatch/trust/live install/service/global tool/
 signing/release/merge action. Stop at this bounded handoff.
 
+### R7 before code — approved single-fixture consent, captured producer contract
+
+Separate queued outcome now authorized at local HEAD
+`238411d31722e8b57ea6dad25374494dcba7236c`, same branch/sole writer/initial HIGH,
+no model override. Linux blocked-flush fix independently reviewed/fresh checked
+and locally committed, NOT pushed; freeze it. Remote PR45 still71b6c2a and hosted
+run43831002522attempt1/merge02bccd2 remains failed. No worker Git/PR/CI dispatch,
+live install/service/trust/GUI execution/global tools/signing/release/worktree.
+Three0.23.0fields fixed; protected content excluded BEFORE reads/copies/hashes,
+unrelated cache/all private evidence retained. Private `/var/tmp/ww7`0700/077,
+original task ledger prefix captured; test children alone use normal022 and exact
+TMPDIR=/var/tmp/GOTOOLCHAIN=go1.26.11/PYTHONDONTWRITEBYTECODE=1.
+
+Owner's exact `approve` remains authorization ONLY for one safely identified
+owned fixture-CA prompt: full expected generated DER/CN/full UI SHA1, live creation
+identity/PID/TID/parent/control revalidation immediately before one scoped action,
+CurrentUser only/exact DER postcondition before Download/exact cleanup. Wrong-CA
+approval risk was explained; safer manual interactive validation unavailable.
+No blanket trust, global keystrokes/focus, foreign UI, policy/elevation/LocalMachine,
+TLS bypass or signing authority. No new observation-only substitute absent a new
+material safety gap.
+
+Captured R6 control producer: owned PID8852/TID4240/creation134392911558098992,
+root327800 `#32770`/`Security Warning`; exactly direct Button6 `&Yes`, Button7
+`&No`, Static20 empty, Static65535 complete806rune warning. Body references the
+same random CN three times and includes one grouped40hex `Thumbprint (sha1)`.
+Canonical captured English body/layout with CRLF-only normalization supersedes
+our preliminary standalone-field assumption, NOT exact identity. Sanitized actual
+capture will be a golden fixture; positive tests replace its observed CN/full
+fingerprint with values from the test's pinned generated DER, not derive expected
+text from the implementation. Old expected DER was NOT printed, so do not claim
+the historical observed identity already matched DER. UI SHA1 identifies this
+public native root only; release payload verification remains SHA256.
+
+PRE-EDIT native TDD exception: Windows UI runtime unavailable locally. Portable
+real-helper guard/action-state/process lifecycle RED→GREEN, exact capture and
+adversarial cases, race25, pinned API/source inspection, Windows compile/vet are
+possible but NOT native action/import evidence. Native acceptance still requires
+all16oncePASS/zero skips/all11actualverifiedHTTPS modes and both cleanup proofs.
+
+Before uncertain action APIs, read official BM_CLICK (Microsoft commit
+2ec0df659644a793ed4f6160f238a95c9d9a9dcf) and SendMessageTimeoutW (metadata commit
+fa53641576e3603fa7b66d3a4ad969d3ce49d6f3). BM_CLICK has zero parameters and no
+message return value; SendMessageTimeout function's nonzero result indicates
+dispatch completion, NOT button LRESULT/nonzero acceptance. A nonactive dialog
+might not act: do NOT activate/focus it or claim success; exact DER postcondition
+must independently establish import. Choose one specific-owned-Yes HWND BM_CLICK
+0x00F5, bounded100ms SMTO_BLOCK|ABORTIFHUNG(0x3); unlike read flags0x23, avoid
+ERRORONEXIT's documented false failure on normal button/dialog destruction during
+processing. No NOTIMEOUT/broadcast/unbounded SendMessage/PostMessage/retry. API
+failure/timeout consumes the attempt and fails closed. Context7
+`ctx7:docs:170425ac2c3c1871cc073968` cross-checked against actual x/sys v0.47.0
+LazyProc.Call: error always nonnil/possibly stale, primary API result decides.
+
+Lifecycle plan: keep child5s/parent6s inside shared120s/import reserve8s/cleanup20s;
+join observer/output before original exactly-once kill and all waits before return.
+Do not cancel a finishing observer when normal certutil exits immediately after
+click; let bounded observer finalize. Helper0 only after guarded dispatch, never
+proof of OS acceptance. Explicit no-action import-already-completed result may
+allow naturally completed exit0 to reach unchanged exact-DER postcondition, but
+wrong identity/guard/action error cannot authorize Download even if main exits0.
+No second prompt/action; matching snapshots/DER and fresh ownership must agree.
+
 ### R6 parent local acceptance checkpoint
 
 Independent reviewer `01a1e1ea-4a07-7503-b4c7-e7dc96ff6f22` resumed after a provider quota interruption and completed with no issues in the exact R6 observation/curl fixture patch against `d22e9ce`. The interrupted attempt was not approval. Completed review inspected evidence but executed no tests or native operations. Parent inspected the actual owned-control sources, lifecycle integration, curl regression and causal timing evidence; all 7 task/467 input/145 evidence hashes matched.
@@ -1238,3 +1301,139 @@ Fresh parent checks, with child-only umask `022` and `TMPDIR=/var/tmp`:
 - Windows amd64 upgrade-test compilation and Windows-target upgrade vet: PASS, `/var/tmp/warden-r6-upgrade-windows.test.exe` and `/var/tmp/warden-windows-r6-parent-windows-vet.log`; **not native execution**.
 
 Reviewed task hashes remained unchanged until this prose-only append. Fresh approved base remains `0.22.1`; existing three `0.23.0` fields remain unchanged. This accepts only the no-click observation and causal fixture correction for the authorized automatic PR checkpoint. Actual native control layout, exact UI identity match and consent action remain unverified/unimplemented; all16/native HTTPS and external gates remain open. The next run is observational and must not be described as consent delivery or a native fix.
+
+## Round 7 — guarded single-fixture consent implemented, NATIVE UNRUN
+
+This supersedes the older current-state UNKNOWN/UNIMPLEMENTED statements only;
+all original checkpoints/failures remain historical evidence. The R7 before-code
+exception and owner scope above were recorded before native API changes. Baseline
+is local `238411d31722e8b57ea6dad25374494dcba7236c`: accepted Linux fixture fix is
+frozen and NOT pushed. Remote/hosted authoritative R6 outcome is still
+run43831002522attempt1/merge02bccd2,16once15PASS/1FAIL/0SKIP and zero HTTPS modes.
+No R7 Windows execution, trust-store or GUI action occurred locally.
+
+### Implementation and non-negotiable limits
+
+- `certutil_control_test.go` now matches exactly the captured English combined
+  warning, not substring/standalone-field heuristics. Exactly four unique direct
+  child handles/IDs/classes/texts are required, including Yes6 `&Yes`, No7 `&No`,
+  empty Static20 and full Static65535. CRLF→LF is the only normalization. All
+  three CN occurrences and the single grouped full40hex SHA1 must be the same
+  identity derived from the pinned public DER; every extra/missing/partial/wrong
+  or conflicting identity/body/control/dialog/locale is rejected.
+- New `certutil_consent_test.go` owns canonical body and single-attempt state.
+  Initial match, full fresh snapshot, unchanged handle/evidence comparison,
+  fresh public DER validation and cancellation checks precede dispatch. The
+  allowance is consumed before the dispatcher, including errors/timeouts; no
+  retry is possible. Its golden `testdata/certutil-security-warning.txt` is the
+  actual public capture with ONLY CRLF normalized. Tests independently replace
+  historical CN/thumbprint using their generated DER, not implementation text.
+- Native reader pins the process handle/creation, filters owned numeric threads,
+  reads only the exact owned warning, and repeats complete process/window/child
+  snapshots again at the native action seam. Root/Yes PID/TID/class/parent/ID are
+  checked immediately before the sole100ms specifically-targeted BM_CLICK site.
+  The only tolerated non-dialog top-level classes are the actually R5-observed
+  `CertUtil`, `MSCTFIME UI`, `IME`; unknown classes fail closed. Original thread,
+  window, control, UTF16/text-chunk and poll caps remain. Only a fully matched
+  fixture's public text is logged; no foreign/unknown text or environment dump.
+- Official BM_CLICK/SendMessageTimeout/EnumThreadWindows/EnumChildWindows docs
+  and installed x/sys0.47.0 are archived in `/var/tmp/ww7/api/` and metadata.
+  EnumThreadWindows zero also means no windows; EnumChildWindows' return is
+  unused, so callback ownership/error/cap checks remain decisive. Read flags0x23
+  are unchanged; action uses BLOCK|ABORTIFHUNG0x3,100ms, no ERRORONEXIT because
+  normal click processing may destroy its button. Nonzero FUNCTION result, NOT
+  LRESULT, establishes dispatch only. Inactive dialogs may ignore the click;
+  no focus/activation/global input workaround or success guarantee is claimed.
+- Helper0 only means guarded dispatch. A separate4 result means the pinned
+  import completed before any action, NOT consent; parent must still obtain
+  actual normal certutil exit/context and exact DER-store postcondition. Every
+  identity/guard/action error fails even if main exits0. Normal main exit does
+  not cancel a finishing observer. Cancellation cancels/joins observer/output
+  before the original exactly-once kill/result; import Wait/output are joined.
+  Even test watchdog callbacks are explicitly stopped/joined, not detached.
+- `installer_https_windows_test.go` logs expected public CN/full SHA1/DER-SHA256
+  before import and uses the corrected lifecycle. Its actual argv remains
+  `-user -f -addstore Root CAfile`, CurrentUser only; absence preflight BEFORE
+  cleanup arming, exclusive public DER/random128 serial/CN, exact DER-store
+  postcondition BEFORE Download, all11 actual modes and both cleanup paths are
+  unchanged. Shared120s total/import reserve8s/observer child5s-parent6s/cleanup20s
+  are unchanged. Production installers/C#/true-null helper/Unix/Linux fixture/
+  storage/auth/crypto/modules/workflows/three0.23.0 fields are frozen.
+
+### Measured RED→GREEN and final fresh validation
+
+Private evidence root `/var/tmp/ww7`0700; recorder parent077/logs0600, test children
+alone normal022. All recorded commands use TMPDIR=/var/tmp,
+GOTOOLCHAIN=go1.26.11, PYTHONDONTWRITEBYTECODE=1; no model/thinking override.
+
+1. Guard/action RED09:29:13→09:29:14: actual captured compound CRLF and LF text
+   rejected by old standalone matcher; zero reads/actions. After canonical guard,
+   action RED09:31:21→09:31:22: explicit no-action checkpoint still prevents the
+   expected one attempt/API-failure consumption. GREEN09:32:19→09:32:19 exercises
+   actual shared matcher/guard/state, including zero-action adversarial cases.
+2. Real fake-owned-process lifecycle RED09:35:11→09:35:12: old observer0 path
+   kills consent-success import; handshake forces normal import Wait to precede
+   observer final report, exposing observer cancellation. New tests use actual
+   child PIDs/exec/Wait/context/output and file handshakes, not source contains.
+3. Retained first GREEN failure09:37:54: test wrongly demanded a redundant kill
+   after an already-joined natural nonzero import exit. Corrected expected count
+   to0 for that case, still exactly1 on guard/cancel failures. Retained09:47:58
+   failure: LF golden normalization made the bare-CR test mutation a no-op;
+   corrected the mutation to actually introduce bare CR. No production waiver.
+4. Self-review tightened test watchdog callback joins. All affected Go proofs
+   were freshly repeated AFTER that change, not reused as current:
+
+| Final check | UTC window | Result |
+| --- | --- | --- |
+| Focused guard/action/real-process race25 |10:01:21→10:01:40|6names each25,150top/2475all-level PASS,zero skips |
+| Uncached fullGo |10:01:40→10:02:10|811PASS/3existing skips |
+| Fullrace `./...` |10:01:21→10:02:52|811PASS/3existing skips |
+| Required server/store/client included in fullrace |same|657PASS/3existing skips |
+| Affected upgrade/client included in fullrace |same|355PASS/1existing skip |
+| Fullvet + Windows amd64 compile/vet |10:01:21→10:01:23|PASS, compile-only NOT native |
+| Offline installers |09:53:34→09:53:45|PASS |
+| Actual curl HTTPS suite |09:53:45→09:53:48|5PASS/zero skips |
+| CI contracts |09:53:48→09:53:50|12PASS/zero skips |
+| actionlint1.7.12 |09:53:50|PASS, unavailable ShellCheck/Pyflakes explicitly disabled |
+| Production HTTPS runner Go section |09:56:43→09:56:54|fresh private trimpath binaries + actual HTTPS/import/agent lifecycle/4runner contracts PASS |
+
+Broad skips are unchanged opt-in browser setup/runtime fixtures and privileged
+Unix wrong-owner fixture; NOT waived acceptance. Exact current source and all13
+production distribution assets are hash-bound; no frontend rebuild/test/audit or
+whole `scripts/test.sh` invocation is claimed. HTTPS uses synthetic TEST-ONLY PRF,
+not genuine authenticator or production trust. Whole SSHDBrace25/source scan were
+not rerun here and no clean-module/full-hosted-pipeline claim is made.
+
+### Bounded review handoff, NOT native acceptance
+
+Deliver `/var/tmp/warden-windows-r7-review.{diff,json,sha256}` against238411d with
+all9task paths, complete pre-R7 ledger prefix/full delta, current safe inputs,
+actual captured producer/raw hosted evidence, API archives, fresh UTC argv/exits,
+all failures/dispositions/RED-GREEN/race25, nested HTTPS commands, current13asset
+hashes and nonapplying reverse-patch check. Protected content excluded before
+reads/copies/hashes; unrelated cache/private originals untouched. Index empty,
+HEAD fixed, Linux source/report unchanged. No worker stage/commit/push/PR/dispatch/
+GUI/trust/install/service/global-tool/signing/tag/release/merge/worktree action.
+
+Parent independently reviews, freshly checks and locally commits R7; only then
+publish both accepted Linux and Windows fixes together for one automatic CI run.
+Do NOT push Linux alone or rerun the unchanged no-action checkpoint. Native
+acceptance still requires all16 exact names once PASS/zero skips, all11 verified
+HTTPS modes and both exact cleanup proofs. Old expected DER/body equality remains
+unproved; dispatch is not import acceptance. Genuine PRF/production trust,
+privileged Unix, hosted artifact/OIDC/signature and public-signing authority gates
+remain open. STOP at this bounded handoff.
+
+### R7 parent local acceptance checkpoint
+
+Independent reviewer `01a1e1ea-4a07-7503-b4c7-e7dc96ff6f22` found no issues in the exact R7 patch against held Linux-fix commit `238411d`; review ran no tests or native operations. Parent inspected the actual exact-body guard, single-attempt dispatcher, native targeting and integration, and verified all 9 task/471 input/72 evidence hashes and 13 production assets.
+
+Fresh parent checks used child-only umask `022`, `TMPDIR=/var/tmp` and Go `1.26.11`:
+
+- Uncached full Go: PASS, `/var/tmp/warden-windows-r7-parent-full.log`.
+- Uncached full Go race, covering both Linux and Windows-test-helper inputs: PASS, `/var/tmp/warden-windows-r7-parent-full-race.log`.
+- New consent tests race25: PASS, `/var/tmp/warden-windows-r7-parent-consent-race25.log`.
+- Full vet, Windows amd64 test compilation and Windows-target vet: PASS, `/var/tmp/warden-windows-r7-parent-vet.log`, `/var/tmp/warden-r7-upgrade-windows.test.exe`, `/var/tmp/warden-windows-r7-parent-windows-vet.log`. Compilation/vet are not native execution.
+- Actual curl suite: **5/5 PASS**, `/var/tmp/warden-windows-r7-parent-curl.log`.
+
+Reviewed task hashes remained unchanged before this prose-only append. Fresh approved base remains `0.22.1`; three existing `0.23.0` fields remain unchanged. This accepts a local R7 commit and joint push with `238411d` for one authorized automatic PR run. It does not prove native dispatch, import, DER postcondition, any HTTPS mode or cleanup. Historical expected DER remains unlogged; no retrospective matching claim. All native/external acceptance and separate signing-authority limits remain in force.

@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"reflect"
 	"strings"
 	"syscall"
 	"testing"
@@ -21,6 +22,9 @@ import (
 // its process handle. Creation FILETIME plus a live handle prevents PID reuse
 // from converting the later child observations into observations of a stranger.
 func certutilFixtureOwnedControlCommand(ctx context.Context, pid int, ca certutilFixtureCAIdentity, env []string) (*exec.Cmd, error) {
+	if err := ca.validateCertificate(); err != nil {
+		return nil, err
+	}
 	if pid <= 0 || uint64(pid) > 1<<32-1 || pid == os.Getpid() {
 		return nil, errors.New("invalid/self owned target")
 	}
@@ -41,18 +45,22 @@ func certutilFixtureProcessCreation(h windows.Handle) (uint64, error) {
 	if err != nil {
 		return 0, err
 	}
-	if state != uint32(windows.WAIT_TIMEOUT) {
-		return 0, errors.New("owned process is not live")
+	if state != uint32(windows.WAIT_TIMEOUT) && state != uint32(windows.WAIT_OBJECT_0) {
+		return 0, errors.New("owned process state unavailable")
 	}
 	var creation, exit, kernel, user windows.Filetime
 	if err := windows.GetProcessTimes(h, &creation, &exit, &kernel, &user); err != nil {
 		return 0, err
 	}
-	return uint64(creation.HighDateTime)<<32 | uint64(creation.LowDateTime), nil
+	identity := uint64(creation.HighDateTime)<<32 | uint64(creation.LowDateTime)
+	if state == uint32(windows.WAIT_OBJECT_0) {
+		return identity, errCertutilFixtureImportCompleted
+	}
+	return identity, nil
 }
 
 // Private infrastructure, not a seventeenth native acceptance test. No target
-// means no observation; even exact identity evidence NEVER causes an action.
+// means no action. Helper0 means guarded dispatch only, never import acceptance.
 func TestCertutilFixtureOwnedControlsProcess(t *testing.T) {
 	value := os.Getenv(certutilFixtureControlEnv)
 	if value == "" {
@@ -81,8 +89,14 @@ func TestCertutilFixtureOwnedControlsProcess(t *testing.T) {
 		defer cancel()
 		return certutilFixtureOwnedControls(ctx, target)
 	}()
-	fmt.Printf("owned certificate controls checkpoint: identityEvidenceMatch=%t error=%v; native action contract UNKNOWN; NO ACTION\n", err == nil, err)
-	os.Exit(3) // deliberate fail-closed checkpoint, including identity-only matches
+	fmt.Printf("owned certificate consent: guardedDispatch=%t error=%v; exact DER import postcondition still required\n", err == nil, err)
+	if err == nil {
+		os.Exit(0)
+	}
+	if errors.Is(err, errCertutilFixtureImportCompleted) {
+		os.Exit(certutilFixtureImportCompletedExit)
+	}
+	os.Exit(3) // identity/layout/ownership/action error; no retry
 }
 
 func certutilFixtureOwnedControls(ctx context.Context, target certutilFixtureControlTarget) error {
@@ -91,12 +105,19 @@ func certutilFixtureOwnedControls(ctx context.Context, target certutilFixtureCon
 		return err
 	}
 	defer windows.CloseHandle(h)
-	live := func() bool {
+	processError := func() error {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		creation, err := certutilFixtureProcessCreation(h)
-		return ctx.Err() == nil && err == nil && creation == target.Creation
+		if creation != target.Creation {
+			return errors.New("owned process creation mismatch")
+		}
+		return err
 	}
-	if !live() {
-		return errors.New("owned process creation/liveness mismatch")
+	live := func() bool { return processError() == nil }
+	if err := processError(); err != nil {
+		return err
 	}
 	user32 := windows.NewLazySystemDLL("user32.dll")
 	enumThread := user32.NewProc("EnumThreadWindows")
@@ -105,8 +126,8 @@ func certutilFixtureOwnedControls(ctx context.Context, target certutilFixtureCon
 	getParent := user32.NewProc("GetParent")
 	getID := user32.NewProc("GetDlgCtrlID")
 	isChild := user32.NewProc("IsChild")
-	getText := user32.NewProc("SendMessageTimeoutW")
-	for _, proc := range []*windows.LazyProc{enumThread, enumChild, getCaption, getParent, getID, isChild, getText, user32.NewProc("GetWindowThreadProcessId"), user32.NewProc("GetClassNameW")} {
+	sendMessageTimeout := user32.NewProc("SendMessageTimeoutW")
+	for _, proc := range []*windows.LazyProc{enumThread, enumChild, getCaption, getParent, getID, isChild, sendMessageTimeout, user32.NewProc("GetWindowThreadProcessId"), user32.NewProc("GetClassNameW")} {
 		if err := proc.Find(); err != nil {
 			return fmt.Errorf("API %s unavailable: %w", proc.Name, err)
 		}
@@ -127,7 +148,10 @@ func certutilFixtureOwnedControls(ctx context.Context, target certutilFixtureCon
 	// Only a numeric THREAD snapshot is system-wide. Filter owner BEFORE any
 	// window enumeration, class/caption query or logging. Polling is capped, not
 	// an import retry; missing/raced data is UNKNOWN, never evidence of no UI.
-	for attempt := 0; attempt < 32 && live(); attempt++ {
+	readSnapshot := func() ([]certutilFixtureDialog, error) {
+		if err := processError(); err != nil {
+			return nil, err
+		}
 		dialogs, err := func() ([]certutilFixtureDialog, error) {
 			snapshot, err := windows.CreateToolhelp32Snapshot(windows.TH32CS_SNAPTHREAD, 0)
 			if err != nil {
@@ -154,7 +178,13 @@ func certutilFixtureOwnedControls(ctx context.Context, target certutilFixtureCon
 					return 0
 				}
 				if class != "#32770" {
-					return 1
+					// Observed non-dialog certutil/Windows input infrastructure only.
+					switch class {
+					case "CertUtil", "MSCTFIME UI", "IME":
+						return 1
+					}
+					readErr = errors.New("unknown owned top-level window class")
+					return 0
 				}
 				var caption [128]uint16
 				n, _, _ := getCaption.Call(hwnd, uintptr(unsafe.Pointer(&caption[0])), uintptr(len(caption)))
@@ -190,27 +220,19 @@ func certutilFixtureOwnedControls(ctx context.Context, target certutilFixtureCon
 			if err != nil && !errors.Is(err, windows.ERROR_NO_MORE_FILES) {
 				return nil, err
 			}
-			if !live() {
-				return nil, errors.New("owned process exited or observation deadline")
+			if err := processError(); err != nil {
+				return nil, err
 			}
 			return dialogs, nil
 		}()
 		if err != nil {
-			return err
+			return nil, err
 		}
 		if len(dialogs) == 0 {
-			select {
-			case <-ctx.Done():
-				return ctx.Err()
-			case <-time.After(100 * time.Millisecond):
-				continue
-			}
-		}
-		for _, d := range dialogs {
-			fmt.Printf("owned dialog pid=%d tid=%d creation=%d hwnd=%d class=%q caption=%q complete=%t\n", d.PID, d.TID, d.Creation, d.HWND, d.Class, d.Caption, d.Complete)
+			return dialogs, nil
 		}
 		if len(dialogs) != 1 || !dialogs[0].Complete {
-			return errors.New("missing/duplicate/unexpected owned warning; no child read")
+			return nil, errors.New("missing/duplicate/unexpected owned warning; no child read")
 		}
 		d := &dialogs[0]
 		root := uintptr(d.HWND)
@@ -264,7 +286,7 @@ func certutilFixtureOwnedControls(ctx context.Context, target certutilFixtureCon
 				}
 				// WM_GETTEXT=0x000D is system-marshalled across processes. BLOCK(1),
 				// ABORTIFHUNG(2), ERRORONEXIT(0x20); never NOTIMEOUTIFNOTHUNG/broadcast.
-				result, _, _ := getText.Call(hwnd, 0x000D, uintptr(len(text)), uintptr(unsafe.Pointer(&text[0])), 0x23, 100, uintptr(unsafe.Pointer(&chars)))
+				result, _, _ := sendMessageTimeout.Call(hwnd, 0x000D, uintptr(len(text)), uintptr(unsafe.Pointer(&text[0])), 0x23, 100, uintptr(unsafe.Pointer(&chars)))
 				if !member() {
 					readErr = errors.New("lost ownership after text read")
 					return 0
@@ -285,15 +307,37 @@ func certutilFixtureOwnedControls(ctx context.Context, target certutilFixtureCon
 			return 1
 		})
 		if !dialogOK() {
-			return errors.New("lost parent dialog before scoped enumeration")
+			return nil, errors.New("lost parent dialog before scoped enumeration")
 		}
 		enumChild.Call(root, callback, 0)
 		if readErr != nil {
-			return readErr
+			return nil, readErr
 		}
 		if !dialogOK() {
-			return errors.New("lost parent dialog after scoped enumeration")
+			return nil, errors.New("lost parent dialog after scoped enumeration")
 		}
+		return dialogs, nil
+	}
+	var state certutilFixtureConsentState
+	for attempt := 0; attempt < 32; attempt++ {
+		dialogs, err := readSnapshot()
+		if err != nil {
+			return err
+		}
+		if len(dialogs) == 0 {
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-time.After(100 * time.Millisecond):
+				continue
+			}
+		}
+		// Only log the known public fixture warning, never foreign/unknown text.
+		if err := certutilFixtureControlIdentityEvidence(target, dialogs); err != nil {
+			return err
+		}
+		d := &dialogs[0]
+		fmt.Printf("owned dialog pid=%d tid=%d creation=%d hwnd=%d class=%q caption=%q complete=%t\n", d.PID, d.TID, d.Creation, d.HWND, d.Class, d.Caption, d.Complete)
 		for i, c := range d.Controls {
 			fmt.Printf("owned control index=%d hwnd=%d parent=%d pid=%d tid=%d id=%d class=%q complete=%t textRunes=%d\n", i, c.HWND, c.Parent, c.PID, c.TID, c.ID, c.Class, c.Complete, len([]rune(c.Text)))
 			// Quoted public text in fixed chunks stays below the streaming 1024-byte
@@ -305,7 +349,50 @@ func certutilFixtureOwnedControls(ctx context.Context, target certutilFixtureCon
 				runes = runes[n:]
 			}
 		}
-		return certutilFixtureControlIdentityEvidence(target, dialogs)
+		return state.dispatch(ctx, target, dialogs, readSnapshot, func(d certutilFixtureDialog) error {
+			// One last full live-process/layout/text/DER read at the native seam;
+			// every previous handle must still identify the same owned controls.
+			current, err := readSnapshot()
+			if err != nil {
+				return err
+			}
+			if err := certutilFixtureControlIdentityEvidence(target, current); err != nil {
+				return err
+			}
+			if !reflect.DeepEqual(current, []certutilFixtureDialog{d}) {
+				return errors.New("native target changed before dispatch")
+			}
+			var yes certutilFixtureControl
+			for _, c := range d.Controls {
+				if c.ID == 6 {
+					yes = c
+				}
+			}
+			if !owns(uintptr(d.HWND), d.TID) || !owns(uintptr(yes.HWND), d.TID) {
+				return errors.New("lost final Yes ownership")
+			}
+			parent, _, _ := getParent.Call(uintptr(yes.HWND))
+			id, _, _ := getID.Call(uintptr(yes.HWND))
+			class, complete := classOf(uintptr(yes.HWND))
+			if !complete || class != "Button" || uint64(parent) != d.HWND || id != 6 || !owns(uintptr(yes.HWND), d.TID) {
+				return errors.New("changed final Yes metadata")
+			}
+			if err := ctx.Err(); err != nil {
+				return err
+			}
+			// BM_CLICK has no message return value. Check FUNCTION success, not
+			// the output LRESULT (normally zero). No focus/activation operation:
+			// an inactive dialog might not act; only exit + exact DER prove import.
+			// BLOCK|ABORTIFHUNG,100ms; omit ERRORONEXIT because a normal click can
+			// destroy the button while processing. Never retry any ambiguous result.
+			var ignored uintptr
+			result, _, _ := sendMessageTimeout.Call(uintptr(yes.HWND), 0x00F5, 0, 0, 0x3, 100, uintptr(unsafe.Pointer(&ignored)))
+			if result == 0 {
+				return errors.New("Yes dispatch failed or timed out; attempt consumed")
+			}
+			fmt.Println("owned Yes dispatch completed once; not proof of import acceptance")
+			return nil
+		})
 	}
 	return errors.New("owned warning missing/unavailable within fixed observation bound")
 }
