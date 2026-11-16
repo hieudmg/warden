@@ -21,14 +21,27 @@ func TestWindowsHelperAtomicReplacementAndFailureCleanup(t *testing.T) {
 	if err != nil {
 		t.Fatal("required native Windows PowerShell is unavailable")
 	}
-	for _, blocked := range []bool{false, true} {
-		t.Run(map[bool]string{false: "replace", true: "locked failure"}[blocked], func(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		blocked bool
+		literal bool
+	}{
+		{name: "replace"},
+		{name: "locked failure", blocked: true},
+		{name: "metacharacter replace", literal: true},
+		{name: "metacharacter locked failure", blocked: true, literal: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
 			dir := t.TempDir()
-			target := filepath.Join(dir, "warden.exe")
+			targetName, stagePrefix := "warden.exe", ".verified-"
+			if tc.literal {
+				targetName, stagePrefix = "warden % & ' [target].exe", ".verified % & ' [stage]-"
+			}
+			target := filepath.Join(dir, targetName)
 			if err := os.WriteFile(target, []byte("old fixture"), 0600); err != nil {
 				t.Fatal(err)
 			}
-			stage, err := createUpgradeTemp(dir, ".verified-")
+			stage, err := createUpgradeTemp(dir, stagePrefix)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -39,7 +52,7 @@ func TestWindowsHelperAtomicReplacementAndFailureCleanup(t *testing.T) {
 			if err := stage.Close(); err != nil {
 				t.Fatal(err)
 			}
-			if blocked {
+			if tc.blocked {
 				native, err := windows.UTF16PtrFromString(target)
 				if err != nil {
 					t.Fatal(err)
@@ -50,14 +63,16 @@ func TestWindowsHelperAtomicReplacementAndFailureCleanup(t *testing.T) {
 				}
 				defer windows.CloseHandle(handle)
 			}
-			// Same production program; only its retry duration is shortened for a test.
-			program := strings.Replace(windowsHelperProgram, "AddSeconds(90)", "AddSeconds(1)", 1)
+			// Actual production program with test-only first-exception diagnostics;
+			// only its retry duration is shortened. Do not mask native failures.
+			program := strings.Replace(windowsHelperDiagnosticProgram(t), "AddSeconds(90)", "AddSeconds(1)", 1)
 			ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
 			defer cancel()
 			cmd := exec.CommandContext(ctx, shell, "-NoLogo", "-NoProfile", "-NonInteractive", "-EncodedCommand", encodePowerShellCommand(program))
 			cmd.Env = append(os.Environ(), windowsHelperEnv(source, target, 2147483647)...)
 			output, err := cmd.CombinedOutput()
-			if blocked {
+			t.Logf("native replacement diagnostics:\n%s", output)
+			if tc.blocked {
 				if err == nil {
 					t.Fatal("helper replaced a delete-locked target")
 				}
@@ -74,7 +89,7 @@ func TestWindowsHelperAtomicReplacementAndFailureCleanup(t *testing.T) {
 			if _, err := os.Stat(source); !os.IsNotExist(err) {
 				t.Fatalf("helper stage not cleaned: %v", err)
 			}
-			assertDirEntries(t, dir, "warden.exe")
+			assertDirEntries(t, dir, targetName)
 		})
 	}
 }

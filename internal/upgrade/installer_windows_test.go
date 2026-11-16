@@ -9,7 +9,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"strings"
 	"testing"
 	"time"
 )
@@ -26,13 +25,9 @@ func TestWindowsPowerShellInstallerPrivateFilesAndHTTPRefusal(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, source, ok := strings.Cut(string(script), "-TypeDefinition @'\n")
-	if !ok {
-		t.Fatal("missing embedded downloader")
-	}
-	source, _, ok = strings.Cut(source, "\n'@")
-	if !ok {
-		t.Fatal("missing C# boundary")
+	source, err := installerDownloaderSource(script)
+	if err != nil {
+		t.Fatal(err)
 	}
 	dir := t.TempDir()
 	sourcePath := filepath.Join(dir, "Downloader.cs")

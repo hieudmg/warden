@@ -28,6 +28,25 @@ eight module-only findings. Narrow owner acceptance of specified T16 Action
 Undici/DSSE residuals is not remediation, blanket waiver or dispatch/publication
 authority. Older task checkpoints describe their time, not current missing code.
 
+### Native Windows follow-up — draft PR #45, 2026-11-16
+
+Hosted read-only run43786023388 attempt1 (event head `d8aa802`, actual PR merge
+`c987a687`) passed Linux job133033735087 but failed Windows job133033735279:
+**13/16 named top-level PASS, three FAIL, zero reported skips** (agent7/SFTP5/
+upgrade-private-stage1 pass). The two actual C# fixtures fail at LF-only source
+extraction; native helper ordinary replacement fails with its cause suppressed,
+while locked-failure passes. This supersedes historical UNRUN wording only for
+that original run, not acceptance. The [follow-up report](../reports/2026-11-16-native-windows-followup.md)
+records actual logs, deterministic CRLF RED→GREEN through one shared test-only
+extractor, preserved actual C# bytes and production safeguards, and bounded
+native exception diagnostics. Null-string binding remains a hypothesis; no
+production helper fix or native GREEN is claimed. Local full Go, affected
+upgrade/client race, vet, offline installers, real curl,12 CI contracts and
+compile-only Windows pass. Parent review/diagnostic push to automatic CI is
+needed before diagnosing the helper and obtaining all16 native passes/zero skips.
+Release0.23.0 and all pending acceptance checkboxes/gates remain unchanged; no
+manual signing/dispatch/publication or production service operation authorized.
+
 ## Execution, dependencies, and evidence discipline
 
 - Repository `/var/www/code/go/warden`, branch `hieudmg/security-hardening`, inspected HEAD/fetched `origin/main` both `c104353` on 2026-11-14. Only one writer in this checkout. A controller may assign sequential workers one task at a time; no parallel writers/worktrees. Each handoff names changed paths, red/green commands, remaining failures and next dependency. Preserve unrelated work, particularly protected untracked `mise.toml` (do not read/change/stage).

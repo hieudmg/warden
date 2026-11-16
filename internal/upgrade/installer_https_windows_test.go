@@ -186,13 +186,9 @@ func TestWindowsPowerShellTrustedHTTPSReleaseMatrix(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, source, ok := strings.Cut(string(installer), "-TypeDefinition @'\n")
-	if !ok {
-		t.Fatal("missing actual C# downloader")
-	}
-	source, _, ok = strings.Cut(source, "\n'@")
-	if !ok {
-		t.Fatal("missing C# end")
+	source, err := installerDownloaderSource(installer)
+	if err != nil {
+		t.Fatal(err)
 	}
 	sourceFile := writePrivate("source-", []byte(source))
 	env := append(os.Environ(), "WARDEN_FIXTURE_CA="+caFile, "WARDEN_FIXTURE_THUMBPRINT="+thumbprint,
