@@ -698,3 +698,30 @@ workflows/modules/version0.23.0 fields frozen. Independent parent review pending
 no stage/commit/push/PR/CI dispatch/install/global/service/trust/GUI/signing/release.
 Windows latest15/1/0, both cleanup absence proofs/final counters and all external
 acceptance gates remain open; R8 historical docs not rewritten. STOP for review.
+
+### 0.23.0 personal release — superseding owner decision
+
+The sole user/developer accepts a limited personal daily-use release now, with
+Windows validation owner-owned and genuine PRF/production trust, Unix cross-owner
+and release provenance validation deferred NOT PASS. This supersedes the earlier
+release/push hold as authority only; historical BLOCK/failure evidence remains.
+Existing normal public-attestation publication is authorized, no separate manual
+signing workflow needed. Parent owns publication/merge/push/release after review;
+worker performs no Git writes, dispatch, live install/migration/service cutover.
+
+Minimal test-first extraction moves the unchanged Windows job into owner-only
+workflow_dispatch test-windows.yml; automatic PR/reusable test.yml retains the
+byte-frozen Linux job. release.yml is byte-frozen. All 16 native names/harness,
+GUI/trust/cleanup/counter checks, pins, permissions, time bounds and retention
+remain unchanged. Native 15/1/0, both Root-removal absence proofs and final counters
+remain unproven. Reviewed local419dc58 fixes the previous Linux toast-test failure;
+parent hosted combined Linux checks remain pending. RED exposes missing manual
+workflow and existing automated Windows job; GREEN14 offline CI contracts and
+existing actionlint PASS, not native/external acceptance. No fresh fullGo needed
+for workflow-only change. Preserve three0.23.0 fields and breaking0.22.1→0.23.0
+release notes with old-release legacy-v1 export/fresh-init/import guidance.
+
+See ../reports/2026-11-16-personal-release-decision.md for the explicit exception,
+validation limits and publication handoff. Private bounded review bundle
+/var/tmp/warden-personal-release-review.{diff,json,sha256}; append-only ignored
+ledger retained. Stop for independent review; no Windows run started by worker.

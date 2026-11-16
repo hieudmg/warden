@@ -27,7 +27,7 @@ def step(job, step_id):
 
 class WorkflowContracts(unittest.TestCase):
     def test_default_and_build_test_permissions_are_read_only(self):
-        for name in ['release.yml', 'test.yml']:
+        for name in ['release.yml', 'test.yml', 'test-windows.yml']:
             with self.subTest(workflow=name):
                 w = workflow(name)
                 self.assertEqual(w['permissions'], {'contents': 'read'})
@@ -41,7 +41,7 @@ class WorkflowContracts(unittest.TestCase):
                         self.assertNotIn('continue-on-error', job)
 
     def test_every_external_action_is_an_api_verified_known_repo_commit(self):
-        for name in ['release.yml', 'test.yml']:
+        for name in ['release.yml', 'test.yml', 'test-windows.yml']:
             w = workflow(name)
             for job in w['jobs'].values():
                 for s in job.get('steps', []):
@@ -79,8 +79,23 @@ class WorkflowContracts(unittest.TestCase):
             self.assertIn(command, commands)
         self.assertIn('11.20.0', commands)
 
+    def test_native_windows_is_only_owner_dispatched(self):
+        manual = workflow('test-windows.yml')
+        self.assertEqual(manual['on'], {'workflow_dispatch': ''})
+        self.assertEqual(set(manual['jobs']), {'windows'})
+
+    def test_automated_linux_and_release_do_not_depend_on_windows(self):
+        automated = workflow('test.yml')
+        self.assertEqual(set(automated['jobs']), {'linux'})
+        self.assertNotIn('needs', automated['jobs']['linux'])
+        release = workflow('release.yml')
+        self.assertEqual(release['jobs']['checks']['uses'], './.github/workflows/test.yml')
+        self.assertEqual(release['jobs']['build']['needs'], 'checks')
+        for name in ['test.yml', 'release.yml']:
+            self.assertNotIn('test-windows.yml', json.dumps(workflow(name)))
+
     def test_native_windows_executes_named_nonempty_security_matrix(self):
-        job = workflow('test.yml')['jobs']['windows']
+        job = workflow('test-windows.yml')['jobs']['windows']
         self.assertEqual(job['runs-on'], 'windows-latest')
         self.assertNotIn('continue-on-error', job)
         text = json.dumps(job)
