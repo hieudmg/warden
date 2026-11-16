@@ -667,3 +667,34 @@ first-manifest evidence byte hash unchanged made SAMEverifier/SAMEbundle PASS
 11:34:17Z BEFORE prose edits; not verifier weakening/rerunwaiver. Receipt and final
 rebundle include this separate required-failure disposition. No source/test/native
 status changed; final unchanged verifier must PASS after all prose updates.
+
+### Hosted import-toast query — bounded local test-only review checkpoint
+
+Baseline15c93b8, no publication. Actual R8 Linux second frontend278PASS/1FAIL
+found both real import-success toast and Radix accessibility announcer with
+role=status (rawlinux10925-11002); first frontend279PASS is not a waiver.
+Installed Radix1.2.23 confirms separate temporary announcer portal. Exact hosted
+scheduling is unknown; production/accessibility unchanged. Existing import test
+now awaits actual announcer, selects unique status within Notifications(F8),
+asserts exact message/title/toast visibility and announcer coexistence, retains
+all five loaders exactly twice. Controlled unscoped250msRED reproduces actual
+ambiguity; same-budget scopedGREEN passes. Default-budget observation passed by
+waiting for announcer removal and is retained, not counted as RED.
+
+Fresh predetermined25/25 focused invocations PASS; full frontend twice each
+17files279PASS plus13nodecontracts/zero suite skips; production build+include-dev
+audit0PASS; all13 emitted assets byte-identical. Private recorder SyntaxError and
+initial Go1.25.14-root/1.26.11-tool mismatch retained and corrected in harness only;
+explicit child GOROOT1.26.11 yields fresh actual-binary integrated Go remainder+
+4runnercontracts PASS. Whole scripts/test.sh verbatim UNRUN because npm ci install
+is forbidden; frontend/build/audit argv executed separately unchanged, suffix
+extracted unchanged. No fresh fullGo/fullrace/vet claim for TS-test-only scope.
+See ../reports/2026-11-16-import-toast-test.md and private /var/tmp/wft evidence.
+
+Four task paths include full append-only ignored ledger delta; private review
+bundle /var/tmp/warden-import-toast-review.{diff,json,sha256} binds baseline,
+source freeze, RED/GREEN, commands, outputs and assets. All runtime/Windows/
+workflows/modules/version0.23.0 fields frozen. Independent parent review pending;
+no stage/commit/push/PR/CI dispatch/install/global/service/trust/GUI/signing/release.
+Windows latest15/1/0, both cleanup absence proofs/final counters and all external
+acceptance gates remain open; R8 historical docs not rewritten. STOP for review.

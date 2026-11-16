@@ -1666,3 +1666,20 @@ Independent reviewer `01a1e1ea-4a07-7503-b4c7-e7dc96ff6f22` found no issues in t
 - Actual curl suite: **5/5 PASS**, `/var/tmp/warden-windows-r8-parent-curl.log`.
 
 Reviewed task hashes remained unchanged before this prose-only append. Fresh approved base remains `0.22.1`; the three existing `0.23.0` fields remain unchanged. This accepts only one diagnostic automatic-PR checkpoint. It is not a removal fix, consent extension, absence proof or native acceptance. The 120s/20s bounds and exact cleanup gates remain intact. Any additional removal GUI action still requires separate owner approval.
+
+### R8 actual hosted result: removal dialogs observed, no action
+
+Automatic run [43860842587](https://github.com/hieudmg/warden/actions/runs/43860842587), attempt 1, expected head `15c93b8a89241fd3b69f9c015d7ad527eee4f12e`, checked out merge `be0bf8fcb09c64371c712e83a828222ca144fe1d` into base `c10435358456dda0c1044fa5606b6ab5af014eef`. Both jobs failed. Evidence remains private at `/var/tmp/warden-pr45-native-r8/`; artifact 14222464771 ZIP SHA-256 `62cc52c35c90454a9cf1c78c942fde7323c7a964115a892f9af71b342c7b633d` matched the API. Parent verified that hash and program-derived the exact sixteen top-level names against all three UTF-8-BOM JSONL streams: **15 PASS / 1 FAIL / 0 SKIP**, each once, zero subtest skips.
+
+Both separately bound cleanup processes positively displayed an owned `#32770` **Root Certificate Store** dialog with Yes/No controls after their guarded Remove markers:
+
+- Main PID 9700, creation FILETIME 134393033228357679, dialog TID 10096, root HWND 131432.
+- Independent PID 1408, creation FILETIME 134393034341473827, dialog TID 7520, root HWND 196994.
+- Each had four complete owned controls. Static ID 65535 contained 421 runes, with the expected CN and full SHA-1 each counted once. Raw text was not emitted: this is **not full UI identity/layout proof or proof of the sole blocking cause**.
+- Expected public identity: CN `Warden T16 isolated fixture 85caaeaaabadd015bc0787b1c007b0f6`, SHA-1 `811286BB39F8728E22C849ECB0EA9A407C14F368`, DER-SHA256 `9de03fa0509b139c392414111065a90889b7f315f8aa7f21b95cdb0cc0ff506c`.
+
+Both probes completed read-only in approximately 80–87 ms with nil error/context, before their target processes joined on their reserved operation deadlines (parent contexts still nil). Main and independent operation boundaries were approximately 112s/12s, inside the unchanged 120s/20s enclosing caps; overall test 124.26s. **Neither absence PASS nor store-close completion exists.** Parent inspected `upgrade.jsonl:203,226,230,251–252,259,300,304,317–318`; full phase evidence is at `:203–321`. No click or removal consent was performed. Additional fixture-only removal confirmation was explicitly requested from the owner and remains unanswered; import consent is not reused.
+
+One guarded import, normal completion, exact CurrentUser DER before downloads and all eleven actual HTTPS mode assertions still passed. Observed counters were connections=10, payload=16, CRL=1, exact=2, CDN=2, forbiddenHTTP=0; final Go counter assertions were not reached because cleanup failed. All replacement-helper subcases passed. This remains a failing native gate, not a cleanup fix or absence proof.
+
+Linux passed initial frontend 279/build/audit, full Go/full race/vet and SSH/DB race25. It then failed the integrated second frontend run, 278/279, at `app.test.tsx:435`: the global status query matched the real import toast and accessibility announcer (`linux.log:10925–11002`). Integrated completion, offline/curl, final restart, CI12/actionlint and source scan were not reached; older passes do not establish those gates for this run. The separately reviewed local test-only correction is documented in [import-toast-test](2026-11-16-import-toast-test.md); its fresh local frontend/build/audit passes do not change this hosted outcome. No rerun, merge, release or signing operation was initiated.

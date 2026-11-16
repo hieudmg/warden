@@ -432,7 +432,22 @@ describe("Data transfer", () => {
     await user.upload(within(dialog).getByLabelText(/export file/i), file)
     await user.click(within(dialog).getByRole("button", { name: "Import" }))
 
-    expect(await screen.findByRole("status")).toHaveTextContent(/imported/i)
+    // Exercise the real Radix announcer alongside the visible toast, rather
+    // than relying on whether the assertion wins its animation-frame race.
+    const announcer = await screen.findByText("Notification SuccessImported data successfully.", {
+      selector: "span",
+    })
+    expect(announcer).toHaveAttribute("role", "status")
+
+    // Resolve before the announcer's one-second lifetime ends, so retrying
+    // until it disappears cannot conceal an ambiguous toast query.
+    const notifications = screen.getByRole("region", { name: "Notifications (F8)" })
+    expect(notifications).not.toContainElement(announcer)
+    const toast = await within(notifications).findByRole("status", undefined, { timeout: 250 })
+    expect(toast).toBeVisible()
+    expect(within(toast).getByText("Imported data successfully.")).toBeVisible()
+    expect(within(toast).getByText("Success")).toBeVisible()
+    expect(announcer).toBeInTheDocument()
     for (const loader of [
       mockedAPI.listSSH,
       mockedAPI.listDB,
