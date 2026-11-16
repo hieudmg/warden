@@ -101,6 +101,39 @@ func TestPowerShellFixtureOutputBoundsAndFragments(t *testing.T) {
 	}
 }
 
+// A successful tool exit is required; streamed output is never a substitute.
+func TestPowerShellFixtureCommandReportsExitStatus(t *testing.T) {
+	const childEnv = "WARDEN_TEST_EXIT_PROCESS"
+	switch os.Getenv(childEnv) {
+	case "success":
+		os.Exit(0)
+	case "failure":
+		os.Exit(7)
+	}
+	executable, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		name string
+		code int
+	}{{"success", 0}, {"failure", 7}} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+			defer cancel()
+			cmd := exec.CommandContext(ctx, executable, "-test.run=^TestPowerShellFixtureCommandReportsExitStatus$")
+			cmd.Env = append(os.Environ(), childEnv+"="+tc.name)
+			err := runPowerShellFixtureCommand(cmd, func(string) {})
+			if ctx.Err() != nil || cmd.ProcessState == nil {
+				t.Fatalf("exit fixture did not join normally: process=%v context=%v", err, ctx.Err())
+			}
+			if cmd.ProcessState.ExitCode() != tc.code || (err == nil) != (tc.code == 0) {
+				t.Fatalf("exit status: got=%d error=%v want=%d", cmd.ProcessState.ExitCode(), err, tc.code)
+			}
+		})
+	}
+}
+
 func TestPowerShellFixtureCommandStreamsAndJoinsOnCancellation(t *testing.T) {
 	const marker = "Native HTTPS phase: before-block"
 	const childEnv = "WARDEN_TEST_PHASE_PROCESS"

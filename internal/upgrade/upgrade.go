@@ -124,7 +124,8 @@ if ($parent) { [void]$parent.WaitForExit(30000) }
 $deadline = (Get-Date).AddSeconds(90)
 while ((Get-Date) -lt $deadline) {
     try {
-        [IO.File]::Replace($source, $target, $null)
+        # NullString supplies a .NET null, not PowerShell's empty string.
+        [IO.File]::Replace($source, $target, [System.Management.Automation.Language.NullString]::Value)
         exit 0
     } catch {
         Start-Sleep -Milliseconds 250

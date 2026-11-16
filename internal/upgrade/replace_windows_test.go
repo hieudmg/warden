@@ -76,6 +76,11 @@ func TestWindowsHelperAtomicReplacementAndFailureCleanup(t *testing.T) {
 				if err == nil {
 					t.Fatal("helper replaced a delete-locked target")
 				}
+				// HRESULT_FROM_WIN32(ERROR_SHARING_VIOLATION), not a bad
+				// backup argument or another unrelated refusal.
+				if !strings.Contains(string(output), "Native replacement exception: System.IO.IOException; HRESULT=-2147024864;") {
+					t.Fatal("locked helper did not report the actual sharing violation")
+				}
 				assertFileContent(t, target, "old fixture")
 			} else {
 				if err != nil {

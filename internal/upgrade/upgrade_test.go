@@ -597,7 +597,7 @@ func TestWindowsHelperWaitsAndRetriesReplace(t *testing.T) {
 		"$env:" + windowsHelperParentPIDEnv,
 		"WaitForExit",
 		"while (",
-		"[IO.File]::Replace($source, $target, $null)",
+		"[IO.File]::Replace($source, $target, [System.Management.Automation.Language.NullString]::Value)",
 	} {
 		if !strings.Contains(program, want) {
 			t.Errorf("helper program missing %q", want)

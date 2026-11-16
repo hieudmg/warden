@@ -6,8 +6,8 @@ import (
 )
 
 // windowsHelperDiagnosticProgram adds disposable argument/control probes and
-// failure output. Production stays unchanged until the native backup argument
-// is observed, rather than inferred solely from an invalid-path exception.
+// failure output. The preservation test reconstructs the exact production
+// program, including its native-proven true-null backup argument.
 func windowsHelperDiagnosticProgram(t *testing.T) string {
 	t.Helper()
 	const boundary = "    } catch {\n        Start-Sleep -Milliseconds 250"
@@ -85,6 +85,16 @@ const windowsHelperFailureDiagnostic = `    } catch {
             }
         }
         Start-Sleep -Milliseconds 250`
+
+// Native PS5.1 boundary controls established that $null becomes an empty
+// backup path. Check the actual encoded production program, not the probe.
+func TestWindowsHelperEncodedReplacementUsesTrueNullBackup(t *testing.T) {
+	program := decodePowerShellCommand(t, encodePowerShellCommand(windowsHelperProgram))
+	const replace = "[IO.File]::Replace($source, $target, [System.Management.Automation.Language.NullString]::Value)"
+	if strings.Count(program, replace) != 1 || strings.Count(program, "[IO.File]::Replace(") != 1 {
+		t.Fatal("encoded helper must atomically replace once with the PS5.1 true-null backup argument")
+	}
+}
 
 func TestWindowsHelperDiagnosticPreservesProgram(t *testing.T) {
 	instrumented := windowsHelperDiagnosticProgram(t)

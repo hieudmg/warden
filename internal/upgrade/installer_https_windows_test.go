@@ -40,6 +40,10 @@ func TestWindowsPowerShellTrustedHTTPSReleaseMatrix(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	certutil, err := exec.LookPath("certutil.exe")
+	if err != nil {
+		t.Fatal(err)
+	}
 	dir := t.TempDir()
 	writePrivate := func(prefix string, data []byte) string {
 		t.Helper()
@@ -211,9 +215,7 @@ func TestWindowsPowerShellTrustedHTTPSReleaseMatrix(t *testing.T) {
 		t.Logf("native HTTPS observed counts after process joins: connections=%d payload=%d CRL=%d exact=%d CDN=%d forbiddenHTTP=%d",
 			peerConnections.Load(), payloadRequests.Load(), crlRequests.Load(), goodRequests.Load(), cdnRequests.Load(), forbiddenHTTP.Load())
 	}()
-	runPS := func(phase, program string, budget time.Duration) error {
-		ctx, cancel := context.WithTimeout(context.Background(), budget)
-		defer cancel()
+	runPS := func(ctx context.Context, phase, program string) error {
 		cmd := exec.CommandContext(ctx, shell, "-NoLogo", "-NoProfile", "-NonInteractive", "-EncodedCommand", encodePowerShellCommand(powerShellFixtureProgram(program)))
 		cmd.Env = env
 		err := runPowerShellFixtureCommand(cmd, func(line string) { t.Logf("native HTTPS %s: %s", phase, line) })
@@ -223,6 +225,27 @@ func TestWindowsPowerShellTrustedHTTPSReleaseMatrix(t *testing.T) {
 		}
 		return err
 	}
+	// Preflight, import and downloads share the original matrix deadline.
+	matrixCtx, cancelMatrix := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancelMatrix()
+	preflight := `$ErrorActionPreference = 'Stop'
+if ($PSVersionTable.PSEdition -ne 'Desktop' -or $PSVersionTable.PSVersion -lt [Version]'5.1') { throw 'Desktop 5.1 required' }
+$framework = Get-ItemProperty 'HKLM:\SOFTWARE\Microsoft\NET Framework Setup\NDP\v4\Full' -Name Release
+if ($framework.Release -lt 461808) { throw '.NET4.7.2+ required' }
+[Console]::Out.WriteLine('CurrentUser unique-CA-preflight:begin')
+$ca = New-Object System.Security.Cryptography.X509Certificates.X509Certificate2($env:WARDEN_FIXTURE_CA)
+if ($ca.Thumbprint -ne $env:WARDEN_FIXTURE_THUMBPRINT) { throw 'preflight certificate mismatch' }
+$store = New-Object System.Security.Cryptography.X509Certificates.X509Store('Root', 'CurrentUser')
+try {
+    $store.Open([System.Security.Cryptography.X509Certificates.OpenFlags]::ReadOnly)
+    if ($store.Certificates.Find([System.Security.Cryptography.X509Certificates.X509FindType]::FindByThumbprint, $ca.Thumbprint, $false).Count -ne 0) { throw 'fixture CA already exists; refuse ownership' }
+    [Console]::Out.WriteLine('CurrentUser unique-CA-preflight absence:PASS')
+} finally { $store.Close() }
+`
+	if err := runPS(matrixCtx, "preflight", preflight); err != nil {
+		t.Fatalf("native current-user CA preflight: %v", err)
+	}
+	// Arm only after preexisting absence is proven, before any partial import.
 	// Independent cleanup also runs if the main PowerShell process is killed.
 	// Compare the exact generated certificate bytes before removing its thumbprint.
 	cleanup := `$ErrorActionPreference = 'Stop'
@@ -249,10 +272,29 @@ try {
 }
 `
 	defer func() {
-		if err := runPS("independent-cleanup", cleanup, 20*time.Second); err != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+		defer cancel()
+		if err := runPS(ctx, "independent-cleanup", cleanup); err != nil {
 			t.Errorf("exact current-user certificate cleanup: %v", err)
 		}
 	}()
+	// Documented test-only CurrentUser CLI alternative; noninteractive behavior
+	// remains a native-CI question. Go owns certutil directly, never via PS.
+	// Reserve its bounded output-pipe join within, not beyond, the matrix budget.
+	deadline, _ := matrixCtx.Deadline()
+	importCtx, cancelImport := context.WithDeadline(matrixCtx, deadline.Add(-time.Second))
+	cmd := exec.CommandContext(importCtx, certutil, "-user", "-addstore", "Root", caFile)
+	cmd.Env = env
+	cmd.WaitDelay = time.Second
+	t.Log("native HTTPS CurrentUser unique-CA-import:begin")
+	importErr := runPowerShellFixtureCommand(cmd, func(line string) { t.Logf("native HTTPS certutil: %s", line) })
+	importContextErr := importCtx.Err()
+	cancelImport()
+	t.Logf("native HTTPS certutil process joined: error=%v context=%v", importErr, importContextErr)
+	if importErr != nil || importContextErr != nil {
+		t.Fatalf("native current-user CA import: process=%v context=%v", importErr, importContextErr)
+	}
+	t.Log("native HTTPS CurrentUser unique-CA-import:end")
 	program := `$ErrorActionPreference = 'Stop'
 [Console]::Out.WriteLine('runtime-check:begin')
 if ($PSVersionTable.PSEdition -ne 'Desktop' -or $PSVersionTable.PSVersion -lt [Version]'5.1') { throw 'Desktop 5.1 required' }
@@ -270,16 +312,16 @@ $ca = New-Object System.Security.Cryptography.X509Certificates.X509Certificate2(
 if ($ca.Thumbprint -ne $env:WARDEN_FIXTURE_THUMBPRINT) { throw 'fixture certificate mismatch' }
 [Console]::Out.WriteLine('certificate-load:end')
 $store = New-Object System.Security.Cryptography.X509Certificates.X509Store('Root', 'CurrentUser')
-$added = $false
+$verified = $false
 try {
     [Console]::Out.WriteLine('CurrentUser store-open:begin')
     $store.Open([System.Security.Cryptography.X509Certificates.OpenFlags]::ReadWrite)
     [Console]::Out.WriteLine('CurrentUser store-open:end')
-    if ($store.Certificates.Find([System.Security.Cryptography.X509Certificates.X509FindType]::FindByThumbprint, $ca.Thumbprint, $false).Count -ne 0) { throw 'fixture CA already exists' }
-    [Console]::Out.WriteLine('CurrentUser unique-CA-add:begin')
-    $store.Add($ca)
-    $added = $true
-    [Console]::Out.WriteLine('CurrentUser unique-CA-add:end')
+    $imported = $store.Certificates.Find([System.Security.Cryptography.X509Certificates.X509FindType]::FindByThumbprint, $ca.Thumbprint, $false)
+    if ($imported.Count -ne 1) { throw 'fixture CA import not present exactly once' }
+    if ([Convert]::ToBase64String($imported[0].RawData) -ne [Convert]::ToBase64String($ca.RawData)) { throw 'fixture CA imported bytes mismatch' }
+    $verified = $true
+    [Console]::Out.WriteLine('CurrentUser exact-CA postcondition:PASS')
     foreach ($mode in @('exact', 'redirect', 'downgrade', 'bad-digest', 'duplicate', 'truncated', 'binary-oversize', 'checksum-oversize', 'slow-headers', 'HTTP', 'untrusted')) {
         [Console]::Out.WriteLine('private-directory:begin mode='+$mode)
         $work = Join-Path $env:WARDEN_FIXTURE_ROOT $mode
@@ -305,7 +347,7 @@ try {
     }
 } finally {
     try {
-        if ($added) {
+        if ($verified) {
             [Console]::Out.WriteLine('CurrentUser unique-CA-remove:begin')
             $store.Remove($ca)
             if ($store.Certificates.Find([System.Security.Cryptography.X509Certificates.X509FindType]::FindByThumbprint, $ca.Thumbprint, $false).Count -ne 0) { throw 'fixture CA remains after main cleanup' }
@@ -317,7 +359,7 @@ try {
     }
 }
 `
-	if err := runPS("matrix", program, 2*time.Minute); err != nil {
+	if err := runPS(matrixCtx, "matrix", program); err != nil {
 		t.Fatalf("native trusted HTTPS: %v", err)
 	}
 	if goodRequests.Load() != 2 || cdnRequests.Load() != 2 {

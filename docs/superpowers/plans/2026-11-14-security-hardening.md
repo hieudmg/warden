@@ -68,6 +68,36 @@ Windows. Parent review/possible next diagnostic push is required. All16 native
 passes once/zero skips,0.23.0, unchecked acceptance gates and narrow T16 risk
 scope remain; no manual signing/dispatch/public attestation/service authority.
 
+### Native Windows round 3 — binding proven; bounded CA CLI candidate
+
+Parent-reviewed R2 is41fa49b. Run43793981262 attempt1 checked out PR merge
+`f87c2d48` into basec104353: Linux133058505878 SUCCESS; Windows133058505659
+FAIL, still **14/16 named top-level PASS/two FAIL/zero reported skips**. All four
+helper cases prove legal exact source/target, literal C#null PASS, PS$null→empty
+argument refusal and explicit PS5.1NullString→null PASS. This isolates the backup
+argument: R3 makes only the authorized production File.Replace sentinel change,
+with portable actual-encoded-program RED→GREEN; native ordinary/metacharacter
+positives and sharing-violation negatives remain pending. HTTPS actual C# compile
+and Root CurrentUser open complete; last phase is `$store.Add($ca)`, no network,
+independent exact-CA absence PASS. Parent's official scout/steer authorizes the
+no-force `certutil.exe -user -addstore Root <CAfile>` fixture candidate, not UI
+cause or known noninteractive success. Go directly owns its bounded child;
+preexisting absence precedes cleanup arming, exact DER/thumbprint postcondition
+precedes Download. Shared2min matrix/20s independent cleanup and every safeguard
+remain. See [chronological R3 evidence](../reports/2026-11-16-native-windows-followup.md#round-3--demonstrated-helper-binding-defect-root-insertion-stall-2026-11-16).
+
+Fresh fullGo794PASS/3existing skips, portable focused/race10/vet/installers/
+actualcurl/12contracts/actionlint and Windows compile-only pass. **Broad upgrade/
+client race FAILS** in unchanged `terminal/TestResizeEventsPropagate` (SIGWINCH
+timeout plus send/close data race); retained with source hashes, no rerun waiver,
+terminal edit or inferred baseline execution. Parent must disposition that
+separate failure and independently review/fresh-check R3 before any possible
+fix/diagnostic push. All16 native passes once/zero skips,0.23.0, open genuine
+PRF/production-trust/privileged Unix/hosted provenance gates and narrow T16 risk
+scope stay unchanged. No manual signing/dispatch/publication/production authority
+or completed checkbox. This is a source-supported helper correction plus bounded
+CA evaluation, not accepted native GREEN or a fully green local checkpoint.
+
 ## Execution, dependencies, and evidence discipline
 
 - Repository `/var/www/code/go/warden`, branch `hieudmg/security-hardening`, inspected HEAD/fetched `origin/main` both `c104353` on 2026-11-14. Only one writer in this checkout. A controller may assign sequential workers one task at a time; no parallel writers/worktrees. Each handoff names changed paths, red/green commands, remaining failures and next dependency. Preserve unrelated work, particularly protected untracked `mise.toml` (do not read/change/stage).

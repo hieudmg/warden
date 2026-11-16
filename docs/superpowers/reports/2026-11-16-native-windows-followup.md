@@ -1,5 +1,17 @@
 # Native Windows follow-up — PR #45
 
+## R3 parent local checkpoint — push held for terminal failure
+
+Independent review found no issues in the bounded R3 helper/fixture patch,
+verified all 9 task paths, 461 inputs and 41 evidence files, and retained the
+separate terminal validation blocker. Parent freshly passed upgrade race tests
+and upgrade vet: `/var/tmp/warden-windows-r3-parent-{upgrade-race,vet}.log`.
+Parent inspected the actual failed broad-race stack and Unix source; this is a
+real send/close race, not a waived baseline failure. Checkpoint the reviewed
+Windows changes locally, then fix and independently verify terminal ownership
+before the next push. R3 is still native UNRUN and certutil is still a candidate,
+not established noninteractive success. No release/signing approval follows.
+
 ## R2 parent diagnostic-push checkpoint
 
 Independent rereview found no issues in the second diagnostic patch, matching
@@ -393,3 +405,197 @@ OIDC/signature gates remain open. The narrow T16 risk acceptance is not a gate
 waiver or authorization for manual signing/dispatch/public attestations/tlog
 writes. The outstanding manual-signing question is unanswered; no related work
 was implemented or run. Stop after this bounded diagnostic self-review.
+
+## Round 3 — demonstrated helper binding defect; Root insertion stall (2026-11-16)
+
+Resumed at parent-reviewed/committed/pushed
+`41fa49bab2c0078eed6339c68a966bf95e35fa34`. Same sole-writer authority and
+prohibitions; no model/thinking override or fallback attempted. Evidence root
+`/var/tmp/ww3.9hre`; original ledger snapshot `ledger.before.md`. Actual full/job
+logs from run43793981262 attempt1 are copied as data only. Actual PR checkout
+`f87c2d48cf129a4feff92421b3cce0f2f8dcda13`, basec104353; Linux133058505878
+SUCCESS and Windows133058505659 FAIL. Latest **14/16 named top-level PASS,
+two FAIL, zero reported skips**: agent7/SFTP5 aggregate PASS markers plus the
+upgrade JSON's2PASS/2FAIL (do not mistake only the four printed upgrade JSON
+results for the entire native matrix). Historical13/3 and14/2 above remain
+unchanged. Native runtime PS5.1.26100.33648/.NET release533509/Go1.26.11.
+
+**Pre-edit native TDD exception:** local powershell.exe/pwsh remain unavailable.
+The hosted old-helper failures are native RED with matching successful boundary
+controls, not locally reproduced native RED/GREEN. Add a portable focused
+regression against the actual encoded helper, observe it fail for the old backup
+expression, then make the minimal authorized production change. Portable source/
+encoding GREEN and Go compile-only Windows cannot establish native GREEN;
+ordinary/metacharacter positives and genuine sharing-lock negatives still need
+actual future CI. Keep90s/30s production,1s/8s helper test and2min/20s HTTPS
+budgets unchanged, with every assertion/security safeguard retained.
+
+All four helper cases now show exact environment/legal existing source/target,
+C# literal-null replacement PASS, PowerShell `$null` received as **empty** and
+ArgumentExceptionHRESULT-2147024809/refusal, then explicit
+`[System.Management.Automation.Language.NullString]::Value` received as **null**
+and replacement PASS. The unchanged production helper then has the same illegal
+backup-path failure. Combined with the saved official PS5.1 NullString contract
+and Framework File.Replace null-backup handling, this isolates the third string
+argument coercion—**no longer an unproven argument hypothesis**. Approved fix:
+use that exact native-PASS true-null expression in atomic File.Replace, without
+fallback/delete-move, cleanup/path/environment/lifecycle changes. Existing probe
+controls remain for comparison; locked negatives must demonstrate genuine lock
+failure, not accept another invalid-backup refusal.
+
+HTTPS phases now establish actual C# compilation completed, certificate loaded,
+CurrentUser Root store opened, and last reached `unique-CA-add:begin`; no add end
+before the2min kill. All fixture connection/payload/CRL/exact/CDN/forbiddenHTTP
+counts are0. Independent cleanup reports exact-certificate absence PASS and
+process joined without error. Thus the stall is **at `$store.Add($ca)` before
+network**, not an unlocalized compilation/TLS/network failure. UI consent is a
+hypothesis, not observed fact. Parent's independent read-only scout owns official
+noninteractive-import research; do not duplicate it or edit the CA fixture until
+parent steer. Any supported replacement must preserve unique CurrentUser-only
+ownership/preexistence guard, exact DER/thumbprint postconditions, checked exit,
+bounded join/cleanup inside existing budgets and all real verified-HTTPS modes.
+No LocalMachine/elevation/registry hack, validation bypass or new trust contract.
+Manual signing remains unanswered/unauthorized. Stop at bounded review once CA
+steer is considered, not with a premature helper-only acceptance handoff.
+
+### Round-3 CA steer and pre-edit fixture exception
+
+Parent subsequently forwarded the read-only scout's official Microsoft certutil
+reference: `certutil [options] -addstore CertificateStoreName InFile`, with
+`-user` selecting user rather than machine stores. Parent authorized evaluating
+**`certutil.exe -user -addstore Root <CAfile>`**, no `-f`, only inside this owned
+CI fixture. The docs list `-f` but do not establish consent suppression or
+noninteractive behavior; Import-Certificate docs likewise prove supported store
+targets, not the observed stall's UI cause. The candidate is not known working
+until native CI. Microsoft cautions certutil is not recommended for production
+code: this invocation remains test-only. Official page syntax was read before
+coding; no duplicate CA investigation, new trust scope or production import.
+
+**Before CA edits:** native import/runtime TDD cannot run here. Retain the actual
+old `$store.Add($ca)` timeout as RED symptom evidence, but do not call it a local
+candidate RED→GREEN. Strongest feasible checks: current native fixture source/
+Go cross-compilation, portable process streaming/exit/cancel-join tests and exact
+ownership/deadline self-review; actual import plus all verified HTTPS modes and
+CA absence remain pending. Keep the existing2min **shared overall** budget for
+read-only preflight, Go-owned CLI import and main PowerShell matrix; independent
+cleanup retains its separate20s budget. A successful preflight must verify the
+unique thumbprint absent **before** cleanup is armed. Arm only exact-DER-owned
+cleanup before starting import, covering partial failure/timeout. Launch certutil
+directly from Go, not nested beneath killable PowerShell; require successful exit
+and subsequent exact-DER/thumbprint store postcondition before any Download.
+Reserve1s inside that shared deadline for certutil Cmd.WaitDelay (verified
+Go1.26.11 documentation), so unexpected open output pipes cannot cause an
+unbounded join or add a new budget. Preserve all negative/positive assertions,
+CurrentUser-only targeting, no force flag, policy mutation or TLS bypass.
+
+### Round-3 implementation and measured validation
+
+- Production `internal/upgrade/upgrade.go`: only the atomic File.Replace backup
+  expression changes to the exact native-PASS NullString sentinel, with one
+  constraint comment explaining empty-string coercion. Existing wait/retry/
+  cleanup/exit/environment/literal-path behavior is otherwise byte-preserved.
+  `replace_windows.go`, actual installer/C#, all crypto/TLS/ACL/collision/state/
+  rollback/manual-cutover safeguards and0.23.0 stay unchanged.
+- Added `TestWindowsHelperEncodedReplacementUsesTrueNullBackup` against the
+  **actual production encoded program**, independently expecting the native-PASS
+  expression and exactly one atomic call. At03:02:45UTC, exactGo1.26.11 focused
+  command failed for the old third argument (`helper-red.log`, exit1). At
+  03:03:51UTC all portable helper tests passed after the minimal change
+  (`helper-green.log`, exit0). Existing lifecycle expectation now names true
+  null. Diagnostic preservation still reconstructs the exact production program.
+- Native ordinary/metacharacter cases retain all success/content/inventory/
+  stage-cleanup/join assertions. Locked negatives additionally require the main
+  helper's System.IO.IOException HRESULT_FROM_WIN32(ERROR_SHARING_VIOLATION),
+  -2147024864, not another unrelated nonzero exit. The intentionally failing
+  `$null` **probe** is separate from the main-helper diagnostic prefix. New
+  locked assertions and replacement positives remain pending native runtime;
+  no assumption that a previous invalid-argument negative proved lock handling.
+- CA fixture: a read-only Desktop/framework/certificate/thumbprint/absence
+  preflight completes successfully before exact-DER cleanup is armed. Go owns
+  certutil directly with literal argv `-user -addstore Root <private CAfile>`;
+  no nested PS launch, force flag, import fallback or changed production trust.
+  Output is bounded/streamed; nonzero exit, expired import context or WaitDelay
+  error fails. The import's child deadline is shared matrix deadline minus1s,
+  with1s WaitDelay reserved inside the original2min total. Main PS reopens only
+  CurrentUser Root and requires exactly one thumbprint match with exact DER
+  before any actual Download. Main and independent cleanup retain exact CA
+  removal/absence; partial import failure also reaches independent20s cleanup.
+  No certutil operation executed locally. The supported candidate's ability to
+  avoid the observed stall is **UNVERIFIED**, not an established UI-prompt fix.
+- New portable command-exit characterization checks real child exit0 versus7 and
+  joined ProcessState; existing runner behavior already passed it, so this is
+  **not** a fabricated RED→GREEN. Existing phase-before-cancel/output-bound
+  regressions plus it pass race10. No additional Go runner implementation or
+  speculative fixture framework was added.
+
+Every recorded test command uses TMPDIR=/var/tmp, GOTOOLCHAIN=go1.26.11 and
+PYTHONDONTWRITEBYTECODE=1. `commands.jsonl` binds exact argv/UTC/exit/environment;
+`hosted-summary.json` separates12 aggregate agent/SFTP passes from printed
+upgrade JSON2PASS/2FAIL. Initial read-only parser incorrectly expected all16 in
+printed JSON and was corrected; no native outcome/test was rerun or changed.
+API sources/official scout limits are in `api-evidence.json`; source-only native
+program inputs and exact downloader/probe bytes are bound by review manifest.
+
+| Current-source command / evidence | UTC start→end, 2026-11-16 | Result |
+| --- | --- | --- |
+| `go test ./internal/upgrade -run '^TestWindowsHelperEncodedReplacementUsesTrueNullBackup$' -count=1 -v` (`helper-red.log`) | 03:02:45→03:02:46 | expected RED on old actual program, exit1 |
+| `go test ./internal/upgrade -run '^TestWindowsHelper' -count=1 -v` (`helper-green.log`) | 03:03:51→03:03:51 | portable helper GREEN, exit0 |
+| `go test -race ./internal/upgrade -run '^(TestWindowsHelper\|TestPowerShellFixture\|TestInstallerDownloaderSource)' -count=1 -v` (`focused-green.log`) | 03:08:55→03:08:57 | PASS portable contracts/process tests |
+| Windows/amd64/CGO0 `go test -c -o /var/tmp/ww3.9hre/upgrade.test.exe ./internal/upgrade` (`windows-compile.log`) | 03:08:57→03:08:58 | PASS **compile only**, binary never executed |
+| `go test -json ./... -count=1 -timeout=180s` (`full-go.log`) | 03:10:28→03:10:58 | PASS794 top-level tests; three existing explicit skips |
+| `go test -race -json ./internal/upgrade ./internal/client/... -count=1 -timeout=180s` (`upgrade-client-race.log`) | 03:10:28→03:10:49 | **FAIL**338 passes/one failure/one explicit skip; terminal race below |
+| `go test -race ./internal/upgrade -run '^TestPowerShellFixture' -count=10 -timeout=30s -v` (`stream-race10.log`) | 03:10:28→03:10:41 | PASS three portable logging/process tests10times |
+| `go vet ./...` (`vet.log`) | 03:11:45→03:11:46 | PASS, run separately after failed race short-circuited initial chain |
+| `bash scripts/test-installers.sh` (`installers.log`) | 03:10:28→03:10:39 | PASS offline wrappers only |
+| `python3 scripts/installers_test.py` (`installer-https.log`) | 03:10:39→03:10:42 | PASS four actual-curl/private verified-TLS matrices |
+| `python3 -m unittest discover -s scripts/ci -v` (`ci-contracts.log`) | 03:10:42→03:10:45 | PASS12 offline contracts, fake publication only |
+| Existing private actionlint1.7.12 with optional analyzers disabled (`actionlint.log`) | 03:10:45→03:10:45 | PASS; shellcheck/pyflakes unavailable, not claimed |
+
+Full-suite skips remain two opt-in browser fixture servers and unprivileged Unix
+wrong-owner; race skips only wrong-owner. Windows build-tagged code does not run
+on Linux. The new helper regression and command-exit characterization explain
+794 versus792, not additional native acceptance. Frontend/browser fixture inputs
+remain baseline-identical; no frontend/browser rerun is claimed. Prior release-
+build/scan evidence is historical for its original inputs, not proof for the
+changed production helper.
+
+### Round-3 open local race — not waived or silently fixed
+
+The requested broad affected race command **failed**, and no passing rerun is
+used to waive it. `TestResizeEventsPropagate` timed out after2s without its
+SIGWINCH event; deferred Restore then triggered a detector-confirmed send/close
+race. Stack: `internal/client/terminal/terminal_unix.go:87` closes events in
+Restore while `:113` sends in startResize after releasing s.mu. Test callsite
+`terminal_linux_test.go:250,258`. Both source files are byte-identical to
+41fa49b (`terminal-race-inputs.json`); no terminal file was edited and no separate
+baseline execution was performed. The timeout's delivery cause is not isolated;
+concurrent full/race/installer checks are recorded, not treated as a cause.
+The actual race is an unresolved validation blocker, **not a baseline waiver**.
+Upgrade package itself passed within that failed command; this does not turn
+the broader command green. Parent must decide separate terminal triage/fix scope
+and reconcile the failed check before treating local validation as complete.
+
+### Round-3 bounded self-review and handoff
+
+Complete **original41fa49b→current** private review files:
+`/var/tmp/warden-windows-r3-review.diff`, `.json`, `.sha256`. Includes all six
+modified Go paths, this chronological report, plan checkpoint and entire new
+ignored-ledger delta. Protected content is excluded before reads/copies/hashes;
+unrelated cache/evidence, index/HEAD and all three0.23.0 fields remain unchanged.
+Manifest binds current/baseline source bytes, only the authorized production
+call/comment delta, actual unchanged C# and source-only assembled native programs,
+Go/tool runtime metadata, compile-only binary, evidence and ledger prefix/delta.
+Format/whitespace, nonapplying reverse-patch, prefix and checksum verification
+are required; no independent review is implied by self-review.
+
+**Implemented production binding correction; CA CLI remains a bounded native
+candidate; broader local race FAILED. No all-native acceptance claim.** Parent
+independent review/fresh checks and terminal-failure disposition precede any
+possible diagnostic/fix push to automatic PR CI. Still require all16 named native
+tests once PASS/zero skips, ordinary/metacharacter success plus genuine locked
+failure, actual trusted-HTTPS good bytes/full negative matrix and exact CA
+absence. Genuine PRF/production trust, privileged Unix wrong-owner and hosted
+artifact/OIDC/signature gates remain open. No T16 residual acceptance waiver,
+manual signing/dispatch/public attestations/transparency writes, service/global
+policy operations or publication authority. No checkbox completed. Stop at this
+bounded self-review/report; parent controls the next step.
