@@ -527,3 +527,41 @@ latest15PASS/1FAIL/0SKIP; all16oncePASS/zero skips/all11real HTTPS/exact CA clea
 remain required. External PRF/production trust/privileged Unix/artifact-OIDC/
 signatures and signing authorization remain open. No worker publication, CI,
 staging/commit/push, trust, installer/service/global tool/signing/release action.
+
+### Linux blocked-flush checkpoint before queued Windows consent
+
+Current hosted run43831002522attempt1/head71b6c2a/merge02bccd2 failed Linux's first
+fullGo in `TestManagedResponseBlockedHTTPFlushTerminates/write-deadline` with
+unexpected EOF, not waived by earlier passes. Subsequent hosted full race/vet/
+SSHDB25/HTTPS/curl/CI/source-scan gates were not reached. Native16once15/1/0;
+R6 successfully observed public owned controls with NO ACTION, a prerequisite
+checkpoint, not functional consent/import proof. Consent remains queued, no
+Windows change in this separate boundary.
+
+The [blocked-flush report](../reports/2026-11-16-blocked-flush.md) records exact
+Go1.26.11 installed/official source, deterministic actual-pipe/HTTP RED and
+fixture-only correction. Server-wide50ms reached BOTH secret and lock sockets:
+secret Write50.3ms/zero bytes/timeout, actual lock HTTP200 Write53.7ms/zero bytes/
+timeout -> ReadResponse unexpected EOF. Exact historical CI scheduling unproven,
+but the mechanism is causally reproduced. Separate actual HTTP server/listener
+for write-deadline lock preserves shared authenticated plane/middleware with
+ordinary120s while first remains50ms; no deadline-rewriting wrapper, production
+change, fake Flush/lock, larger50ms/peer3s/waitDelivery3s bound or weaker200/no-secret
+assertion. Other two variants remain unchanged. Regression instrumentation and
+implementation ship together; both Serve lifetimes close/join.
+
+Fresh GREEN all3variants+regression; focused runtime delivery race25 covers14tests
+350top/775all-level PASS/zero skips. Fresh uncached fullGo807PASS/3existing skips,
+fullrace807PASS/3skips (required server/store/client657PASS/3skips), vet and actual
+production-binary HTTPS runner Go section/4contracts PASS. Frontend was not rerun;
+unchanged hosted279/build/audit is historical/borrowed, not fresh local proof.
+Whole SSHDB25/curl/CI/source scan not rerun here; no clean-module or complete
+hosted-pipeline claim. Native, genuine PRF/production trust, privileged Unix,
+artifact-OIDC/signature/public-signing gates remain open. All3versions0.23.0,
+HEAD/index/protected exclusions/frozen sources and ledger prefix retained.
+
+Deliver same-baseline `/var/tmp/warden-blocked-flush-review.{diff,json,sha256}`
+for independent parent review/fresh checks and LOCAL COMMIT before separate
+queued consent handoff. No push of Linux fix alone/repeated no-action CI; no
+worker stage/commit/push/PR/dispatch/GUI/trust/global tools/services/installers/
+signing/tag/release/merge/worktrees. Bounded checkpoint only, then STOP.
