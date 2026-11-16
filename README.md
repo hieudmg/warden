@@ -8,17 +8,19 @@ run development operations through them, and records agent change reports.
 > as experimental software, review its behavior, and do not assume it is
 > production-hardened.
 
-Warden is designed for a private tailnet. The previous release had no
-application authentication; this security-hardening branch instead requires
-passkey-authenticated management and individually web-approved CLI credentials.
-It is not yet an accepted security release. Read [Security](docs/security.md)
-before exposing it.
+The **0.23.0 security upgrade** requires HTTPS, passkey-authenticated management
+and individually web-approved CLI credentials. A private tailnet is optional
+defense in depth, not authentication. This is an unpublished local implementation
+checkpoint, **not an accepted security release**: genuine authenticator PRF with
+production certificate trust, native Windows, and hosted artifact/OIDC/signature
+evidence remain required. See the [acceptance matrix](docs/superpowers/reports/2026-11-14-t17-integration.md)
+and [Security](docs/security.md) before exposing it.
 
 ## Install
 
-Installer/service examples below describe the previous release. On this branch
-use [explicit HTTPS initialization](docs/initialization.md) and verified-HTTPS
-client enrollment; installer/release acceptance is still pending.
+Use [explicit HTTPS initialization](docs/initialization.md) and verified-HTTPS
+client enrollment. The instructions below describe the implemented upgrade;
+they do not authorize or claim a release, installation or service cutover.
 
 For old data, follow [old-release export → fresh init → v1 import](docs/migration.md).
 Never reuse/delete the old encrypted database to make this branch start. Keep the
@@ -100,8 +102,8 @@ warden-server upgrade
 
 Each command downloads the latest released binary for the current platform,
 verifies it against the release `SHA256SUMS`, and replaces only its own
-executable. Client config, cached credentials, server config, the database,
-any retained legacy `master.key`, and the service unit are left untouched.
+executable. Client config, private IPC discovery material, server config, the
+database, any retained legacy `master.key`, and the service unit are left untouched.
 
 `warden-server upgrade` does not restart the service. It prints the manual
 user-scope and system-scope systemd restart commands, which are also listed in
@@ -127,18 +129,11 @@ see [configuration](docs/configuration.md) and [CLI enrollment](docs/cli.md).
 Native Windows and genuine PRF/browser acceptance remain pending; this is not a
 completed security release.
 
-The following installer layout describes the previous release (installer work
-remains separately scoped); current server initialization is documented in
-[initialization](docs/initialization.md). Server installer previously created:
-
-```text
-~/.warden/
-├── server.json
-├── warden.db
-├── master.key
-├── warden-server
-└── warden-server.service
-```
+The server installer creates only `warden-server` and an absent
+`warden-server.service` under `~/.warden/`. Later explicit init creates private
+`server.json` and a fresh initialized `warden.db`; runtime may create WAL/SHM
+sidecars. **No plaintext vault key is created or loaded.** Existing legacy keys
+remain untouched only for old-release rollback. See [initialization](docs/initialization.md).
 
 See [Configuration](docs/configuration.md) for file paths, environment
 variables, and complete server settings.
@@ -203,7 +198,10 @@ passwords, private keys, and passphrases. Store it securely and delete it once
 the migration is complete. Import only succeeds when the destination has no
 managed data, so it never overwrites or merges existing records; a failed import
 leaves the destination unchanged. The destination re-encrypts imported secrets
-with its own master key, so the source and destination do not need the same key.
+with its own random vault DEK, wrapped by its passkeys and offline recovery
+material. Source and destination do not need the same key or authentication
+identity. Authenticate and unlock the destination, then authorize that exact
+import with a fresh assertion. Auth/session/client records never travel in exports.
 
 See [CLI guide](docs/cli.md) for advanced behavior, picker details, database
 targets, copy semantics, and host-key handling.

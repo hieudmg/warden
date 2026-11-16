@@ -1,7 +1,67 @@
 # Security model
 
-Warden is a personal development aid, not a production security boundary.
-Review code and deployment choices before using it with sensitive systems.
+Warden is a personal development aid, not certified production-hardened software.
+The 0.23.0 implementation nevertheless makes **mandatory application
+authentication** a security boundary, independent of network membership. Normal
+management requires a passkey session and unlocked vault; CLI retrieval requires
+an individually web-approved credential. Setup, web and client APIs require
+configured HTTPS. A private tailnet is optional defense in depth, never an auth
+bypass. Review deployment choices before using sensitive systems.
+
+## Vault custody, recovery and release gates
+
+Explicit `warden-server init` is the only bootstrap: an eight-character CSPRNG
+terminal-only password, absolute 15-minute ready-time lifetime, bounded guesses,
+setup-only routes, signed WebAuthn UV registration/assertion and required PRF.
+There is no first-visitor initialization. A random DEK encrypts fields with
+AES-256-GCM and row/field AAD. Passkey PRF/HKDF/AES-GCM and high-entropy recovery
+wrappers protect that DEK; no disk plaintext vault key or fallback is loaded.
+PRF output is key material, **not a signed identity proof**. Software passkeys
+are supported by standards, not a vendor allowlist; unsupported PRF explicitly
+fails without downgrade. Login can work locked without PRF, unlock cannot.
+
+Restart is always locked. Logout revokes only that session, not the global key;
+global lock is separate and cancels/drains secret response emission. Checked
+writes and HTTP/1 flush remain inside the delivery lease, with joined cancellation
+and current authentication/recovery revalidation after acquisition. The guarantee
+is server emission into the network stack, not client receipt, proxy-buffer
+revocation, future HTTP/2 proof or erasure of already retrieved credentials.
+
+Save/re-enter recovery at setup and rotation. Verified recovery is restricted to
+unlock and replacement enrollment, not management/export. Only after verifying a
+new signed PRF-capable passkey and same-DEK wrapper round-trip does one atomic
+commit replace **all** old passkeys/wrappers and revoke sessions/clients. Abort
+preserves identity; success returns to ordinary login. Rotation is separate.
+No last-passkey deletion or administrator/recovery-without-key bypass exists.
+See [initialization/recovery](initialization.md) and [migration/rollback](migration.md).
+
+Live compromise of browser/provider/OS, same-origin JS, unlocked server, service
+account or trusted terminating proxy can steal live material; this is not zero
+knowledge. Clearing Go/JS references is best effort, not guaranteed GC/string/
+crypto-copy zeroization. Protect process memory/core dumps/swap and backups.
+Metadata is not all encrypted. Old backup wrappers/recovery material remain
+usable after current revocation/rotation; remote credentials already retrieved
+must be rotated at the remote system after exposure. Losing every usable passkey
+and saved recovery key means losing vault access.
+
+The [T17 acceptance matrix](superpowers/reports/2026-11-14-t17-integration.md)
+distinguishes local PASS from remaining **UNRUN** genuine authenticator PRF with
+production trust, native Windows and hosted artifact/OIDC/signature checks.
+Synthetic signed fixtures/injected PRF/test-only certificate exceptions are not
+those proofs. This is not release readiness. Source scans retain eight Go
+module-only findings; stripped release-binary scans conservatively exit 3, not
+zero. The owner accepted only the identified enabled Undici trusted-service/
+terminating-proxy risks and Sigstore DSSE/PAE type-binding limitation in the
+[T16 risk report](superpowers/reports/2026-11-14-t16-action-runtime-risk.md), not
+all action audit findings or downstream verification. Retain exact byte/source/
+run/type guards and direct official attester; await official fixes. Mutable
+same-version force/clobber and executable-only/manual-restart policy are
+intentional, not immutability/anti-rollback guarantees.
+
+Warden-owned HTTPS does **not** add verified TLS to existing external database
+or HTTP CONNECT proxy legs. Basic credentials/data can traverse plaintext directly
+or onward beyond an SSH endpoint. These owner-scope-excluded risks remain, not
+end-to-end confidentiality claims. No DB/proxy profile or v1 export format change.
 
 ## Current local-agent boundary (T10)
 
@@ -66,8 +126,8 @@ TSV delimiters remain intact. No arbitrary header-length truncation was added.
 SSH interactive/exec byte streams and binary/file transfers are not filtered.
 See [CLI diagnostic details](cli.md#diagnostic-text) and the
 [T13 implementation report](superpowers/reports/2026-11-14-t13-client-output.md).
-Independent review/native execution remain separate; no T14 distribution or T15
-dependency remediation is claimed.
+Native execution and overall acceptance remain separate; distribution and
+dependency evidence are recorded in T14–T17, not inferred from redirect tests.
 
 ## SSH authentication and graph lifecycle (T12)
 
@@ -87,7 +147,7 @@ joins pending opens. Cancellation can abort the root socket before reverse
 logical teardown because an SSH channel Close itself may block on a write.
 
 An unconfirmed SSH OpenChannel has no per-request cancellation handle in pinned
-x/crypto v0.55.0. A borrowed DB dialer therefore holds an explicit pool owner,
+x/crypto v0.56.0. A borrowed DB dialer therefore holds an explicit pool owner,
 not just a target pointer. Canceling such an open invalidates and aborts **that
 same graph**, including concurrent leases on that connection; it is removed from
 reuse with reason `SSH channel open canceled; connection-level abort required`.
@@ -111,11 +171,15 @@ the 5-second whole-chain bound and checking graph Close errors. This is separate
 from the production cancellation fixes.
 
 See the [T12 evidence report](superpowers/reports/2026-11-14-t12-ssh-lifecycle.md)
-for exact RED/GREEN, real handler/drain completion, final focused normal/race,
-boundary race25 and full-Go PASS. **One intermediate interactive PTY Ctrl-D
-timeout remains unexplained**; later repeated passes are not its fix or waiver.
-Native Windows and independent acceptance remain pending. Known x/crypto
-advisories remain T15 work; the dependency is not upgraded here. External DB and
+for exact RED/GREEN, real handler/drain completion and the historical PTY
+failure chronology. Native PTY evidence later demonstrated why immediate
+SIGINT/EOT sequencing is not a valid fixture assumption; the fixture now waits
+for a later private shell prompt before its single EOT, retaining the 10-second
+bound and joins. That does not establish the parent's exact failed syscall
+ordering or a production input-pump defect. T15 additionally fixed independently
+attributed SSH relay fixture leaks and upgraded x/crypto to v0.56.0. Fresh T17
+checks are in its matrix; historical passing reruns alone are not the fixes.
+Native Windows and overall acceptance remain pending. External DB and
 CONNECT proxy transport is unchanged: Basic credentials and onward traffic may
 still traverse plaintext beyond SSH's encrypted segment. No end-to-end external
 TLS, genuine PRF or production-browser trust claim follows from these tests.
@@ -168,7 +232,8 @@ an unbounded edge slice. Failure returns no partial bundle. Initial missing
 profiles and any archived profile retain generic `404 not_found`; malformed,
 cyclic, missing-hop, missing/cleared-key, depth and budget failures use
 `422 invalid_graph`. New graph errors contain fixed text/numeric IDs/limits,
-never raw stored JSON. Broader audit-value cleanup remains T8, not a T7 claim.
+never raw stored JSON. The separate T8 audit boundary below handles raw
+audit-value cleanup.
 
 Both phases use **one SQLite read transaction**. Its first metadata read fixes
 which rows are validated and later decrypted; concurrent profile/archive/key
@@ -344,38 +409,15 @@ has now authorized the limited flow above without changing dependencies. Native
 Windows traversal/ACL/replacement tests remain required and unverified. This
 section records authority and remaining evidence, not release acceptance.
 
-## Historical pre-0.23 server notes
+## Legacy keys are rollback-only
 
-The server/master-key notes below describe the previous release, **not** the
-breaking branch's current authenticated initialization/vault implementation or a
-new security acceptance claim. For the current server workflow and remaining
-acceptance limitations, use [initialization](initialization.md) and the
-[approved design](superpowers/specs/2026-11-14-security-hardening-design.md).
-
-### Previous trust boundary
-
-The server has no application authentication. Tailnet membership is the trust
-boundary: every peer that can reach the API can manage profiles, retrieve
-credentials through transport endpoints, and run client operations.
-
-Bind loopback and use a tailnet proxy, or bind directly to a Tailscale address.
-Do not expose the API on a public interface. Runtime configuration accepts only
-`localhost`, loopback, or Tailscale addresses.
-
-## Credential handling
-
-- Credentials are encrypted at rest with AES-256-GCM.
-- Each value uses a fresh nonce and resource-bound additional authenticated
-  data.
-- The standalone 32-byte master key must have mode `0600`.
-- The server owns the database and master key; it never executes commands.
-- Normal API reads return redacted metadata.
-- Decrypted transport responses use `Cache-Control: no-store`.
-- Audit records contain operation/resource/source/result/timestamp, never
-  credentials, SQL text, or command payloads.
-
-Protect the master key separately from the database. Losing it makes all
-stored credentials unreadable.
+Pre-0.23 releases used a standalone plaintext master key and lacked application
+authentication. Retain that exact old key with coherent old artifacts only for
+the [manual old-release export/rollback workflow](migration.md). Never copy it
+to the new runtime as a fallback or start the old release on the new database.
+Current storage uses wrapped custody above. Normal reads redact secret fields;
+auth/data/error responses are no-store. Audit limits apply to new events, not
+old rows or a guarantee against caller-supplied secrets in allowed User-Agent.
 
 ## SSH host keys
 

@@ -31,7 +31,7 @@ minimum_go="$(awk '$1 == "go" { print $2 }' go.mod)"
 # installation/build output never becomes code in the publisher.
 log "building frontend"
 npm --prefix "$ROOT/web" ci --include=dev
-npm --prefix "$ROOT/web" run build
+NODE_ENV=production npm --prefix "$ROOT/web" run build
 
 log "building release artifacts into $DIST"
 rm -rf "$DIST"

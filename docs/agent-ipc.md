@@ -124,9 +124,12 @@ its pool lease to invalidate/abort THAT graph with a fixed reason. Other users o
 that SAME connection fail too; independent healthy graphs remain usable. Normal
 borrowed Close and completed opens do not invalidate healthy transports. The
 [T12 report](superpowers/reports/2026-11-14-t12-ssh-lifecycle.md) records this
-constraint, callback joining, fixture leak proof and validation limits, including
-an unexplained intermediate PTY Ctrl-D timeout. This is not arbitrary-callback
-or blocked-console-reader preemption, native Windows proof, or unconditional
+constraint, callback joining, fixture leak proof and historical PTY Ctrl-D
+failure. The subsequent test-only shell-prompt acknowledgment correction keeps
+the original single-EOT/10-second bound; it is not a production input-pump fix.
+Current local evidence is in the [T17 matrix](superpowers/reports/2026-11-14-t17-integration.md).
+This is not arbitrary-callback or blocked-console-reader preemption, native Windows
+proof, or unconditional
 security acceptance. Forced process termination/crash may leave stale files;
 startup rules handle them, not a promise of crash-time cleanup.
 

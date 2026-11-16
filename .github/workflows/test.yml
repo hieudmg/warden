@@ -44,7 +44,7 @@ jobs:
         run: |
           npm --prefix web ci --include=dev
           npm --prefix web test
-          npm --prefix web run build
+          NODE_ENV=production npm --prefix web run build
           npm --prefix web audit --include=dev
       - name: Full Go checks and bounded whole SSH/DB stress
         shell: bash
@@ -55,8 +55,9 @@ jobs:
           go test -race ./... -count=1 -timeout=180s
           go vet ./...
           go test -race ./internal/client/ssh ./internal/client/db -count=25 -timeout=180s -failfast -v
-      - name: Offline installers, real curl HTTPS matrix and signed HTTPS restart integration
+      - name: Integrated production HTTPS acceptance, offline installers and real curl matrix
         run: |
+          bash scripts/test.sh
           bash scripts/test-installers.sh
           python3 scripts/installers_test.py
           go test ./internal/server/runtime -run '^TestHTTPSRuntimeSubprocessRestartAuthentication$' -count=1 -timeout=180s -v

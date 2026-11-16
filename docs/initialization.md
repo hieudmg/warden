@@ -1,4 +1,4 @@
-# Explicit initialization and authenticated runtime (T1–T3 checkpoint)
+# Explicit HTTPS initialization, unlock and recovery
 
 Initialization remains a separate setup-only process. After it exits, normal
 `warden-server serve --config /your/fresh/private-directory/server.json` now
@@ -7,24 +7,27 @@ Log in with the registered passkey, then use a new required-UV assertion and PRF
 unwrap to unlock management. Logout revokes only that browser session; Lock vault
 cancels/drains global key access. Key reveal/mutation and documented v1
 export/import now require a new passkey assertion bound to the exact request.
-Legacy management transport remains blocked; the future client audience is not
-implemented. Security controls add/revoke passkeys (never the last active one),
+Legacy management transport remains blocked; CLI retrieval uses the separately
+approved `/api/v1/client/` audience through the local agent. Security controls
+add/revoke passkeys (never the last active one),
 rotate recovery with saved re-entry, and offer restricted offline-key recovery.
 Recovery MUST verify a new PRF passkey before atomically replacing ALL old
 passkeys/wrappers, revoking sessions/client authorizations, and returning locked
 to ordinary passkey login. Abort leaves the old identity intact. Recovery alone
 never permits management/read/export and does not rotate the recovery root.
 See the [T3 implementation/evidence report](superpowers/reports/2026-11-14-t3-passkeys-recovery.md)
-for disposable journeys and the T4 generation contract. Genuine PRF-positive
-HTTPS/browser, native Windows and production-browser CSP acceptance are pending;
+for protocol evidence and [CLI enrollment](cli.md#login-logout-and-status) for
+pairing. Genuine PRF-positive HTTPS/browser with production trust and native
+Windows acceptance remain pending. Real Chromium CSP/network checks use a
+synthetic signed authenticator/injected PRF and test-only certificate exception;
 this is not verified M1 or a release-ready security upgrade.
 
 ## Build and run against fresh disposable storage
 
 ```sh
-npm --prefix web run build
-go build -o /tmp/warden-server-t2 ./cmd/warden-server
-/tmp/warden-server-t2 init --config /your/fresh/private-directory/server.json
+NODE_ENV=production npm --prefix web run build
+GOTOOLCHAIN=go1.26.11 TMPDIR=/var/tmp go build -o /var/tmp/warden-server-check ./cmd/warden-server
+/var/tmp/warden-server-check init --config /your/fresh/private-directory/server.json
 ```
 
 Run from an interactive controlling terminal. Without `--config`, init also
@@ -105,6 +108,38 @@ it as a fallback or deletes old artifacts automatically. After publication, reru
 init refuses the installation. A failed HTTP response around commit is ambiguous:
 do not reset storage; retain it and inspect with the authenticated runtime.
 
+## Recovery, replacement and rotation
+
+1. At the HTTPS login view fill **Offline recovery key** and choose
+   **Recover and replace all passkeys**. Re-enter the saved
+   `warden-recovery-v1:...` key privately. The browser derives a separate
+   authentication proof; the server verifies it before returning a recovery
+   wrapper or accepting key delivery. The raw recovery key never goes to the
+   server. Treat this proof as password-equivalent, not phishing-resistant.
+2. After recovery unlock, the session is **restricted**: no managed reads,
+   exports or general administration. Register a new passkey, complete its
+   independent signed user-verifying assertion and PRF unwrap/rewrap check.
+   Unsupported PRF fails explicitly; software passkeys are acceptable when
+   they support the standard. There is no plaintext/key-only fallback.
+3. Only a verified new wrapper preserving the same DEK permits the atomic swap:
+   **all prior passkeys/wrappers are replaced**, all browser sessions and CLI
+   authorizations invalidated, and the vault locked. Log in normally with the
+   replacement passkey and unlock again. Reapprove CLI agents explicitly.
+   Cancel/abort before commit preserves the old identity. A lost completion
+   response is ambiguous: try ordinary login with the verified replacement;
+   never delete storage or identity markers to retry.
+4. Replacement keeps the recovery root. To rotate it separately while normally
+   authenticated and unlocked, use Security's recovery-key rotation, freshly
+   verify, save the new key, hide/re-enter it and confirm its local round-trip.
+   The old key then fails against current state, **not against old backups**.
+
+Keep at least one usable PRF-capable passkey and a separately protected saved
+recovery key. Last-passkey removal is refused; loss of all usable passkeys AND
+recovery means loss of vault access. There is no administrator bypass. Logout
+ends only that browser session; Lock vault is global and drains new secret
+emission before acknowledgement. Previously delivered bytes/proxy buffers or
+retrieved remote credentials cannot be recalled. Every server restart is locked.
+
 ## Existing storage and limitations
 
 Never point init at an old, unknown, corrupt or initialized database. It refuses
@@ -117,10 +152,14 @@ no real migration is performed by this checkpoint. Export version 1 and external
 transport behavior are unchanged.
 
 Tests include real ECDSA-signed fixtures through the maintained verifier,
-setup HTTPS tests with a test-only ceremony seam, normal-runtime subprocess
-TLS/proxy restart tests using the real verifier, and WebCrypto/shared vectors. **A genuine PRF-capable authenticator's
-positive HTTPS/browser ceremony remains external acceptance pending.** Mocks and
-vectors do not prove provider/browser/authenticator PRF behavior. Native Windows
-execution and full browser CSP enforcement are also not established by Linux
-cross-compilation/jsdom. Clearing Go/JS buffers is best effort; same-origin
-malicious JS or a compromised live host/browser can steal live material.
+production init/serve/CLI executables over private-CA-verified HTTPS, explicit
+proxy restart tests, and WebCrypto/shared vectors. The composed journey in
+`scripts/test.sh` uses a real controlling PTY and synthetic signed credentials
+and PRF material; no verifier bypass. Some older setup unit fixtures use an
+explicit test-only ceremony seam. **A genuine PRF-capable authenticator's
+positive HTTPS/browser ceremony with production trust remains pending.**
+Mocks/vectors and the separately run synthetic Chromium CSP journey do not prove
+provider/browser/authenticator PRF support. Native Windows execution is not
+established by cross-compilation; jsdom alone cannot establish browser CSP.
+Clearing Go/JS buffers is best effort; same-origin malicious JS or a compromised
+live host/browser can steal live material.

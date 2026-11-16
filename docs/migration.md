@@ -179,6 +179,9 @@ go test -race ./internal/store ./internal/server/profiles ./internal/server/runt
 The retained [fixture provenance](../internal/store/testdata/README.md) identifies
 its complete synthetic SQL constructor, serializer source and checksums. These
 commands never exercise a live account, upgrade or real old-release server.
-`scripts/test.sh` still contains the historical unauthenticated HTTP/master-key
-lifecycle; **do not use it for this migration**. T17 owns its full replacement,
-not T5's narrowly scoped offline fixture flow.
+`GOTOOLCHAIN=go1.26.11 TMPDIR=/var/tmp bash scripts/test.sh` now runs the
+disposable authenticated HTTPS lifecycle, fresh export/import and separate
+`LegacyRefusalAndRollback` fault/preservation suites. It never touches your
+installation or performs a live migration. Its signed synthetic PRF fixtures
+are not genuine-authenticator/production-trust or native Windows acceptance;
+see [the T17 matrix](superpowers/reports/2026-11-14-t17-integration.md).

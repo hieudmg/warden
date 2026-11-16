@@ -4,7 +4,10 @@ Warden's security-hardening branch requires application authentication and a
 configured HTTPS public origin; a private network is optional defense in depth,
 not authentication or permission to trust additional hosts/origins. The installer
 reference below describes this branch's T14 implementation, not a published or
-accepted security release. The dedicated systemd reference is
+accepted security release. Required genuine PRF/production trust, native Windows
+and hosted artifact/OIDC/signature evidence is still pending; see the
+[T17 acceptance matrix](superpowers/reports/2026-11-14-t17-integration.md).
+The dedicated systemd reference is
 [`deploy/systemd/README.md`](../deploy/systemd/README.md).
 
 ## Breaking-storage cutover on the security-hardening branch

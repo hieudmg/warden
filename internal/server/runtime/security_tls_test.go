@@ -2,81 +2,39 @@ package runtime
 
 import (
 	"bytes"
-	"context"
 	"crypto/ecdsa"
 	"crypto/sha256"
-	"crypto/tls"
 	"encoding/json"
 	"io"
-	"net"
 	"net/http"
-	"net/http/cookiejar"
+	"os"
 	"path/filepath"
 	"testing"
-	"time"
 	"warden/internal/config"
 	"warden/internal/crypto"
-	"warden/internal/store"
-	"warden/internal/web"
 )
 
-// Synthetic signed credentials and PRF material exercise the production HTTPS
-// runtime, never a verifier bypass. This is NOT genuine authenticator PRF proof.
-func TestHTTPSRuntimeT3SecurityLifecycle(t *testing.T) {
-	p, _, initial, dek, firstSigner := runtimeFixture(t)
-	root, initialProof := recoveryFixture(t, p, dek)
-	raw, err := p.store.Installation(context.Background())
-	if err != nil {
-		t.Fatal(err)
-	}
-	dir := t.TempDir()
-	db := filepath.Join(dir, "security.db")
-	if err = store.CommitInstallation(context.Background(), db, raw); err != nil {
-		t.Fatal(err)
-	}
-	_, roots, certPath, keyPath := testCertificate(t, dir)
-	reserved, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatal(err)
-	}
-	address := reserved.Addr().String()
-	reserved.Close()
-	cfg := config.Setup{PublicOrigin: initial.PublicOrigin, RPID: initial.RPID, Mode: "tls", TLSCertificate: certPath, TLSKey: keyPath}
-	jar, _ := cookiejar.New(nil)
-	transport := &http.Transport{TLSClientConfig: &tls.Config{RootCAs: roots, MinVersion: tls.VersionTLS13}, DialContext: func(ctx context.Context, network, target string) (net.Conn, error) {
-		return (&net.Dialer{}).DialContext(ctx, network, address)
-	}}
-	client := &http.Client{Transport: transport, Jar: jar, Timeout: 5 * time.Second}
-	defer transport.CloseIdleConnections()
-	var stop context.CancelFunc
-	var exited chan error
-	start := func() {
-		ctx, cancel := context.WithCancel(context.Background())
-		stop = cancel
-		exited = make(chan error, 1)
-		go func() {
-			exited <- Run(ctx, Options{Config: cfg, Bind: address, DBPath: db, Assets: web.Distribution()})
-		}()
-		deadline := time.Now().Add(5 * time.Second)
-		for time.Now().Before(deadline) {
-			res, e := client.Get(cfg.PublicOrigin + "/api/v1/auth/status")
-			if e == nil {
-				io.Copy(io.Discard, res.Body)
-				res.Body.Close()
-				return
-			}
-			time.Sleep(5 * time.Millisecond)
-		}
-		t.Fatal("HTTPS runtime did not become ready")
-	}
+// One composed disposable journey using production init/serve/CLI binaries and
+// the real signature verifier. Synthetic PRF and graph/clock substitutions are
+// explicit; this is NOT genuine authenticator or native Windows acceptance.
+// Extends the former TestHTTPSRuntimeT3SecurityLifecycle rather than duplicating
+// its signed enrollment/recovery/rotation producer-consumer contracts.
+func TestSecurityLifecycleHTTPS(t *testing.T) {
+	binaries := securityBinaries(t)
+	ambientDB := filepath.Join(t.TempDir(), "must-not-use.db")
+	t.Setenv("WARDEN_SERVER_DB_PATH", ambientDB)
+	t.Setenv("WARDEN_CLIENT_API_BASE_URL", "https://ambient.invalid")
+	active := securityInitialize(t, binaries)
+	initial, dek, firstSigner := active.initial, active.dek, active.signer
+	root, initialProof := active.root, active.proof
+	cfg := config.Setup{PublicOrigin: initial.PublicOrigin, RPID: initial.RPID}
+	client := active.client
+	var stop func()
+	start := func() { stop = securityServe(t, binaries, active) }
 	halt := func() {
 		if stop != nil {
 			stop()
-			if e := <-exited; e != nil && e != context.Canceled {
-				t.Fatal(e)
-			}
 			stop = nil
-			transport.CloseIdleConnections()
 		}
 	}
 	defer halt()
@@ -163,10 +121,24 @@ func TestHTTPSRuntimeT3SecurityLifecycle(t *testing.T) {
 		signed := fixtureAssertion(t, signer, id, initial.Owner.ID, challenge, cfg.PublicOrigin, cfg.RPID, true)
 		result := post("fresh/finish", map[string]any{"id": nonce, "credential": json.RawMessage(signed)}, "")
 		var g struct {
-			Grant string `json:"grant"`
+			Grant   string         `json:"grant"`
+			Wrapper crypto.Wrapper `json:"wrapper"`
 		}
-		json.Unmarshal(result, &g)
-		post("unlock", map[string]string{"grant": g.Grant, "dek": crypto.Encode(dek)}, "")
+		if err := json.Unmarshal(result, &g); err != nil {
+			t.Fatal(err)
+		}
+		// Explicit synthetic PRF result, never a raw-key alternative to the
+		// independent signed assertion or wrapper/key-check contract.
+		material := bytes.Repeat([]byte{15}, 32)
+		if bytes.Equal(id, initial.Owner.Credentials[0].ID) {
+			material = bytes.Repeat([]byte{13}, 32)
+		}
+		round, err := g.Wrapper.Unwrap(material, "passkey", g.Wrapper.VaultID, crypto.Encode(id))
+		if err != nil || !bytes.Equal(round, dek) {
+			t.Fatal("verified passkey wrapper did not preserve DEK", err)
+		}
+		defer clear(round)
+		post("unlock", map[string]string{"grant": g.Grant, "dek": crypto.Encode(round)}, "")
 	}
 	enroll := func(ownerSigner *ecdsa.PrivateKey, ownerID []byte, recovery bool, newID byte) (*ecdsa.PrivateKey, []byte) {
 		t.Helper()
@@ -228,6 +200,18 @@ func TestHTTPSRuntimeT3SecurityLifecycle(t *testing.T) {
 	if status, data := request("GET", "/api/v1/data/export", "", g); status != 200 || !bytes.Contains(data, []byte("synthetic-tls-key")) {
 		t.Fatal("export", status)
 	}
+	post("logout", struct{}{}, "")
+	login(secondSigner, secondID)
+	if status, _ := request("GET", "/api/v1/key-pairs", "", ""); status != 200 {
+		t.Fatal("logout implicitly locked vault", status)
+	}
+	post("lock", struct{}{}, "")
+	if status, _ := request("GET", "/api/v1/auth/status", "", ""); status != 200 {
+		t.Fatal("lock logged out browser", status)
+	}
+	if status, _ := request("GET", "/api/v1/key-pairs", "", ""); status != 423 {
+		t.Fatal("global lock did not deny management", status)
+	}
 	halt()
 	start()
 	if status, _ := request("GET", "/api/v1/key-pairs", "", ""); status != 423 {
@@ -251,8 +235,8 @@ func TestHTTPSRuntimeT3SecurityLifecycle(t *testing.T) {
 	if e != nil || !bytes.Equal(round, dek) {
 		t.Fatal(e)
 	}
+	post("recovery/unlock", map[string]string{"grant": recovered.Grant, "dek": crypto.Encode(round)}, "")
 	clear(round)
-	post("recovery/unlock", map[string]string{"grant": recovered.Grant, "dek": crypto.Encode(dek)}, "")
 	if status, _ := request("GET", "/api/v1/data/export", "", ""); status != 403 {
 		t.Fatal("recovery export", status)
 	}
@@ -280,6 +264,10 @@ func TestHTTPSRuntimeT3SecurityLifecycle(t *testing.T) {
 	if status, data := request("GET", "/api/v1/key-pairs/1", "", g); status != 200 || !bytes.Contains(data, []byte("synthetic-tls-key")) {
 		t.Fatal("replacement lost secrets", status)
 	}
+	securityClientLifecycle(t, binaries, active, post, func(action, method, path, body string) string {
+		return grantFor(replacementSigner, replacementID, action, method, path, body)
+	}, func() { halt(); start() })
+	unlock(replacementSigner, replacementID)
 	g = grantFor(replacementSigner, replacementID, "recovery_rotate", "POST", "/api/v1/auth/recovery/rotation/key", "{}")
 	delivery := post("recovery/rotation/key", struct{}{}, g)
 	var rotation struct {
@@ -304,5 +292,41 @@ func TestHTTPSRuntimeT3SecurityLifecycle(t *testing.T) {
 	body, _ := json.Marshal(map[string]string{"id": nonce.ID, "proof": crypto.Encode(oldProof)})
 	if status, _ := request("POST", "/api/v1/auth/recovery/proof", string(body), ""); status != 403 {
 		t.Fatal("old recovery root still authenticated", status)
+	}
+	g = grantFor(replacementSigner, replacementID, "export", "GET", "/api/v1/data/export", "")
+	status, exported := request("GET", "/api/v1/data/export", "", g)
+	if status != 200 {
+		t.Fatal("source export", status)
+	}
+	halt()
+	active = securityInitialize(t, binaries)
+	initial, dek, client = active.initial, active.dek, active.client
+	cfg = config.Setup{PublicOrigin: initial.PublicOrigin, RPID: initial.RPID}
+	start()
+	firstID = initial.Owner.Credentials[0].ID
+	login(active.signer, firstID)
+	unlock(active.signer, firstID)
+	g = grantFor(active.signer, firstID, "import", "POST", "/api/v1/data/import", string(exported))
+	if status, _ = request("POST", "/api/v1/data/import", string(exported), g); status != 204 {
+		t.Fatal("fresh destination import", status)
+	}
+	g = grantFor(active.signer, firstID, "export", "GET", "/api/v1/data/export", "")
+	status, imported := request("GET", "/api/v1/data/export", "", g)
+	if status != 200 {
+		t.Fatal("destination export", status)
+	}
+	var source, destination map[string]any
+	if json.Unmarshal(exported, &source) != nil || json.Unmarshal(imported, &destination) != nil {
+		t.Fatal("invalid v1 roundtrip")
+	}
+	delete(source, "exported_at")
+	delete(destination, "exported_at")
+	a, _ := json.Marshal(source)
+	b, _ := json.Marshal(destination)
+	if !bytes.Equal(a, b) {
+		t.Fatal("v1 roundtrip changed managed data")
+	}
+	if _, err := os.Stat(ambientDB); !os.IsNotExist(err) {
+		t.Fatal("fixture used ambient server database instead of disposable config")
 	}
 }

@@ -6,6 +6,28 @@ Implement [the approved design](../specs/2026-11-14-security-hardening-design.md
 
 Breaking release approved: `0.22.1 -> 0.23.0`, subject to latest-base recheck and all three version fields in `AGENTS.md`. No legacy encrypted-storage compatibility or automatic deletion; only old-release export -> fresh init -> documented export import. No real migration, deployment, commit/push, dependency edits or app implementation during preparation of these documents.
 
+## Current implementation status — T17 local checkpoint, 2026-11-16
+
+T1–T16 implementation history and reviewed T16 HEAD `774ce3b` are retained below.
+Bounded T17 now replaces the obsolete HTTP/key runner with actual production
+init/serve/CLI + signed HTTPS composition, separately named preservation/daemon
+suites and read-only CI wiring; updates current operational/recovery/security
+runbooks and exactly three version fields to approved **0.23.0**. The
+[T17 requirement/evidence matrix](../reports/2026-11-14-t17-integration.md) records
+current full Go/race/vet, web279+13/audit0/build, offline installers, browser,
+whole SSH/DB race25 and CI checks, genuine substitutions and actual skips/failures.
+The runner/release/test builds explicitly override test NODE_ENV with production;
+the original failed browser trace and focused RED→GREEN evidence are retained.
+
+**No task checkbox or release is accepted here.** Genuine authenticator PRF with
+production trust, native Windows, hosted artifact/downstream/OIDC/signature
+proofs and independent combined acceptance remain pending. Unix cross-owner
+chown fixture also skips without privilege; no native privacy proof is inferred.
+Actual stripped-binary scans conservatively exit3; source0symbol/0package retains
+eight module-only findings. Narrow owner acceptance of specified T16 Action
+Undici/DSSE residuals is not remediation, blanket waiver or dispatch/publication
+authority. Older task checkpoints describe their time, not current missing code.
+
 ## Execution, dependencies, and evidence discipline
 
 - Repository `/var/www/code/go/warden`, branch `hieudmg/security-hardening`, inspected HEAD/fetched `origin/main` both `c104353` on 2026-11-14. Only one writer in this checkout. A controller may assign sequential workers one task at a time; no parallel writers/worktrees. Each handoff names changed paths, red/green commands, remaining failures and next dependency. Preserve unrelated work, particularly protected untracked `mise.toml` (do not read/change/stage).
@@ -218,7 +240,9 @@ Breaking release approved: `0.22.1 -> 0.23.0`, subject to latest-base recheck an
 - **Documentation:** clearly state auth is mandatory, public HTTPS/RP/proxy config, restart locked/manual unlock, recovery save/confirmation, pairing/revocation, memory-only per-user-agent API token/API requests with durable server verifier/revocation, reapproval after agent restart (not server restart or SSH pool idle expiry), no automatic client-token expiry/rotation/refresh, daemon with no timed/idle exit in any authentication/pool state (logout/revocation/outage/restart/lock keep it alive; external cancellation terminates cleanly), deterministic fake-clock lifetime acceptance, stolen-token-until-revocation residual risk, separate disk IPC trust/discovery material, protected local IPC, unchanged external DB/HTTP CONNECT transport behavior and scope-excluded plaintext-leg risks (including onward beyond SSH), retained version 1 export/import, plaintext export cautions/rollback artifacts, memory/live-compromise/backup and already-retrieved-credential limits. Explain no last-passkey/no-recovery bypass. Keep state/service safeguards and approved upgrade semantics.
 - **Version:** re-read latest approved `origin/main` version before PR/release preparation; if still 0.22.1 set all three fields to 0.23.0 without unrelated lock changes. If base moved incompatibly with that explicit approval, raise it rather than silently choosing another version. Verify plain SemVer equality and state old/new/breaking rationale. After the planning hold is lifted, implementation and commit/push/new-PR delivery follow the owner's existing new-PR authorization and scoped Git workflow. Merge, manual release/tag publication and deployment remain separately authorized; this plan does not authorize them.
 - **Final review:** inspect full diff, enumerate every acceptance item and residual dependency exposure, verify protected mise file untouched and no real migration/state changes. Review key-delivery authentication (PRF output not a signature), concurrent setup/lock/recovery/import, client audience and injected redirect clients, Warden-owned HTTPS/IPC TLS boundaries, unchanged external transport residuals, Windows proof and publisher privileges. Findings are verified claims; mark unrun checks/failures honestly. A security release is blocked by missing required proofs or policy-dependent unresolved changes, not by ordinary reversible implementation choices.
-- [ ] Implement and verify T17.
+- **Bounded local T17 implementation checkpoint:** actual current-source composed `TestSecurityLifecycleHTTPS` uses production init/serve/CLI executables, controlling PTY, private-CA HTTPS, real signed verifier and explicit synthetic PRF/clock/graph seams. Fixture subprocesses strip inherited WARDEN overrides, with actual subprocess RED→GREEN and deliberately conflicting disposable environment in the composition. `LegacyRefusalAndRollback` remains a separately run source-named preservation/fault aggregate; independent permanent-agent and real-SSH graph tests also run. Obsolete `scripts/test.sh` is replaced and used by read-only CI. Four runner contracts, build-mode and PTY cancellation RED→GREEN, full Go, required server/store/client race, whole SSH/DB race25, vet, frontend279+13/build/audit0, offline installers/curl, 19 network-gate and two real synthetic Chromium journeys PASS. The initial development-bundle browser failure is retained and root-cause-fixed without relaxing its gate; actual stripped production scans exit3, not PASS. Three release declarations alone change0.22.1→0.23.0; no dependency graph/publication change. Full requirement matrix, exact command timestamps/exits/skips, runbooks, complete original774ce3b-to-current patch/hashed manifest and append-only ledger are in [the T17 report](../reports/2026-11-14-t17-integration.md). Genuine PRF/production trust, NativeWindowsSecurity, hosted artifact/downstream/OIDC/signature evidence and parent independent review remain pending; Unix chown-dependent cross-owner fixture is also UNRUN. No stage/commit/push/dispatch/signing/release/live migration/service operation or protected-file access; stop at self-review.
+- **Parent local checkpoint:** independent review found no issues; parent freshly passed the actual disposable HTTPS runner (including include-dev frontend install/tests/build/audit0), full Go, required server/store/client race scope, vet, 12 CI contracts, actionlint, offline installers and exact-Go source scan (0 symbol/0 package/8 module-only). Parent matched all 18 task-file and 13 emitted-asset hashes and exact three-field 0.22.1→0.23.0-only delta; a fresh fetch confirms base0.22.1. See T17 report for logs. Local review is closed; authorized draft PR/hosted read-only CI is the next checkpoint. No merge/release or manual public signing authorization.
+- [ ] Implement and verify T17 (local implementation independently reviewed and freshly verified; required external/native acceptance remains pending).
 
 ## Coverage and decision ledger
 
@@ -246,4 +270,4 @@ Breaking release approved: `0.22.1 -> 0.23.0`, subject to latest-base recheck an
 | Service-managed self-upgrade semantic changes | T14/T17; owner only if a needed change requires it | Preserve executable-only/manual-restart semantics; not an unconditional blocker |
 | Full release proof/version parity/native checks/real PRF | T17 | Final ledger; no claim of completion from this planning document |
 
-This plan and its linked specification were originally prepared without application changes. T1 execution is now separately recorded in the linked report and ledger; checkboxes remain unchecked while required acceptance is pending. Acceptance names are intentions, not execution evidence; consult each task's recorded checkpoint and report for implemented behavior, measured checks and pending acceptance.
+This plan and its linked specification were originally prepared without application changes. T1–T17 bounded implementation checkpoints are now separately recorded in their linked reports and chronological ledger; checkboxes remain unchecked while required acceptance is pending. Named acceptance intentions alone are not execution evidence: consult the current T17 matrix and each historical task report for exact implemented behavior, measured checks, substitutions, actual failures/skips and outstanding independent/native/external acceptance.
