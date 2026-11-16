@@ -33,7 +33,7 @@ export function DevicesView({ client }: { client: AuthClient }) {
  if (!state.authenticated || state.recovering) return null
  return <section aria-label="CLI devices" className="space-y-2">
   <h3>CLI devices</h3>
-  <p>Compare the complete fingerprint with the CLI before fresh passkey approval. Approval cannot unlock the vault. Credentials remain in agent memory only; restart needs new approval. Revocation blocks future API retrieval, not already retrieved remote credentials or established sessions.</p>
+  <p>Compare the complete fingerprint with the CLI before {state.authMethod === 'account' ? 'fresh password verification' : 'fresh passkey approval'}. Approval cannot unlock the vault. Credentials remain in agent memory only; restart needs new approval. Revocation blocks future API retrieval, not already retrieved remote credentials or established sessions.</p>
   <button disabled={busy} onClick={() => void run(async () => {})}>Refresh devices</button>
   <ul>{devices.pending.map(d => <li key={d.id}>
    <strong>{d.label}</strong> {requested === d.id && <span>Requested device</span>}<p>Request: {d.id}</p><code>{d.fingerprint}</code><p>Expires: {d.expires}</p>

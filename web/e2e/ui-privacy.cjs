@@ -12,6 +12,8 @@ const { spawn, spawnSync } = require('node:child_process')
 const { generateKeyPairSync } = require('node:crypto')
 const syntheticAuthenticator = require('./synthetic-authenticator.cjs')
 const { assertNetworkComplete } = require('./ui-privacy-network.cjs')
+const { completedRequest, installTransitionHold, armTransition, releaseTransition, cookieHeader, proveLocked, proveLoggedOut } = require('./auth-lifecycle.cjs')
+process.umask(0o077)
 const shared = require(path.join(os.homedir(), '.local/share/playwright-global/index.cjs'))
 const repo = path.resolve(__dirname, '../..')
 // This read-only reference installation is explicitly documented by the machine
@@ -43,7 +45,7 @@ async function main() {
   }
   let browser, context, imageServer
   const failures = [], violations = [], network = [], imageHits = [], videos = [], consoleErrors = []
-  const verifiedTransitions = {}
+  const verifiedTransitions = {}, serverProofs = {}
   const requests = new Map()
   let phase = 'setup'
   try {
@@ -57,6 +59,8 @@ async function main() {
     browser = await shared.connect({ project })
     context = await browser.newContext({ ignoreHTTPSErrors: true, recordVideo: { dir: path.join(output, 'video') }, acceptDownloads: true })
     await context.tracing.start({ screenshots: true, snapshots: true, sources: true })
+    const heldDispatch = process.env.WARDEN_UI_HOLD_TRANSITIONS === '1'
+    if (heldDispatch) await installTransitionHold(context)
     const { privateKey } = generateKeyPairSync('ec', { namedCurve: 'prime256v1' })
     await context.addInitScript(syntheticAuthenticator, privateKey.export({ format: 'jwk' }))
     await context.addInitScript(() => { globalThis.__cspViolations = []; document.addEventListener('securitypolicyviolation', event => globalThis.__cspViolations.push({ directive: event.effectiveDirective, blocked: event.blockedURI })) })
@@ -147,7 +151,7 @@ async function main() {
     assert.equal(await dialog.getByLabel('Private key passphrase', { exact: true }).getAttribute('type'), 'password')
     await checkCSP('key pair dialog'); await dialog.getByRole('button', { name: 'Cancel', exact: true }).click()
     await page.getByRole('button', { name: 'Export data', exact: true }).click()
-    await checkCSP('export dialog'); const download = page.waitForEvent('download')
+    await checkCSP('export dialog'); const download = page.waitForEvent('download'); download.catch(() => {})
     await dialog.getByRole('button', { name: 'Export', exact: true }).click()
     const exported = await download; assert.equal(exported.suggestedFilename(), 'warden-data.json'); await exported.delete()
     await page.getByRole('button', { name: 'Import data', exact: true }).click(); await checkCSP('import dialog'); await dialog.getByRole('button', { name: 'Cancel', exact: true }).click()
@@ -189,26 +193,31 @@ async function main() {
     // including unicode subsets not naturally needed by this English test page.
     await page.evaluate(async names => { for (const [index, name] of names.entries()) { const face = new FontFace(`fixture${index}`, `url(/${name})`); await face.load(); document.fonts.add(face) } }, assets.filter(name => name.endsWith('.woff2')))
     await checkCSP('all emitted assets/fonts')
+    const previousCookie = await cookieHeader(page, origin)
+    assert(previousCookie, 'an authenticated cookie must predate both transitions')
+    await armTransition(page, 'lock', heldDispatch)
+    // Register before the click and wait for full post-lock metadata bodies,
+    // not only optimistic UI or the unrelated status response.
+    const lockPost = completedRequest(page, '/api/v1/auth/lock', 'POST')
+    const postLockList = completedRequest(page, '/api/v1/auth/passkeys/list')
+    const postLockDevices = completedRequest(page, '/api/v1/auth/clients/list')
     phase = 'lock'
     await page.getByRole('button', { name: 'Lock vault', exact: true }).click(); await expectVisible(page.getByRole('heading', { name: 'Vault locked', exact: true }))
+    await releaseTransition(page, heldDispatch)
+    await Promise.all([lockPost, postLockList, postLockDevices])
     phase = 'lock confirmation'
-    const locked = await page.evaluate(async () => {
-      const response = await fetch('/api/v1/auth/status', { cache: 'no-store', credentials: 'same-origin' })
-      const state = await response.json()
-      return { status: response.status, unlocked: state.unlocked }
-    })
-    assert.equal(locked.status, 200)
-    assert.equal(locked.unlocked, false, 'server must be locked, not just the optimistic UI')
+    serverProofs.locked = await proveLocked(page, origin, previousCookie)
     verifiedTransitions.locked = true
+    const logoutCookie = await cookieHeader(page, origin)
+    assert(logoutCookie, 'a live session cookie must predate logout')
+    await armTransition(page, 'logout', heldDispatch)
+    const logoutPost = completedRequest(page, '/api/v1/auth/logout', 'POST')
     phase = 'logout'
     await page.getByRole('button', { name: 'Log out', exact: true }).click(); await expectVisible(page.getByRole('button', { name: 'Log in with passkey' }))
+    await releaseTransition(page, heldDispatch)
+    await logoutPost
     phase = 'logout confirmation'
-    const loggedOutStatus = await page.evaluate(async () => {
-      const response = await fetch('/api/v1/auth/status', { cache: 'no-store', credentials: 'same-origin' })
-      await response.arrayBuffer()
-      return response.status
-    })
-    assert.equal(loggedOutStatus, 401, 'server must reject the session, not just show optimistic login controls')
+    serverProofs.loggedOut = await proveLoggedOut(page, origin, logoutCookie)
     verifiedTransitions.loggedOut = true
     assert.equal(await page.locator('.markdown-body').count(), 0)
     const imageOrigin = new URL(hostile).origin
@@ -217,13 +226,13 @@ async function main() {
     const unexpectedConsoleErrors = consoleErrors.filter(error => !(error.message === 'Failed to load resource: the server responded with a status of 401 (Unauthorized)' && expectedFailures.some(request => request.url === error.url && request.status === 401)))
     failures.push(...unexpectedConsoleErrors.map(error => error.message))
     assert.deepEqual(failures, [])
-    await fs.writeFile(path.join(output, 'result.json'), JSON.stringify({ status: 'PASS', tests: 1, browser: browser.version(), syntheticAuthenticator: true, genuinePRF: false, testOnlyCertificateException: true, origin, imageBeforeActivation, imageObservationMs, imageAfterActivation: imageHits.length, imageHits, violations, failures, consoleErrors, expectedFailures, verifiedTransitions, loadedAssets: assets, completedAssets, network }, null, 2))
+    await fs.writeFile(path.join(output, 'result.json'), JSON.stringify({ status: 'PASS', tests: 1, browser: browser.version(), heldDispatch, syntheticAuthenticator: true, genuinePRF: false, testOnlyCertificateException: true, origin, imageBeforeActivation, imageObservationMs, imageAfterActivation: imageHits.length, imageHits, violations, failures, consoleErrors, expectedFailures, verifiedTransitions, serverProofs, loadedAssets: assets, completedAssets, network }, null, 2))
     await fs.writeFile(path.join(dir, 'stop'), '')
     assert.equal(await runtime.completed, 0)
     await fs.writeFile(path.join(output, 'index.html'), '<!doctype html><meta charset="utf-8"><title>T9 UI privacy artifacts</title><h1>T9 production HTTPS UI privacy — PASS</h1><p>One disposable synthetic signed WebAuthn/injected-PRF journey, including explicit unsupported-PRF refusal. Test-only self-signed certificate exception; not genuine PRF or production trust evidence.</p><ul>' + ['result.json', 'trace.zip', 'setup.png', 'login.png', 'dialog-popover.png', 'markdown-before.png', 'markdown-explicit.png', 'video/'].map(file => `<li><a href="${file}">${file}</a></li>`).join('') + '</ul>')
     console.log(`PASS production HTTPS UI privacy/CSP (synthetic signed WebAuthn + injected PRF, test-only certificate exception). Artifacts: ${output}`)
   } catch (error) {
-    await fs.writeFile(path.join(output, 'failure.json'), JSON.stringify({ error: error.stack, violations, failures, consoleErrors, verifiedTransitions, network, imageHits }, null, 2))
+    await fs.writeFile(path.join(output, 'failure.json'), JSON.stringify({ error: error.stack, violations, failures, consoleErrors, verifiedTransitions, serverProofs, network, imageHits }, null, 2))
     throw error
   } finally {
     if (context) {

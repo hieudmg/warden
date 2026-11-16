@@ -19,7 +19,8 @@ async function harness(){
  const fetcher=vi.fn(async(path:RequestInfo|URL,init?:RequestInit)=>{
   const route=String(path);const body=init?.body?JSON.parse(String(init.body)):{};sent.push({path:route,body,headers:init?.headers as Record<string,string>})
   let data:unknown={}
-  if(route.endsWith('/status'))data={authenticated:true,unlocked:true,csrf:'csrf',credential_id:'Bw'}
+  if(route.endsWith('/method'))data={auth_method:'passkey'}
+  else if(route.endsWith('/status'))data={authenticated:true,unlocked:true,csrf:'csrf',credential_id:'Bw'}
   else if(route.endsWith('/passkeys/list'))data={credentials:['Bw']}
   else if(route.endsWith('/clients/list'))data={pending:[{id:'device-id',label:'fixture device',fingerprint:'public-fingerprint',status:'pending',expires:'2099-01-01T00:00:00Z'}],clients:[]}
   else if(route.endsWith('/recovery/begin'))data={id:'nonce',kdf_salt:recovery.kdf_salt}

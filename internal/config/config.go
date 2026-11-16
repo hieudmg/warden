@@ -119,9 +119,6 @@ func DefaultSetup() Setup {
 // environment overrides or runtime validation. Only init may edit drafts.
 func ParseServerDraft(path string, data []byte) (Server, error) {
 	cfg := DefaultServer()
-	if filepath.Clean(path) == filepath.Clean("/etc/warden/server.json") {
-		cfg.DBPath = "/var/lib/warden/warden.db"
-	}
 	if err := decodeServerFile(&cfg, data); err != nil {
 		return Server{}, err
 	}
@@ -150,15 +147,6 @@ func LoadServer(opts ServerOptions) (Server, error) {
 	configPath, required, err := serverConfigPath(opts, lookupEnv)
 	if err != nil {
 		return Server{}, err
-	}
-	// An implicitly discovered legacy config keeps its old omitted DB default.
-	// Explicit legacy paths also retain this behavior; no files are relocated.
-	legacyPath := opts.legacyConfigPath
-	if legacyPath == "" {
-		legacyPath = "/etc/warden/server.json"
-	}
-	if filepath.Clean(configPath) == filepath.Clean(legacyPath) {
-		cfg.DBPath = "/var/lib/warden/warden.db"
 	}
 	if err := mergeServerFile(&cfg, configPath, required, opts.readFile); err != nil {
 		return Server{}, err
@@ -259,11 +247,19 @@ func mergeServerFile(cfg *Server, path string, required bool, readFile func(stri
 }
 
 func decodeServerFile(cfg *Server, data []byte) error {
+	if err := canonicalServerKeys(data); err != nil {
+		return err
+	}
 	var fileCfg serverFileConfig
 	if err := decodeStrictJSON(data, &fileCfg); err != nil {
 		return err
 	}
 
+	// All existing unmarked configs predate the new-init path default, regardless
+	// of pathname. New init always persists an explicit DB path.
+	if fileCfg.DBPath == nil && !fileCfg.InitializationDraft {
+		cfg.DBPath = "/var/lib/warden/warden.db"
+	}
 	cfg.InitializationDraft = fileCfg.InitializationDraft
 	if fileCfg.Security != nil {
 		cfg.Security = fileCfg.Security

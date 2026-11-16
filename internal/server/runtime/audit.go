@@ -19,7 +19,8 @@ func securityAuditOperation(method, route string) string {
 		}
 	} else if method == "POST" {
 		switch route {
-		case "/api/v1/auth/login/begin", "/api/v1/auth/login/finish",
+		case "/api/v1/auth/account/login", "/api/v1/auth/account/unlock", "/api/v1/auth/account/fresh", "/api/v1/auth/account/reset",
+			"/api/v1/auth/login/begin", "/api/v1/auth/login/finish",
 			"/api/v1/auth/fresh/begin", "/api/v1/auth/fresh/finish",
 			"/api/v1/auth/unlock", "/api/v1/auth/lock", "/api/v1/auth/logout",
 			"/api/v1/auth/passkeys/begin", "/api/v1/auth/passkeys/registration", "/api/v1/auth/passkeys/assertion", "/api/v1/auth/passkeys/key", "/api/v1/auth/passkeys/commit", "/api/v1/auth/passkeys/remove",

@@ -1,7 +1,9 @@
 # Configuration
 
 Warden has separate server and client configuration. Configuration files are
-strict JSON: unknown fields and trailing data are rejected.
+strict JSON: unknown fields and trailing data are rejected. Server fields,
+including nested security fields, must use their canonical lowercase spellings;
+case aliases and duplicate keys are refused.
 
 ## Client
 
@@ -48,7 +50,8 @@ create certificates. Explicit custom config/database/TLS paths remain supported.
 
 `serve` discovers `/etc/warden/server.json` **only when** the new default config
 is absent. It never copies or migrates that file, and retains the old omitted DB
-default `/var/lib/warden/warden.db` for that legacy config path. An existing but
+default `/var/lib/warden/warden.db` for **all existing unmarked configs** that
+omit `db_path`, including custom paths. New init always writes an explicit DB path. An existing but
 invalid/incomplete new default causes refusal, not fallback to an old installation.
 Explicit `--config` or `WARDEN_SERVER_CONFIG` wins over discovery. Init uses the
 explicit flag/environment path or prompts with the fresh home-directory default;
@@ -60,6 +63,7 @@ it never silently edits a discovered legacy deployment.
   "db_path": "/home/you/.warden/warden.db",
   "static_fs": "",
   "security": {
+    "auth_method": "account",
     "public_origin": "https://warden.example",
     "rp_id": "warden.example",
     "mode": "tls",
@@ -76,13 +80,17 @@ Fields:
   choice. See [initialization](initialization.md) for HTTPS and RP constraints.
 - `db_path` — fresh SQLite storage for init; existing initialized storage for serve.
 - `security` — public HTTPS origin, RP ID and `tls` or `proxy` transport settings.
+  `auth_method` is `account` or `passkey`; there is no unauthenticated mode.
+  New init defaults to account; a missing legacy field means passkey. Config and
+  installation modes must match. There is no mode conversion or dual enrollment.
   It is immutable once storage is initialized. Proxy mode uses
   `backend_authority` instead of TLS file settings.
 - `static_fs` — optional external frontend directory for development; empty
   uses the embedded UI. Init preserves this and other recognized non-prompted settings.
 - `initialization_draft` — init-owned marker for editable, unfinished answers.
   Serve refuses drafts even if their current answers validate. Init removes the
-  marker after validation and storage checks, **before** starting setup; existing
+  marker after validation and storage checks, durably publishes the config
+  (Unix directory sync; Windows write-through move), **before** starting setup; existing
   storage then prevents further init config edits. Do not toggle it manually.
 - `master_key_path` — retained legacy field only, not a disk-key fallback in the
   authenticated runtime. New init files never emit it.

@@ -58,11 +58,19 @@ type ceremonyVerifier interface {
 	FinishAssertion(auth.Owner, webauthn.SessionData, []byte) (*webauthn.Credential, error)
 }
 
+type AccountCredential struct {
+	ID       string                 `json:"id"`
+	Username string                 `json:"username"`
+	Envelope crypto.AccountEnvelope `json:"envelope"`
+}
+
 type Installation struct {
-	Format       int        `json:"format"`
-	PublicOrigin string     `json:"public_origin"`
-	RPID         string     `json:"rp_id"`
-	Owner        auth.Owner `json:"owner"`
+	AuthMethod   string             `json:"auth_method,omitempty"`
+	Account      *AccountCredential `json:"account,omitempty"`
+	Format       int                `json:"format"`
+	PublicOrigin string             `json:"public_origin"`
+	RPID         string             `json:"rp_id"`
+	Owner        auth.Owner         `json:"owner"`
 	// Passkey is a source compatibility alias for the first wrapper only.
 	// Runtime authorization uses the complete Passkeys collection.
 	Passkey  crypto.Wrapper   `json:"-"`
@@ -111,6 +119,7 @@ type Plane struct {
 	verifiedUntil        time.Time
 	pending              *Installation
 	requests             chan struct{}
+	accountOperations    chan struct{}
 }
 
 func newPlane(cfg config.Setup, assets fs.FS, v ceremonyVerifier, commit func(context.Context, []byte) error) (*Plane, error) {
@@ -127,7 +136,7 @@ func newPlane(cfg config.Setup, assets fs.FS, v ceremonyVerifier, commit func(co
 	if err != nil {
 		return nil, err
 	}
-	return &Plane{cfg: cfg, assets: assets, verifier: v, commit: commit, now: time.Now, done: make(chan struct{}), owner: auth.Owner{ID: id}, vaultID: vault, prfInput: input, requests: make(chan struct{}, 8)}, nil
+	return &Plane{cfg: cfg, assets: assets, verifier: v, commit: commit, now: time.Now, done: make(chan struct{}), owner: auth.Owner{ID: id}, vaultID: vault, prfInput: input, requests: make(chan struct{}, 8), accountOperations: make(chan struct{}, 2)}, nil
 }
 func (p *Plane) ready(now time.Time, password string) {
 	p.active = true
@@ -239,6 +248,15 @@ func (p *Plane) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
+	if r.URL.Path == "/api/v1/setup/account/prepare" {
+		select {
+		case p.accountOperations <- struct{}{}:
+			defer func() { <-p.accountOperations }()
+		default:
+			reject(w, 429)
+			return
+		}
+	}
 	var body []byte
 	if strings.HasPrefix(r.URL.Path, "/api/v1/setup/") {
 		if r.Method != "POST" {
@@ -297,7 +315,20 @@ func (p *Plane) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		reject(w, 403)
 		return
 	}
+	account := p.cfg.AuthenticationMethod() == "account"
+	if account && (strings.HasPrefix(r.URL.Path, "/api/v1/setup/registration/") || r.URL.Path == "/api/v1/setup/assertion/finish" || r.URL.Path == "/api/v1/setup/prepare") || !account && strings.HasPrefix(r.URL.Path, "/api/v1/setup/account/") {
+		reject(w, 403)
+		return
+	}
 	switch r.URL.Path {
+	case "/api/v1/setup/account/begin":
+		if p.phase != "authorized" || strict(body, &struct{}{}) != nil {
+			reject(w, 409)
+			return
+		}
+		respond(w, 200, map[string]string{"vault_id": p.vaultID})
+	case "/api/v1/setup/account/prepare":
+		p.prepareAccount(w, r, body)
 	case "/api/v1/setup/registration/begin":
 		if p.phase != "authorized" {
 			reject(w, 409)
@@ -423,7 +454,7 @@ func (p *Plane) password(w http.ResponseWriter, body []byte) {
 	p.csrfHash = hashToken([]byte(csrf))
 	p.phase = "authorized"
 	http.SetCookie(w, &http.Cookie{Name: "__Host-warden-setup", Value: token, Path: "/", Secure: true, HttpOnly: true, SameSite: http.SameSiteStrictMode, Expires: p.deadline})
-	respond(w, 200, map[string]string{"csrf": csrf})
+	respond(w, 200, map[string]string{"csrf": csrf, "auth_method": p.cfg.AuthenticationMethod()})
 }
 func (p *Plane) setSession(s *webauthn.SessionData) {
 	p.session = s
@@ -474,7 +505,7 @@ func (p *Plane) prepare(w http.ResponseWriter, body []byte) {
 		reject(w, 500)
 		return
 	}
-	p.pending = &Installation{Format: 1, PublicOrigin: p.cfg.PublicOrigin, RPID: p.cfg.RPID, Owner: p.owner, Passkey: prep.Passkey, Recovery: prep.Recovery, RecoveryVerifier: prep.RecoveryVerifier, KeyCheck: check}
+	p.pending = &Installation{AuthMethod: "passkey", Format: 1, PublicOrigin: p.cfg.PublicOrigin, RPID: p.cfg.RPID, Owner: p.owner, Passkey: prep.Passkey, Recovery: prep.Recovery, RecoveryVerifier: prep.RecoveryVerifier, KeyCheck: check}
 	p.phase = "prepared"
 	respond(w, 200, map[string]bool{"prepared": true})
 }

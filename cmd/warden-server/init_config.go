@@ -23,9 +23,13 @@ type initializationConfig struct {
 	cfg      config.Server
 }
 
+var checkInitializationStorage = freshInitializationStorage
+var synchronizeInitializationPublication = syncInitializationDirectory
+
 func readInitializationConfig(path string) (*initializationConfig, error) {
 	s := &initializationConfig{path: path, fields: make(map[string]json.RawMessage), cfg: config.DefaultServer()}
 	defaults := config.DefaultSetup()
+	defaults.AuthMethod = "account"
 	s.cfg.Security = &defaults
 	info, err := os.Lstat(path)
 	if os.IsNotExist(err) {
@@ -45,11 +49,14 @@ func readInitializationConfig(path string) (*initializationConfig, error) {
 	if err != nil {
 		return nil, err
 	}
+	if s.cfg.Security.AuthMethod == "" {
+		s.cfg.Security.AuthMethod = "passkey"
+	}
 	// A draft has never been handed to setup or serve. It may contain an
 	// occupied storage answer, which must remain correctable without opening it.
 	// Published/legacy initialized configs may never be turned back into drafts.
 	if !s.cfg.InitializationDraft {
-		if err := freshInitializationStorage(s.cfg.DBPath); err != nil {
+		if err := checkInitializationStorage(s.cfg.DBPath); err != nil {
 			return nil, err
 		}
 	}
@@ -70,6 +77,9 @@ func openInitializationConfig(path string) (*initializationConfig, error) {
 	}
 	dir, err := filepath.EvalSymlinks(filepath.Dir(path))
 	if err != nil {
+		return nil, err
+	}
+	if err := syncInitializationAncestors(dir); err != nil {
 		return nil, err
 	}
 	canonical := filepath.Join(dir, filepath.Base(path))
@@ -171,13 +181,12 @@ func (s *initializationConfig) save() error {
 	if err = s.unchanged(); err != nil {
 		return err
 	}
-	if s.info == nil {
-		// Exclusive initial publication, never replacement of a racing config.
-		err = os.Link(name, s.path)
-	} else {
-		err = os.Rename(name, s.path)
+	if err = publishInitializationConfig(name, s.path, s.info != nil); err != nil {
+		return err
 	}
-	if err != nil {
+	// Identity commit must never run before the published config (especially draft
+	// removal) crosses this barrier, even when config and DB are on different disks.
+	if err = synchronizeInitializationPublication(filepath.Dir(s.path)); err != nil {
 		return err
 	}
 	s.original = data

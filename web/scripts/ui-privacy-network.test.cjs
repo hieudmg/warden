@@ -75,12 +75,14 @@ test('only the first mount read cancellation with a later completed replacement 
   ]) assert.throws(() => assertNetworkComplete(network, options), /request|response/i)
 })
 for (const [phase, key, status] of [['lock', 'locked', 200], ['logout', 'loggedOut', 401]]) {
-  test(`${phase} cancellation needs an independently verified completed server-state probe`, () => {
+  test(`${phase} cancellation is rejected even with an independently verified completed probe`, () => {
     const aborted = { ...complete(`${origin}/api/v1/auth/${phase}`), method: 'POST', phase, status: null, finished: false, failure: 'net::ERR_ABORTED' }
     const probe = { ...complete(`${origin}/api/v1/auth/status`), status, phase: `${phase} confirmation` }
     const network = [...loaded(), aborted, probe]
     const verified = { ...options, verifiedTransitions: { [key]: true } }
-    assert.doesNotThrow(() => assertNetworkComplete(network, verified))
+    assert.throws(() => assertNetworkComplete(network, verified), /request failed/)
+    assert.throws(() => assertNetworkComplete([...loaded(), { ...aborted, status: 200 }, probe], verified), /request failed/)
+    assert.throws(() => assertNetworkComplete([...loaded(), { ...aborted, failure: null, status: 200 }, probe], verified), /incomplete/)
     assert.throws(() => assertNetworkComplete(network, options), /request failed/)
     assert.throws(() => assertNetworkComplete([...loaded(), aborted], verified), /request failed/)
     assert.throws(() => assertNetworkComplete([...loaded(), { ...aborted, failure: 'net::ERR_CONNECTION_RESET' }, probe], verified), /request failed/)

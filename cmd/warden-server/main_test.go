@@ -188,7 +188,7 @@ func TestInitHelpAndPromptedConfiguration(t *testing.T) {
 	}
 	dir := t.TempDir()
 	path := filepath.Join(dir, "server.json")
-	answers := strings.Join([]string{path, filepath.Join(dir, "vault.db"), "https://warden.example:8443", "warden.example", "proxy", "127.0.0.1:8080", "127.0.0.1:8080"}, "\n") + "\n"
+	answers := strings.Join([]string{path, filepath.Join(dir, "vault.db"), "https://warden.example:8443", "warden.example", "proxy", "127.0.0.1:8080", "127.0.0.1:8080", "account"}, "\n") + "\n"
 	cfg, gotPath, err := promptInitialization(strings.NewReader(answers), &out, "")
 	if err != nil {
 		t.Fatal(err)

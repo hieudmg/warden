@@ -38,7 +38,7 @@ bash scripts/test.sh
 `scripts/test.sh` **replaces** the obsolete unauthenticated HTTP/key-file flow.
 It installs include-dev frontend dependencies, runs all web tests/build/audit,
 builds actual init/serve/CLI executables embedding those assets, and runs
-`TestSecurityLifecycleHTTPS`. Setup uses an actual controlling PTY/CSPRNG password,
+`TestSecurityLifecycleHTTPS` and `TestAccountSecurityLifecycleHTTPS`. Setup uses an actual controlling PTY/CSPRNG password,
 private-CA-verified HTTPS and signed WebAuthn fixtures, never a production auth
 bypass. Fixture subprocesses strip inherited `WARDEN_*` overrides; explicit
 config files alone would not isolate per-field environment settings. The journey
@@ -58,7 +58,18 @@ installers, services, public signing or release writes are used. Runner contract
 are checked by `python3 scripts/test_integration_runner.py`; read-only CI invokes
 the same runner, not only a differently named discrete suite.
 
-Separate real-browser privacy/CSP validation, using the existing shared Chromium:
+Separate real-browser privacy/CSP validation, using the existing shared Chromium
+(build production assets first). The account runner covers setup, recovery reentry,
+login+unlock, nested fresh export, recovery rotation, global lock/re-unlock,
+locked restart, logout and restricted password replacement, asserting no access
+to `navigator.credentials` or PRF:
+
+```sh
+TMPDIR=/var/tmp WARDEN_ACCOUNT_ARTIFACTS=/var/tmp/warden-account-private-artifacts \
+  node web/e2e/account-lifecycle.cjs
+```
+
+Passkey privacy/CSP coverage is retained separately:
 
 ```sh
 GOTOOLCHAIN=go1.26.11 TMPDIR=/var/tmp \

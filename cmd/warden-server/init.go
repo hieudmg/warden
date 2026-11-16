@@ -21,7 +21,7 @@ import (
 )
 
 func printInitUsage(w io.Writer) {
-	fmt.Fprintln(w, "Usage: warden-server init [--config path]\n\nDefaults to ~/.warden/server.json, ~/.warden/warden.db and ~/.warden/tls/.\nSaves each non-secret answer immediately; rerun to edit saved defaults.\nPrompts on the controlling terminal for fresh storage and HTTPS/RP/TLS or\nliteral-loopback proxy configuration. Creates only a temporary password-gated\nsetup plane, confirms passkey PRF and saved recovery, then exits. Existing\nstorage and initialized configuration are never reset. Normal serve starts\nlocked after initialization.")
+	fmt.Fprintln(w, "Usage: warden-server init [--config path]\n\nDefaults to ~/.warden/server.json, ~/.warden/warden.db and ~/.warden/tls/.\nSaves each non-secret answer immediately; rerun to edit saved defaults.\nPrompts on the controlling terminal for fresh storage and HTTPS/RP/TLS or\nliteral-loopback proxy configuration. Creates only a temporary password-gated\nsetup plane, creates an account (default) or passkey, confirms saved recovery,\nthen exits. No unauthenticated mode. Existing\nstorage and initialized configuration are never reset. Normal serve starts\nlocked after initialization.")
 	fmt.Fprint(w, transferHelp)
 }
 func runInit(args []string, stdout, stderr io.Writer, lookupEnv func(string) (string, bool)) int {
@@ -197,6 +197,9 @@ func initializeWithAnswers(input io.Reader, out io.Writer, configPath string, ru
 		err = answer("Explicit loopback backend authority", &cfg.Security.BackendAuthority, cfg.ListenAddr, nil)
 	}
 	if err != nil {
+		return *cfg, configPath, err
+	}
+	if err := answer("Authentication method (account or passkey)", &cfg.Security.AuthMethod, "account", nil); err != nil {
 		return *cfg, configPath, err
 	}
 	if err := cfg.Security.Validate(cfg.ListenAddr); err != nil {

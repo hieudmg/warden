@@ -142,7 +142,7 @@ signal.pause()
 	}
 }
 
-func securityInitialize(t *testing.T, binaries string) *securityInstallation {
+func securityInitialize(t *testing.T, binaries string, methods ...string) *securityInstallation {
 	t.Helper()
 	dir := t.TempDir()
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
@@ -173,6 +173,9 @@ func securityInitialize(t *testing.T, binaries string) *securityInstallation {
 		}
 	}
 	cfg := config.Setup{PublicOrigin: s.origin, RPID: "localhost", Mode: "tls", TLSCertificate: s.ca, TLSKey: keyPath}
+	if len(methods) > 0 {
+		cfg.AuthMethod = methods[0]
+	}
 	raw, err := json.Marshal(map[string]any{"listen_addr": address, "db_path": s.db, "security": cfg})
 	if err != nil {
 		t.Fatal(err)
@@ -204,7 +207,7 @@ signal.signal(signal.SIGTERM, stop)
 collected = b''
 # Resumable init reprompts existing config. Accept the saved TLS values only
 # when each expected field is actually requested, before password disclosure.
-prompts = [b'Fresh storage path', b'Public HTTPS origin', b'WebAuthn RP ID', b'Mode (tls or proxy)', b'Listen address', b'TLS certificate path', b'TLS private key path']
+prompts = [b'Fresh storage path', b'Public HTTPS origin', b'WebAuthn RP ID', b'Mode (tls or proxy)', b'Listen address', b'TLS certificate path', b'TLS private key path', b'Authentication method (account or passkey)']
 answered = 0
 try:
  while True:
@@ -291,66 +294,95 @@ finally:
 	}
 	password = ""
 	csrf = authorized.CSRF
-	var creation struct {
-		PublicKey struct {
-			Challenge string `json:"challenge"`
-			User      struct {
-				ID string `json:"id"`
-			} `json:"user"`
-		} `json:"publicKey"`
-	}
-	if err = json.Unmarshal(post("registration/begin", struct{}{}), &creation); err != nil {
-		t.Fatal(err)
-	}
-	owner, err := crypto.Decode(creation.PublicKey.User.ID, 32)
-	if err != nil {
-		t.Fatal(err)
-	}
-	registration, signer, id := fixtureRegistration(t, creation.PublicKey.Challenge, s.origin, "localhost", true)
-	s.signer = signer
-	var registered struct {
-		Vault     string `json:"vault_id"`
-		Input     string `json:"prf_input"`
-		Assertion struct {
+	var recovery crypto.Wrapper
+	if cfg.AuthenticationMethod() == "account" {
+		var b struct {
+			Vault string `json:"vault_id"`
+		}
+		if err = json.Unmarshal(post("account/begin", struct{}{}), &b); err != nil {
+			t.Fatal(err)
+		}
+		s.dek = make([]byte, 32)
+		s.root = make([]byte, 32)
+		if _, err = rand.Read(s.dek); err != nil {
+			t.Fatal(err)
+		}
+		if _, err = rand.Read(s.root); err != nil {
+			t.Fatal(err)
+		}
+		recovery, err = crypto.Wrap(s.root, s.dek, "recovery", b.Vault, "", nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		salt, _ := crypto.Decode(recovery.KDFSalt, 32)
+		s.proof, err = crypto.Derive(s.root, salt, "warden/v1/recovery-auth")
+		if err != nil {
+			t.Fatal(err)
+		}
+		verifier := sha256.Sum256(s.proof)
+		post("account/prepare", map[string]any{"username": "owner", "password": accountPassword, "password_confirmation": accountPassword, "recovery_wrapper": recovery, "recovery_verifier": crypto.Encode(verifier[:]), "dek": crypto.Encode(s.dek)})
+	} else {
+		var creation struct {
 			PublicKey struct {
 				Challenge string `json:"challenge"`
+				User      struct {
+					ID string `json:"id"`
+				} `json:"user"`
 			} `json:"publicKey"`
-		} `json:"assertion"`
+		}
+		if err = json.Unmarshal(post("registration/begin", struct{}{}), &creation); err != nil {
+			t.Fatal(err)
+		}
+		owner, err := crypto.Decode(creation.PublicKey.User.ID, 32)
+		if err != nil {
+			t.Fatal(err)
+		}
+		registration, signer, id := fixtureRegistration(t, creation.PublicKey.Challenge, s.origin, "localhost", true)
+		s.signer = signer
+		var registered struct {
+			Vault     string `json:"vault_id"`
+			Input     string `json:"prf_input"`
+			Assertion struct {
+				PublicKey struct {
+					Challenge string `json:"challenge"`
+				} `json:"publicKey"`
+			} `json:"assertion"`
+		}
+		if err = json.Unmarshal(post("registration/finish", json.RawMessage(registration)), &registered); err != nil {
+			t.Fatal(err)
+		}
+		assertion := fixtureAssertion(t, signer, id, owner, registered.Assertion.PublicKey.Challenge, s.origin, "localhost", true)
+		post("assertion/finish", json.RawMessage(assertion))
+		s.dek = make([]byte, 32)
+		s.root = make([]byte, 32)
+		if _, err = rand.Read(s.dek); err != nil {
+			t.Fatal(err)
+		}
+		if _, err = rand.Read(s.root); err != nil {
+			t.Fatal(err)
+		}
+		material := bytes.Repeat([]byte{13}, 32) // synthetic PRF, TEST ONLY
+		pass, err := crypto.Wrap(material, s.dek, "passkey", registered.Vault, crypto.Encode(id), nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		pass.PRFInput = registered.Input
+		recovery, err = crypto.Wrap(s.root, s.dek, "recovery", registered.Vault, "", nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		salt, err := crypto.Decode(recovery.KDFSalt, 32)
+		if err != nil {
+			t.Fatal(err)
+		}
+		s.proof, err = crypto.Derive(s.root, salt, "warden/v1/recovery-auth")
+		if err != nil {
+			t.Fatal(err)
+		}
+		verifier := sha256.Sum256(s.proof)
+		post("prepare", setup.Preparation{Passkey: pass, Recovery: recovery, RecoveryVerifier: crypto.Encode(verifier[:]), DEK: crypto.Encode(s.dek)})
 	}
-	if err = json.Unmarshal(post("registration/finish", json.RawMessage(registration)), &registered); err != nil {
-		t.Fatal(err)
-	}
-	assertion := fixtureAssertion(t, signer, id, owner, registered.Assertion.PublicKey.Challenge, s.origin, "localhost", true)
-	post("assertion/finish", json.RawMessage(assertion))
-	s.dek = make([]byte, 32)
-	s.root = make([]byte, 32)
-	if _, err = rand.Read(s.dek); err != nil {
-		t.Fatal(err)
-	}
-	if _, err = rand.Read(s.root); err != nil {
-		t.Fatal(err)
-	}
-	material := bytes.Repeat([]byte{13}, 32) // synthetic PRF, TEST ONLY
-	pass, err := crypto.Wrap(material, s.dek, "passkey", registered.Vault, crypto.Encode(id), nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	pass.PRFInput = registered.Input
-	recovery, err := crypto.Wrap(s.root, s.dek, "recovery", registered.Vault, "", nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	salt, err := crypto.Decode(recovery.KDFSalt, 32)
-	if err != nil {
-		t.Fatal(err)
-	}
-	s.proof, err = crypto.Derive(s.root, salt, "warden/v1/recovery-auth")
-	if err != nil {
-		t.Fatal(err)
-	}
-	verifier := sha256.Sum256(s.proof)
-	post("prepare", setup.Preparation{Passkey: pass, Recovery: recovery, RecoveryVerifier: crypto.Encode(verifier[:]), DEK: crypto.Encode(s.dek)})
-	round, err := recovery.Unwrap(s.root, "recovery", registered.Vault, "")
+	round, err := recovery.Unwrap(s.root, "recovery", recovery.VaultID, "")
 	if err != nil || !bytes.Equal(round, s.dek) {
 		t.Fatal("saved recovery roundtrip", err)
 	}

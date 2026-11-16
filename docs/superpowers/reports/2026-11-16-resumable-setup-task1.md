@@ -268,5 +268,11 @@ Windows compilation does not prove native ACL/privacy or rename/lock behavior.
 The first quota-constrained full run remains a failed historical attempt, not a
 passing run; the disk-backed rerun passed without unrelated cleanup.
 
-Task 1 is verified locally. Stop here for parent review and the separately
-approved Task 2 implementation, including the newly recorded modest UI polish.
+Task 1 was verified locally at this historical checkpoint, not independently
+accepted. The subsequent immutable review **BLOCKED** it on custom-path legacy
+omitted-DB defaults, case-insensitive/duplicate JSON aliases, and the missing
+post-publication directory durability barrier. Earlier passing suites did not
+cover those cases. The sole Task2 writer integrated focused corrections and
+regressions; see [Task2 evidence](2026-11-16-resumable-setup-task2.md). Parent
+re-review of those fixes remains required. No historical result above is promoted
+to proof of the newly identified cases.

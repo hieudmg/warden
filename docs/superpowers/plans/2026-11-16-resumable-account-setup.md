@@ -17,7 +17,7 @@ Repository /var/www/code/go/warden, branch hieudmg/resumable-account-setup, base
 - Preserve private permissions, safe file replacement, storage refusal, concurrency/ownership safeguards and malformed/legacy config protection. Persist answers even when later validation or setup fails, without changing initialized identities/data.
 - Focused failing tests before implementation for drafts/retry, validation failure, storage refusal, private save/update, defaults, mode-dependent fields, malformed/legacy config, explicit paths, concurrent conflicts as applicable. Update relevant help/config/init docs. Do not implement auth-mode selection yet; task 2 owns it.
 - Checks: affected config and warden-server tests; inspect actual filesystem/serialized draft round trips. Report exact RED/GREEN commands, results, limitations.
-- [x] Implement and verify. Local evidence and self-review: [Task 1 report](../reports/2026-11-16-resumable-setup-task1.md). Parent/independent acceptance remains separate.
+- [x] Implement and verify locally. Historical evidence: [Task 1 report](../reports/2026-11-16-resumable-setup-task1.md). Independent immutable review later **BLOCKED** custom-path legacy omitted-DB semantics, canonical JSON alias handling, and config-publication durability. Focused corrections/regressions are integrated in Task2 below; parent re-review remains separate.
 
 ## Task 2: Account authentication end-to-end
 
@@ -27,7 +27,7 @@ Repository /var/www/code/go/warden, branch hieudmg/resumable-account-setup, base
 - Browser UI must branch by configured mode, never invoke WebAuthn/PRF in account mode, support account fresh verification and recovery. No account/password controls that merely pretend success or leave required journeys unavailable. Apply modest setup-page usability polish: clear steps, spacing, helpful validation, and an understandable account/passkey choice; no broad redesign.
 - TDD for focused crypto/schema/setup/runtime/frontend acceptance, preserving legacy passkey tests. Exercise representative producer-to-consumer payloads, signed-in sensitive actions, authenticated CLI approval, restart, lock/logout and recovery. Add HTTPS composed account lifecycle coverage alongside existing passkey lifecycle.
 - Update docs and release version 0.23.0 -> 0.24.0 (minor additive account capability), synchronized three version fields, without unrelated lock/dependency changes. No breaking legacy format changes without owner approval.
-- [ ] Implement and verify.
+- [x] Implement and verify locally. [Task2 evidence and self-review](../reports/2026-11-16-resumable-setup-task2.md) records actual RED/GREEN, Task1 BLOCK corrections, full Go/race/vet/web/build and production-binary account/passkey lifecycles, private account/passkey browser artifacts, exact skips and remaining checks. New account mode uses fixed Argon2id 64 MiB×3p4, explicit password envelope/random credential ID, no mode conversion, no TOTP and no password caching. Parent/independent review is pending. One strict passkey browser run retained a lock-transition aborted passkey-list request; preceding/following standalone runs passed without weakening the gate, but flake cause/elimination is unproven and remains an explicit parent-review risk.
 
 ## Final acceptance and publication
 

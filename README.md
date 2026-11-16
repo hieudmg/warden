@@ -8,8 +8,11 @@ run development operations through them, and records agent change reports.
 > as experimental software, review its behavior, and do not assume it is
 > production-hardened.
 
-The **0.23.0 security upgrade** requires HTTPS, passkey-authenticated management
-and individually web-approved CLI credentials. A private tailnet is optional
+The **0.24.0 account-authentication addition** requires HTTPS, authenticated
+management and individually web-approved CLI credentials. New initialization
+chooses **account (username/password, default)** or **passkey**. Account login
+also unlocks its password-protected vault; existing passkey installations retain
+their passkey/PRF flow. There is no unauthenticated mode or mode conversion. A private tailnet is optional
 defense in depth, not authentication. This is an unpublished local implementation
 checkpoint, **not an accepted security release**: genuine authenticator PRF with
 production certificate trust, native Windows, and hosted artifact/OIDC/signature
@@ -121,7 +124,7 @@ On the security-hardening branch the client requires a verified HTTPS origin:
 ```
 
 Run `warden login`, compare its fingerprint in the web **CLI devices** view,
-and approve with a fresh passkey assertion. The existing agent owns the API
+and approve with fresh password verification (account) or a passkey assertion. The existing agent owns the API
 credential only in memory; restart requires reapproval, while server restart
 preserves authorization and starts locked. Use `warden logout` for attempted
 revocation and unconditional local clearing. Private CA trust is configurable;

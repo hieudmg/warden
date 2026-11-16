@@ -81,7 +81,7 @@ func TestInitRetryRepromptsSavedInvalidAnswersAndPreservesOtherSettings(t *testi
 		t.Fatal(err)
 	}
 	var out bytes.Buffer
-	answers := "\nhttps://warden.example\nwarden.example\nproxy\n127.0.0.1:9443\n\n"
+	answers := "\nhttps://warden.example\nwarden.example\nproxy\n127.0.0.1:9443\n\n\n"
 	cfg, gotPath, err := promptInitialization(strings.NewReader(answers), &out, path)
 	if err != nil {
 		t.Fatal(err)
@@ -118,7 +118,7 @@ func TestInitDraftStorageRefusalCanBeCorrectedWithoutTouchingStorage(t *testing.
 			t.Fatal(err)
 		}
 	}
-	answers := db + "\nhttps://warden.example\nwarden.example\nproxy\n127.0.0.1:8080\n\n"
+	answers := db + "\nhttps://warden.example\nwarden.example\nproxy\n127.0.0.1:8080\n\n\n"
 	if _, _, err := promptInitialization(strings.NewReader(answers), io.Discard, path); err == nil {
 		t.Fatal("accepted occupied storage")
 	}
@@ -127,7 +127,7 @@ func TestInitDraftStorageRefusalCanBeCorrectedWithoutTouchingStorage(t *testing.
 		t.Fatal("storage answer not saved")
 	}
 	fresh := filepath.Join(dir, "fresh.db")
-	cfg, _, err := promptInitialization(strings.NewReader(fresh+"\n\n\n\n\n\n"), io.Discard, path)
+	cfg, _, err := promptInitialization(strings.NewReader(fresh+"\n\n\n\n\n\n\n"), io.Discard, path)
 	if err != nil || cfg.DBPath != fresh {
 		t.Fatalf("cannot correct refused storage: %+v %v", cfg, err)
 	}
@@ -236,7 +236,7 @@ func TestInitSetupFailureKeepsAnswersAndLeaseThenProtectsCommittedConfig(t *test
 	dir := t.TempDir()
 	path := filepath.Join(dir, "server.json")
 	db := filepath.Join(dir, "vault.db")
-	answers := db + "\nhttps://warden.example\nwarden.example\nproxy\n127.0.0.1:8080\n\n"
+	answers := db + "\nhttps://warden.example\nwarden.example\nproxy\n127.0.0.1:8080\n\n\n"
 	stopped := errors.New("fixture setup stopped")
 	_, _, err := initializeWithAnswers(strings.NewReader(answers), io.Discard, path, func(cfg config.Server) error {
 		if _, err := config.LoadServer(config.ServerOptions{ConfigPath: path, ConfigPathSet: true, LookupEnv: emptyLookupEnv}); err != nil {
@@ -252,12 +252,12 @@ func TestInitSetupFailureKeepsAnswersAndLeaseThenProtectsCommittedConfig(t *test
 	}
 	// All saved defaults are prompted again after listener/certificate/expiry failure.
 	var out bytes.Buffer
-	cfg, _, err := promptInitialization(strings.NewReader("\n\n\n\n\n\n"), &out, path)
+	cfg, _, err := promptInitialization(strings.NewReader("\n\n\n\n\n\n\n"), &out, path)
 	if err != nil || cfg.DBPath != db || cfg.Security.PublicOrigin != "https://warden.example" {
 		t.Fatalf("failed setup cannot resume: %+v %v", cfg, err)
 	}
 	// Simulate successful publication followed by a lost completion response.
-	_, _, err = initializeWithAnswers(strings.NewReader("\n\n\n\n\n\n"), io.Discard, path, func(config.Server) error {
+	_, _, err = initializeWithAnswers(strings.NewReader("\n\n\n\n\n\n\n"), io.Discard, path, func(config.Server) error {
 		if err := os.WriteFile(db, []byte("published identity"), 0600); err != nil {
 			t.Fatal(err)
 		}
@@ -305,7 +305,7 @@ func TestInitHomeDefaultsMatchServeAndTLS(t *testing.T) {
 		t.Fatalf("config default %q", got)
 	}
 	var out bytes.Buffer
-	cfg, path, err := promptInitialization(strings.NewReader("\n\nhttps://warden.example\nwarden.example\n\n\n\n\n"), &out, "")
+	cfg, path, err := promptInitialization(strings.NewReader("\n\nhttps://warden.example\nwarden.example\n\n\n\n\n\n"), &out, "")
 	if err != nil {
 		t.Fatal(err)
 	}

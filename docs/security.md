@@ -1,9 +1,9 @@
 # Security model
 
 Warden is a personal development aid, not certified production-hardened software.
-The 0.23.0 implementation nevertheless makes **mandatory application
+The 0.24.0 implementation nevertheless makes **mandatory application
 authentication** a security boundary, independent of network membership. Normal
-management requires a passkey session and unlocked vault; CLI retrieval requires
+management requires an account or passkey session and unlocked vault; CLI retrieval requires
 an individually web-approved credential. Setup, web and client APIs require
 configured HTTPS. A private tailnet is optional defense in depth, never an auth
 bypass. Review deployment choices before using sensitive systems.
@@ -12,10 +12,37 @@ bypass. Review deployment choices before using sensitive systems.
 
 Explicit `warden-server init` is the only bootstrap: an eight-character CSPRNG
 terminal-only password, absolute 15-minute ready-time lifetime, bounded guesses,
-setup-only routes, signed WebAuthn UV registration/assertion and required PRF.
-There is no first-visitor initialization. A random DEK encrypts fields with
+setup-only routes and a terminal-selected authentication method. Account is the
+new-init default; legacy missing mode means passkey. A passkey installation uses
+signed WebAuthn UV registration/assertion and required PRF. An account installation
+creates one username/password credential, not a synthetic WebAuthn credential.
+There is no first-visitor initialization, unauthenticated mode, TOTP, dual
+account/passkey enrollment or mode conversion. A random DEK encrypts fields with
 AES-256-GCM and row/field AAD. Passkey PRF/HKDF/AES-GCM and high-entropy recovery
 wrappers protect that DEK; no disk plaintext vault key or fallback is loaded.
+Account passwords are submitted over configured HTTPS and wrap the DEK using
+server-side Argon2id (x/crypto v0.56.0, RFC 9106 low-memory recommendation:
+64 MiB, time=3, lanes=4, 32-byte output), random 32-byte salt and AES-256-GCM with
+fresh nonce and version/purpose/vault/credential binding. Stored KDF parameters
+must exactly match version 1 before allocation; there is no decrypt-capable
+password verifier separate from the envelope. Username is exact UTF-8, 1–64
+bytes, without surrounding whitespace or controls; password is exact UTF-8,
+12–1024 bytes, with no trimming/normalization or composition rules. Wrong username
+still performs password derivation before the same generic failure. Four bounded
+runtime crypto slots (up to 256 MiB Argon2 working memory) and two setup slots
+bound work before body reading; rate limits still apply. Slow KDF work runs
+outside the publication mutex, then rechecks identity generation, session,
+recovery reservation, vault epoch and cancellation before publishing access.
+
+Account login authenticates **and unlocks**. After lock, re-unlock requires a new
+password submission. Sensitive operations prompt for the password again in an
+in-app modal, issuing the same short-lived, exact-request/session/credential/
+vault-epoch-bound single-use grants. The browser never caches a password for a
+future action. Account recovery uses the offline key, wraps the **same DEK** with
+a new password/random credential ID, verifies the wrapper round-trip and commits
+via identity CAS with all-session/client revocation; abort/failure preserves the
+old identity. Recovery-key rotation uses fresh password verification too.
+
 PRF output is key material, **not a signed identity proof**. Software passkeys
 are supported by standards, not a vendor allowlist; unsupported PRF explicitly
 fails without downgrade. Login can work locked without PRF, unlock cannot.
@@ -28,9 +55,10 @@ is server emission into the network stack, not client receipt, proxy-buffer
 revocation, future HTTP/2 proof or erasure of already retrieved credentials.
 
 Save/re-enter recovery at setup and rotation. Verified recovery is restricted to
-unlock and replacement enrollment, not management/export. Only after verifying a
-new signed PRF-capable passkey and same-DEK wrapper round-trip does one atomic
-commit replace **all** old passkeys/wrappers and revoke sessions/clients. Abort
+unlock and credential replacement, not management/export. In passkey mode, only
+a new signed PRF-capable passkey and same-DEK wrapper round-trip permit one atomic
+commit replacing **all** old passkeys/wrappers and revoking sessions/clients.
+Account mode instead replaces the password credential as described above. Abort
 preserves identity; success returns to ordinary login. Rotation is separate.
 No last-passkey deletion or administrator/recovery-without-key bypass exists.
 See [initialization/recovery](initialization.md) and [migration/rollback](migration.md).
@@ -41,8 +69,8 @@ knowledge. Clearing Go/JS references is best effort, not guaranteed GC/string/
 crypto-copy zeroization. Protect process memory/core dumps/swap and backups.
 Metadata is not all encrypted. Old backup wrappers/recovery material remain
 usable after current revocation/rotation; remote credentials already retrieved
-must be rotated at the remote system after exposure. Losing every usable passkey
-and saved recovery key means losing vault access.
+must be rotated at the remote system after exposure. Losing the account password
+(or every usable passkey) and saved recovery key means losing vault access.
 
 The [T17 acceptance matrix](superpowers/reports/2026-11-14-t17-integration.md)
 distinguishes local PASS from remaining **UNRUN** genuine authenticator PRF with
@@ -80,7 +108,8 @@ a Windows cross-build. The daemon no longer exits when SSH graphs expire.
 The same agent now owns memory-only API and polling secrets and performs HTTPS
 requests for every current CLI data command. First use submits only a commitment;
 the owner compares the displayed fingerprint in the web CLI-device view and
-approves that exact pending commitment with a fresh passkey assertion. The
+approves that exact pending commitment with fresh password verification (account)
+or a passkey assertion. The
 explicit `/api/v1/client/` capability allowlist cannot administer authentication,
 unlock, export/import or read key vaults directly. Browser cookies and API bearers
 are distinct audiences. Durable server hashes/revocation and recovery generation

@@ -40,9 +40,10 @@ execution and genuine-authenticator PRF acceptance remain pending.
 
 Configure an **HTTPS origin** (not a management path), then run `warden login`.
 The agent creates a random API secret and submits only its SHA-256 commitment.
-Open the displayed configured-origin URL, log in with a passkey, compare the
-complete request/device fingerprint with the CLI and approve that exact pending
-request using a **fresh** passkey assertion. The server supplies a distinct
+Open the displayed configured-origin URL, log in using the installation's
+account or passkey, compare the complete request/device fingerprint with the CLI
+and approve that exact pending request using **fresh** password verification
+(account) or a passkey assertion. The server supplies a distinct
 polling secret directly to the agent over HTTPS; neither secret is shown in the
 browser, terminal, argv, environment, URLs or IPC discovery files.
 
@@ -60,7 +61,7 @@ agent or globally lock the vault. Offline logout cannot guarantee server
 revocation: use the web device list to revoke any remaining verifier.
 
 The browser's **CLI devices** section lists pending requests and active/revoked
-credentials and supports fresh-passkey approval, denial and revocation, even
+credentials and supports freshly verified approval, denial and revocation, even
 while the vault is locked. Refresh it to observe newly pending devices. Recovery
 replacement invalidates all client verifiers through the durable authorization
 generation. Revocation affects future API retrieval, not remote credentials
