@@ -3,14 +3,12 @@ package main
 import (
 	"bufio"
 	"context"
-	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
 	"io"
 	"os"
 	"os/signal"
-	"path/filepath"
 	"runtime"
 	"strings"
 	"syscall"
@@ -23,10 +21,10 @@ import (
 )
 
 func printInitUsage(w io.Writer) {
-	fmt.Fprintln(w, "Usage: warden-server init [--config path]\n\nPrompts on the controlling terminal for fresh storage and HTTPS/RP/TLS or\nliteral-loopback proxy configuration. Creates only a temporary password-gated\nsetup plane, confirms passkey PRF and saved recovery, then exits. Existing\nstorage is never reset. Normal serve starts locked after initialization.")
+	fmt.Fprintln(w, "Usage: warden-server init [--config path]\n\nDefaults to ~/.warden/server.json, ~/.warden/warden.db and ~/.warden/tls/.\nSaves each non-secret answer immediately; rerun to edit saved defaults.\nPrompts on the controlling terminal for fresh storage and HTTPS/RP/TLS or\nliteral-loopback proxy configuration. Creates only a temporary password-gated\nsetup plane, confirms passkey PRF and saved recovery, then exits. Existing\nstorage and initialized configuration are never reset. Normal serve starts\nlocked after initialization.")
 	fmt.Fprint(w, transferHelp)
 }
-func runInit(args []string, stdout, stderr io.Writer) int {
+func runInit(args []string, stdout, stderr io.Writer, lookupEnv func(string) (string, bool)) int {
 	cmd := flag.NewFlagSet("init", flag.ContinueOnError)
 	cmd.SetOutput(stderr)
 	cmd.Usage = func() {}
@@ -42,6 +40,19 @@ func runInit(args []string, stdout, stderr io.Writer) int {
 		printInitUsage(stderr)
 		return 2
 	}
+	if flagWasSet(cmd, "config") {
+		*path = strings.TrimSpace(*path)
+		if *path == "" {
+			fmt.Fprintln(stderr, "--config must not be empty")
+			return 1
+		}
+	} else if value, ok := lookupEnv("WARDEN_SERVER_CONFIG"); ok {
+		*path = strings.TrimSpace(value)
+		if *path == "" {
+			fmt.Fprintln(stderr, "WARDEN_SERVER_CONFIG must not be empty when set")
+			return 1
+		}
+	}
 	input, output, err := initTerminal()
 	if err != nil {
 		fmt.Fprintln(stderr, "init requires a controlling terminal; no password is written to redirected output")
@@ -51,30 +62,16 @@ func runInit(args []string, stdout, stderr io.Writer) int {
 	if input != output {
 		defer output.Close()
 	}
-	cfg, configPath, err := promptInitialization(input, output, *path)
-	if err != nil {
-		fmt.Fprintf(stderr, "invalid initialization config: %v\n", err)
-		return 1
-	}
-	// Refuse old/unknown/initialized storage before creating even a config file.
-	for _, suffix := range []string{"", "-wal", "-shm", "-journal"} {
-		if _, err := os.Lstat(cfg.DBPath + suffix); !os.IsNotExist(err) {
-			fmt.Fprintln(stderr, "storage exists; preserve config/DB/WAL/SHM/key, export using old release if legacy, and run warden-server init with fresh storage")
-			return 1
+	_, _, err = initializeWithAnswers(input, output, *path, func(cfg config.Server) error {
+		assets, err := web.SetupDistribution()
+		if err != nil {
+			return errors.New("embedded setup distribution unavailable; rebuild web assets")
 		}
-	}
-	if err := saveInitializationConfig(configPath, cfg); err != nil {
-		fmt.Fprintf(stderr, "save initialization config: %v\n", err)
-		return 1
-	}
-	assets, err := web.SetupDistribution()
+		ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+		defer cancel()
+		return setup.Run(ctx, setup.Options{Config: *cfg.Security, Bind: cfg.ListenAddr, DBPath: cfg.DBPath, Assets: assets}, output)
+	})
 	if err != nil {
-		fmt.Fprintln(stderr, "embedded setup distribution unavailable; rebuild web assets")
-		return 1
-	}
-	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer cancel()
-	if err := setup.Run(ctx, setup.Options{Config: *cfg.Security, Bind: cfg.ListenAddr, DBPath: cfg.DBPath, Assets: assets}, output); err != nil {
 		fmt.Fprintf(stderr, "initialization stopped: %v\n", err)
 		return 1
 	}
@@ -109,6 +106,10 @@ func initTerminal() (*os.File, *os.File, error) {
 	return f, f, nil
 }
 func promptInitialization(input io.Reader, out io.Writer, configPath string) (config.Server, string, error) {
+	return initializeWithAnswers(input, out, configPath, nil)
+}
+
+func initializeWithAnswers(input io.Reader, out io.Writer, configPath string, runSetup func(config.Server) error) (config.Server, string, error) {
 	reader := bufio.NewReader(input)
 	ask := func(label, def string) (string, error) {
 		fmt.Fprintf(out, "%s", label)
@@ -133,84 +134,91 @@ func promptInitialization(input io.Reader, out io.Writer, configPath string) (co
 			return config.Server{}, "", err
 		}
 	}
-	// A precommit crash may leave non-secret config. Reuse only explicitly
-	// initialized-format configuration; never overwrite an old config.
-	if _, err := os.Lstat(configPath); err == nil {
-		cfg, err := config.LoadServer(config.ServerOptions{ConfigPath: configPath, ConfigPathSet: true, LookupEnv: func(string) (string, bool) { return "", false }})
-		if err != nil {
-			return cfg, "", err
-		}
-		if cfg.Security == nil {
-			return cfg, "", errors.New("existing config has no initialization security settings; choose a fresh config path")
-		}
-		if err = cfg.Security.Validate(cfg.ListenAddr); err != nil {
-			return cfg, "", err
-		}
-		return cfg, configPath, nil
-	} else if !os.IsNotExist(err) {
-		return config.Server{}, "", err
-	}
-	cfg := config.DefaultServer()
-	cfg.Security = &config.Setup{}
-	fields := []struct {
-		label, def string
-		target     *string
-	}{{"Fresh storage path", cfg.DBPath, &cfg.DBPath}, {"Public HTTPS origin", "", &cfg.Security.PublicOrigin}, {"WebAuthn RP ID", "", &cfg.Security.RPID}, {"Mode (tls or proxy)", "tls", &cfg.Security.Mode}, {"Listen address", cfg.ListenAddr, &cfg.ListenAddr}}
-	for _, f := range fields {
-		*f.target, err = ask(f.label, f.def)
-		if err != nil {
-			return cfg, "", err
-		}
-	}
-	switch cfg.Security.Mode {
-	case "tls":
-		cfg.Security.TLSCertificate, err = ask("TLS certificate path", "")
-		if err == nil {
-			cfg.Security.TLSKey, err = ask("TLS private key path", "")
-		}
-	case "proxy":
-		cfg.Security.BackendAuthority, err = ask("Explicit loopback backend authority", cfg.ListenAddr)
-	}
+	session, err := openInitializationConfig(configPath)
 	if err != nil {
-		return cfg, "", err
+		return config.Server{}, configPath, err
 	}
-	if err = cfg.Security.Validate(cfg.ListenAddr); err != nil {
-		return cfg, "", err
+	defer session.lease.Close()
+	cfg := &session.cfg
+	cfg.InitializationDraft = true
+	if err := session.save(); err != nil {
+		return *cfg, configPath, err
 	}
-	return cfg, configPath, nil
-}
-func saveInitializationConfig(path string, cfg config.Server) error {
-	if _, err := os.Lstat(path); err == nil {
-		existing, err := config.LoadServer(config.ServerOptions{ConfigPath: path, ConfigPathSet: true, LookupEnv: func(string) (string, bool) { return "", false }})
+	answer := func(label string, target *string, fallback string, changed func()) error {
+		def := *target
+		if def == "" {
+			def = fallback
+		}
+		value, err := ask(label, def)
 		if err != nil {
 			return err
 		}
-		if existing.Security == nil || cfg.Security == nil || *existing.Security != *cfg.Security || existing.DBPath != cfg.DBPath || existing.ListenAddr != cfg.ListenAddr {
-			return errors.New("existing config differs; choose a fresh config path without overwriting it")
+		*target = value
+		if changed != nil {
+			changed()
 		}
-		return nil
-	} else if !os.IsNotExist(err) {
-		return err
+		return session.save()
 	}
-	if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
-		return err
+	fields := []struct {
+		label  string
+		target *string
+	}{
+		{"Fresh storage path", &cfg.DBPath},
+		{"Public HTTPS origin", &cfg.Security.PublicOrigin},
+		{"WebAuthn RP ID", &cfg.Security.RPID},
 	}
-	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0600)
+	for _, field := range fields {
+		if err := answer(field.label, field.target, "", nil); err != nil {
+			return *cfg, configPath, err
+		}
+	}
+	if err := answer("Mode (tls or proxy)", &cfg.Security.Mode, "tls", func() {
+		switch cfg.Security.Mode {
+		case "tls":
+			cfg.Security.BackendAuthority = ""
+		case "proxy":
+			cfg.Security.TLSCertificate = ""
+			cfg.Security.TLSKey = ""
+		}
+	}); err != nil {
+		return *cfg, configPath, err
+	}
+	if err := answer("Listen address", &cfg.ListenAddr, "", nil); err != nil {
+		return *cfg, configPath, err
+	}
+	switch cfg.Security.Mode {
+	case "tls":
+		defaults := config.DefaultSetup()
+		if err := answer("TLS certificate path", &cfg.Security.TLSCertificate, defaults.TLSCertificate, nil); err != nil {
+			return *cfg, configPath, err
+		}
+		err = answer("TLS private key path", &cfg.Security.TLSKey, defaults.TLSKey, nil)
+	case "proxy":
+		err = answer("Explicit loopback backend authority", &cfg.Security.BackendAuthority, cfg.ListenAddr, nil)
+	}
 	if err != nil {
-		return err
+		return *cfg, configPath, err
 	}
-	data := struct {
-		ListenAddr string        `json:"listen_addr"`
-		DBPath     string        `json:"db_path"`
-		Security   *config.Setup `json:"security"`
-	}{cfg.ListenAddr, cfg.DBPath, cfg.Security}
-	if err = json.NewEncoder(f).Encode(data); err == nil {
-		err = f.Sync()
+	if err := cfg.Security.Validate(cfg.ListenAddr); err != nil {
+		return *cfg, configPath, err
 	}
-	closeErr := f.Close()
-	if err != nil {
-		os.Remove(path)
-		return err
+	if strings.TrimSpace(cfg.DBPath) == "" {
+		return *cfg, configPath, errors.New("db path must not be empty")
 	}
-	return closeErr
+	if err := freshInitializationStorage(cfg.DBPath); err != nil {
+		return *cfg, configPath, err
+	}
+	if runSetup != nil {
+		// Publish only validated answers before setup can commit an identity.
+		// A crash after commit therefore cannot leave an editable draft pointing
+		// at initialized storage. The config lease stays held through setup.
+		cfg.InitializationDraft = false
+		if err := session.save(); err != nil {
+			return *cfg, configPath, err
+		}
+		if err := runSetup(*cfg); err != nil {
+			return *cfg, configPath, err
+		}
+	}
+	return *cfg, configPath, nil
 }

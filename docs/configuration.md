@@ -41,27 +41,51 @@ master-key paths.
 
 ## Server
 
-Manual/default config path: `/etc/warden/server.json`.
-The release installer uses `<warden-dir>/server.json`, with `~/.warden` as its
-default directory.
+Fresh server defaults are `~/.warden/server.json` and `~/.warden/warden.db`
+(`~` is the current user's home directory). Direct TLS setup defaults to
+`~/.warden/tls/fullchain.pem` and `~/.warden/tls/private.key`; init does not
+create certificates. Explicit custom config/database/TLS paths remain supported.
+
+`serve` discovers `/etc/warden/server.json` **only when** the new default config
+is absent. It never copies or migrates that file, and retains the old omitted DB
+default `/var/lib/warden/warden.db` for that legacy config path. An existing but
+invalid/incomplete new default causes refusal, not fallback to an old installation.
+Explicit `--config` or `WARDEN_SERVER_CONFIG` wins over discovery. Init uses the
+explicit flag/environment path or prompts with the fresh home-directory default;
+it never silently edits a discovered legacy deployment.
 
 ```json
 {
   "listen_addr": "127.0.0.1:8080",
-  "db_path": "/var/lib/warden/warden.db",
-  "master_key_path": "/etc/warden/master.key",
-  "static_fs": ""
+  "db_path": "/home/you/.warden/warden.db",
+  "static_fs": "",
+  "security": {
+    "public_origin": "https://warden.example",
+    "rp_id": "warden.example",
+    "mode": "tls",
+    "tls_certificate": "/home/you/.warden/tls/fullchain.pem",
+    "tls_key": "/home/you/.warden/tls/private.key"
+  }
 }
 ```
 
 Fields:
 
-- `listen_addr` — `host:port`; host must be `localhost`, loopback, or a
-  Tailscale address (`100.64.0.0/10` or Tailscale IPv6 range).
-- `db_path` — SQLite database path.
-- `master_key_path` — path to exactly 32 raw random bytes with mode `0600`.
+- `listen_addr` — `host:port`. Proxy mode requires a literal loopback IP and
+  matching backend authority; public/direct TLS binds are an explicit exposure
+  choice. See [initialization](initialization.md) for HTTPS and RP constraints.
+- `db_path` — fresh SQLite storage for init; existing initialized storage for serve.
+- `security` — public HTTPS origin, RP ID and `tls` or `proxy` transport settings.
+  It is immutable once storage is initialized. Proxy mode uses
+  `backend_authority` instead of TLS file settings.
 - `static_fs` — optional external frontend directory for development; empty
-  uses the embedded UI.
+  uses the embedded UI. Init preserves this and other recognized non-prompted settings.
+- `initialization_draft` — init-owned marker for editable, unfinished answers.
+  Serve refuses drafts even if their current answers validate. Init removes the
+  marker after validation and storage checks, **before** starting setup; existing
+  storage then prevents further init config edits. Do not toggle it manually.
+- `master_key_path` — retained legacy field only, not a disk-key fallback in the
+  authenticated runtime. New init files never emit it.
 
 Environment overrides:
 
@@ -71,8 +95,11 @@ Environment overrides:
 - `WARDEN_SERVER_MASTER_KEY_PATH`
 - `WARDEN_SERVER_STATIC_FS`
 
-Environment values override file values. `WARDEN_SERVER_CONFIG` and the
-`--config` flag select a different JSON file.
+Environment values override runtime file values. `WARDEN_SERVER_CONFIG` and the
+`--config` flag select a different JSON file for init/serve (the flag wins).
+Other runtime overrides are not imported into saved init answers. JSON paths are
+literal paths; `~` in examples must be expanded by the shell or replaced with an
+absolute home path, not written literally inside JSON.
 
 ## Installer layout
 
@@ -82,23 +109,25 @@ Server installer defaults:
 ~/.warden/
 ├── server.json
 ├── warden.db
-├── master.key
 ├── warden-server
 └── warden-server.service
 ```
 
-It preserves `warden.db` and `master.key` when rerun. The client installer
-preserves its existing timeout and changes only the endpoint selected at the
-prompt.
+The server installer installs the executable and creates a service unit only
+when absent; it does not create config, DB or TLS files. Manual init creates
+non-secret configuration and, after successful registration, fresh storage.
+Reruns preserve existing config, DB/WAL/SHM, legacy keys and service units.
+The client installer preserves its existing timeout and changes only the endpoint
+selected at the prompt.
 
-## Master key
+## Resuming initialization and retaining legacy keys
 
-Generate a key as raw bytes, never base64 text:
+Every submitted non-secret answer is saved immediately as private JSON, including
+invalid answers and incomplete drafts. Rerun init with the same config path to
+reprompt applicable fields with saved defaults. Fix validation errors or choose
+fresh storage without discarding the other answers. No password, recovery key,
+vault key, PRF output or authentication credential belongs in this JSON.
 
-```bash
-openssl rand -out master.key 32
-chmod 0600 master.key
-```
-
-The key is separate from the database and decrypts every stored credential.
-Back it up separately. Losing it makes the database unreadable.
+Keep an old `master.key` together with its old binary/config/DB/WAL/SHM for legacy
+export and rollback. Do not generate a new key or overwrite existing storage to
+make startup work. Follow [migration](migration.md) for manual export/import.

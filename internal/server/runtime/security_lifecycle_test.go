@@ -202,6 +202,10 @@ def stop(signum, frame):
  raise SystemExit(1)
 signal.signal(signal.SIGTERM, stop)
 collected = b''
+# Resumable init reprompts existing config. Accept the saved TLS values only
+# when each expected field is actually requested, before password disclosure.
+prompts = [b'Fresh storage path', b'Public HTTPS origin', b'WebAuthn RP ID', b'Mode (tls or proxy)', b'Listen address', b'TLS certificate path', b'TLS private key path']
+answered = 0
 try:
  while True:
   try: data = os.read(master, 4096)
@@ -210,8 +214,13 @@ try:
    raise
   if not data: break
   collected += data
+  if answered < len(prompts) and prompts[answered] in collected and collected.endswith(b': '):
+   os.write(master, b'\n')
+   answered += 1
+   collected = b''
   match = re.search(rb'Setup password: ([23456789ABCDEFGHJKLMNPQRSTUVWXYZ]{8})', collected)
   if match:
+   if answered != len(prompts): raise RuntimeError('init skipped saved TLS prompts')
    print(match[1].decode(), flush=True)
    collected = b''
 finally:

@@ -64,7 +64,9 @@ For a **fresh** installation, run explicitly from an interactive terminal:
 
 ```sh
 ~/.warden/warden-server init --config ~/.warden/server.json
+# Defaults: ~/.warden/server.json, ~/.warden/warden.db, ~/.warden/tls/.
 # Select fresh DB storage, HTTPS origin/RP and TLS or explicit loopback proxy.
+# Each non-secret answer is saved immediately; rerun init to edit saved defaults.
 # Complete passkey/PRF registration and save/re-enter recovery; init exits.
 ```
 

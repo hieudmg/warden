@@ -17,7 +17,6 @@ import (
 
 const (
 	defaultListenAddr    = "127.0.0.1:8080"
-	defaultDBPath        = "/var/lib/warden/warden.db"
 	defaultMasterKey     = "/etc/warden/master.key"
 	defaultAPIBaseURL    = "https://127.0.0.1:8080"
 	defaultClientTimeout = 30 * time.Second
@@ -36,11 +35,12 @@ const (
 )
 
 type Server struct {
-	Security      *Setup
-	ListenAddr    string
-	DBPath        string
-	MasterKeyPath string
-	StaticFS      string
+	InitializationDraft bool
+	Security            *Setup
+	ListenAddr          string
+	DBPath              string
+	MasterKeyPath       string
+	StaticFS            string
 }
 
 type Client struct {
@@ -54,6 +54,7 @@ type ServerOptions struct {
 	ConfigPathSet bool
 	LookupEnv     func(string) (string, bool)
 
+	legacyConfigPath  string
 	defaultConfigPath string
 	readFile          func(string) ([]byte, error)
 }
@@ -68,11 +69,12 @@ type ClientOptions struct {
 }
 
 type serverFileConfig struct {
-	Security      *Setup  `json:"security"`
-	ListenAddr    *string `json:"listen_addr"`
-	DBPath        *string `json:"db_path"`
-	MasterKeyPath *string `json:"master_key_path"`
-	StaticFS      *string `json:"static_fs"`
+	InitializationDraft bool    `json:"initialization_draft,omitempty"`
+	Security            *Setup  `json:"security"`
+	ListenAddr          *string `json:"listen_addr"`
+	DBPath              *string `json:"db_path"`
+	MasterKeyPath       *string `json:"master_key_path"`
+	StaticFS            *string `json:"static_fs"`
 }
 
 type clientFileConfig struct {
@@ -84,7 +86,7 @@ type clientFileConfig struct {
 func DefaultServer() Server {
 	return Server{
 		ListenAddr:    defaultListenAddr,
-		DBPath:        defaultDBPath,
+		DBPath:        filepath.Join(defaultServerDir(), "warden.db"),
 		MasterKeyPath: defaultMasterKey,
 	}
 }
@@ -96,8 +98,37 @@ func DefaultClient() Client {
 	}
 }
 
+func defaultServerDir() string {
+	home, err := os.UserHomeDir()
+	if err != nil || home == "" {
+		return ".warden"
+	}
+	return filepath.Join(home, ".warden")
+}
+
 func DefaultServerConfigPath() string {
-	return "/etc/warden/server.json"
+	return filepath.Join(defaultServerDir(), "server.json")
+}
+
+// DefaultSetup supplies file locations, not certificates or valid RP settings.
+func DefaultSetup() Setup {
+	return Setup{Mode: "tls", TLSCertificate: filepath.Join(defaultServerDir(), "tls", "fullchain.pem"), TLSKey: filepath.Join(defaultServerDir(), "tls", "private.key")}
+}
+
+// ParseServerDraft strictly decodes one non-secret setup snapshot without
+// environment overrides or runtime validation. Only init may edit drafts.
+func ParseServerDraft(path string, data []byte) (Server, error) {
+	cfg := DefaultServer()
+	if filepath.Clean(path) == filepath.Clean("/etc/warden/server.json") {
+		cfg.DBPath = "/var/lib/warden/warden.db"
+	}
+	if err := decodeServerFile(&cfg, data); err != nil {
+		return Server{}, err
+	}
+	if cfg.Security == nil {
+		return Server{}, errors.New("existing config has no initialization security settings; choose a fresh config path")
+	}
+	return cfg, nil
 }
 
 func DefaultClientConfigPath() string {
@@ -119,6 +150,15 @@ func LoadServer(opts ServerOptions) (Server, error) {
 	configPath, required, err := serverConfigPath(opts, lookupEnv)
 	if err != nil {
 		return Server{}, err
+	}
+	// An implicitly discovered legacy config keeps its old omitted DB default.
+	// Explicit legacy paths also retain this behavior; no files are relocated.
+	legacyPath := opts.legacyConfigPath
+	if legacyPath == "" {
+		legacyPath = "/etc/warden/server.json"
+	}
+	if filepath.Clean(configPath) == filepath.Clean(legacyPath) {
+		cfg.DBPath = "/var/lib/warden/warden.db"
 	}
 	if err := mergeServerFile(&cfg, configPath, required, opts.readFile); err != nil {
 		return Server{}, err
@@ -165,7 +205,22 @@ func LoadClient(opts ClientOptions) (Client, error) {
 }
 
 func serverConfigPath(opts ServerOptions, lookupEnv func(string) (string, bool)) (string, bool, error) {
-	return resolveConfigPath(opts.ConfigPath, opts.ConfigPathSet, serverConfigEnv, lookupEnv, opts.defaultConfigPath, DefaultServerConfigPath())
+	path, required, err := resolveConfigPath(opts.ConfigPath, opts.ConfigPathSet, serverConfigEnv, lookupEnv, opts.defaultConfigPath, DefaultServerConfigPath())
+	if err != nil || required {
+		return path, required, err
+	}
+	// Discovery only: never copy/migrate an old installation, and never fall
+	// back when a new default exists but is malformed, inaccessible or a link.
+	if _, err := os.Lstat(path); os.IsNotExist(err) {
+		legacy := opts.legacyConfigPath
+		if legacy == "" {
+			legacy = "/etc/warden/server.json"
+		}
+		if _, err := os.Lstat(legacy); !os.IsNotExist(err) {
+			return legacy, true, nil
+		}
+	}
+	return path, required, nil
 }
 
 func clientConfigPath(opts ClientOptions, lookupEnv func(string) (string, bool)) (string, bool, error) {
@@ -197,11 +252,19 @@ func mergeServerFile(cfg *Server, path string, required bool, readFile func(stri
 		return err
 	}
 
-	var fileCfg serverFileConfig
-	if err := decodeStrictJSON(data, &fileCfg); err != nil {
+	if err := decodeServerFile(cfg, data); err != nil {
 		return fmt.Errorf("decode server config %q: %w", path, err)
 	}
+	return nil
+}
 
+func decodeServerFile(cfg *Server, data []byte) error {
+	var fileCfg serverFileConfig
+	if err := decodeStrictJSON(data, &fileCfg); err != nil {
+		return err
+	}
+
+	cfg.InitializationDraft = fileCfg.InitializationDraft
 	if fileCfg.Security != nil {
 		cfg.Security = fileCfg.Security
 	}
@@ -319,6 +382,14 @@ func applyClientEnv(cfg *Client, lookupEnv func(string) (string, bool)) error {
 }
 
 func validateServer(cfg Server) error {
+	if cfg.InitializationDraft {
+		return errors.New("initialization answers are a draft; rerun warden-server init with the same config")
+	}
+	if cfg.Security != nil {
+		if err := cfg.Security.Validate(cfg.ListenAddr); err != nil {
+			return err
+		}
+	}
 	if err := validateListenAddr(cfg.ListenAddr); err != nil {
 		return err
 	}

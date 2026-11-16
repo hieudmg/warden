@@ -22,8 +22,13 @@ func TestLoadServerDefaults(t *testing.T) {
 	if cfg.ListenAddr != "127.0.0.1:8080" {
 		t.Fatalf("ListenAddr = %q, want %q", cfg.ListenAddr, "127.0.0.1:8080")
 	}
-	if cfg.DBPath != "/var/lib/warden/warden.db" {
-		t.Fatalf("DBPath = %q, want %q", cfg.DBPath, "/var/lib/warden/warden.db")
+	home, err := os.UserHomeDir()
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantDB := filepath.Join(home, ".warden", "warden.db")
+	if cfg.DBPath != wantDB {
+		t.Fatalf("DBPath = %q, want %q", cfg.DBPath, wantDB)
 	}
 	if cfg.MasterKeyPath != "/etc/warden/master.key" {
 		t.Fatalf("MasterKeyPath = %q, want %q", cfg.MasterKeyPath, "/etc/warden/master.key")

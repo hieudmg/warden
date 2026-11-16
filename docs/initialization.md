@@ -30,12 +30,38 @@ GOTOOLCHAIN=go1.26.11 TMPDIR=/var/tmp go build -o /var/tmp/warden-server-check .
 /var/tmp/warden-server-check init --config /your/fresh/private-directory/server.json
 ```
 
-Run from an interactive controlling terminal. Without `--config`, init also
-prompts for the config path. It asks for a **fresh DB path**, public HTTPS origin,
-RP ID, `tls` or `proxy` mode, and listen address. TLS mode asks for certificate and
-private-key paths; proxy mode asks for the explicit loopback backend authority.
-Configuration contains no vault key or authentication secrets and new files use
-POSIX mode 0600. Native Windows ACL/privacy behavior is not verified here.
+Run from an interactive controlling terminal. `--config` wins over
+`WARDEN_SERVER_CONFIG`; without either, init prompts for the config path with
+`~/.warden/server.json` as its default. The fresh DB default is
+`~/.warden/warden.db`. It asks for public HTTPS origin, RP ID, `tls` or `proxy`
+mode, and listen address. TLS mode asks for certificate and private-key paths
+(defaults `~/.warden/tls/fullchain.pem` and `~/.warden/tls/private.key`); proxy mode
+asks for the explicit loopback backend authority. Init does not generate TLS files.
+All file paths can be customized. Saved paths are literal, not shell-expanded.
+
+Each non-secret answer is saved **before the next prompt**, even if invalid or
+if validation, storage checks, certificate loading or later setup fails. Rerun
+with the same config path to edit applicable fields with saved defaults; blank
+input keeps the displayed default. Switching transport clears incompatible
+transport fields. Other recognized settings such as `static_fs` are preserved.
+Draft files carry `initialization_draft: true`; serve rejects them rather than
+accepting incomplete or invalid answers. After validation and fresh-storage
+checks, init removes the marker before starting the temporary setup plane.
+This ordering protects config even if setup commits but its completion response
+is lost. Never manually toggle the marker to bypass refusal.
+
+New files and atomic sibling-temp replacements use POSIX mode 0600, with newly
+created directories using 0700. Configuration contains paths, not TLS private-key
+contents, vault keys, passwords or authentication secrets. Malformed/unknown-field
+JSON, legacy config without security settings, config symlinks, and config already
+pointing to initialized/occupied storage are not silently overwritten. An editable
+draft's refused storage answer can be corrected without opening that storage.
+Native Windows ACL/privacy behavior is not verified here.
+
+Normal serve prefers the same home config default. Only when absent does it
+still discover `/etc/warden/server.json`, without copying/migrating old settings;
+explicit flag/environment selection wins. An invalid new default never falls
+back to a different installation. Existing passkey installations are unchanged.
 
 An origin has no path (not even `/`), userinfo, query or fragment. Use a canonical
 lowercase DNS hostname, omit the default HTTPS port 443, and use an explicit port
@@ -100,9 +126,14 @@ CLI, profile, report, transport, export/import and normal UI routes are absent.
 
 Unsupported PRF, failed/canceled ceremonies, bad saved recovery proof, expiry,
 process interruption or commit failure cannot create a partially initialized
-identity. After a precommit interruption, a nonsecret config and OS-lock sidecar
-may remain; rerun explicit init with that config/fresh DB path. The kernel releases
-the reservation on process exit; the lock file is deliberately not unlinked.
+identity. After a precommit interruption, a nonsecret config and OS-lock sidecars
+may remain; rerun explicit init with that config/fresh DB path. A config
+`*.setup.lock` lease covers prompts through setup; the independent DB `*.init.lock`
+reservation still exclusively protects identity publication. Other initializers
+cannot edit config during setup. File snapshots reject conflicting external
+changes, but concurrent non-Warden edits of config/lock/storage are unsupported.
+The kernel releases reservations on process exit; lock files are deliberately
+not unlinked.
 A crash can also leave a private `.warden-init-*.db` staging file. Init never loads
 it as a fallback or deletes old artifacts automatically. After publication, rerun
 init refuses the installation. A failed HTTP response around commit is ambiguous:
