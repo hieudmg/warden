@@ -47,6 +47,27 @@ needed before diagnosing the helper and obtaining all16 native passes/zero skips
 Release0.23.0 and all pending acceptance checkboxes/gates remain unchanged; no
 manual signing/dispatch/publication or production service operation authorized.
 
+### Native Windows round 2 — current14/16, two failures
+
+Parent reviewed/committed/pushed the diagnostic checkpoint as `6c385371`.
+Run43789164306 attempt1 checked out merge `0fbbf0a` into basec104353: Linux
+133043430649 PASS, Windows133043430885 FAIL. **14/16 required top-level PASS,
+two FAIL, zero reported skips**; original13/3 above is historical, not this run.
+The private-files/HTTP-refusal actual-C# fixture now passes. Helper ordinary and
+metacharacter positives fail with invalid-path ArgumentException; identical
+errors in locked negatives do not yet prove lock handling. HTTPS matrix times
+out at its2min context; existing output does not establish compile/CA-add/
+download phases or CA absence after cleanup. Round2 adds only test-side exact
+argument/null controls, streamed bounded phases/exception types/fixture counts,
+and exact-CA absence assertions. Production helper/C#/TLS and all budgets stay
+unchanged pending actual boundary evidence; no speculative fix or native GREEN.
+The [chronological follow-up](../reports/2026-11-16-native-windows-followup.md#round-2--new-native-evidence-and-pre-edit-exception-2026-11-16)
+records the pre-edit native TDD exception, real portable streaming RED→GREEN,
+fresh local fullGo/affected race/vet/installers/curl/12contracts and compile-only
+Windows. Parent review/possible next diagnostic push is required. All16 native
+passes once/zero skips,0.23.0, unchecked acceptance gates and narrow T16 risk
+scope remain; no manual signing/dispatch/public attestation/service authority.
+
 ## Execution, dependencies, and evidence discipline
 
 - Repository `/var/www/code/go/warden`, branch `hieudmg/security-hardening`, inspected HEAD/fetched `origin/main` both `c104353` on 2026-11-14. Only one writer in this checkout. A controller may assign sequential workers one task at a time; no parallel writers/worktrees. Each handoff names changed paths, red/green commands, remaining failures and next dependency. Preserve unrelated work, particularly protected untracked `mise.toml` (do not read/change/stage).

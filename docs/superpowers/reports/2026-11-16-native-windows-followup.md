@@ -1,5 +1,14 @@
 # Native Windows follow-up — PR #45
 
+## R2 parent diagnostic-push checkpoint
+
+Independent rereview found no issues in the second diagnostic patch, matching
+all 6 task paths, 461 listed inputs and 42 evidence files. Parent separately
+freshly passed the streaming/helper diagnostic race tests at count10, full Go
+and vet: `/var/tmp/warden-windows-r2-parent-{focused,full,vet}.log`.
+This supports a bounded diagnostic push only. No production helper/C# change,
+native GREEN, merge, manual signing or release approval follows.
+
 ## Parent diagnostic-push checkpoint
 
 Independent review found no issues in this bounded test-only patch, verified the
@@ -216,3 +225,171 @@ Unix cross-owner and hosted artifact/OIDC/signature gates remain open. The narro
 T16 owner-accepted Undici trusted-service/proxy and Sigstore PAE risks do not
 waive any gate or authorize manual signing/public attestations/transparency writes.
 No task checkbox is completed. Stop at this bounded self-review/report.
+
+## Round 2 — new native evidence and pre-edit exception (2026-11-16)
+
+Resumed at parent-committed/pushed `6c385371681d654f0691696db99951cd518a4810`.
+Authority and prohibitions are unchanged; parent alone controls delivery.
+Private evidence `/var/tmp/ww2.ckkE`, baseline ledger `ledger.before.md`.
+Actual logs read: `/var/tmp/warden-pr45-hosted/43789164306.log` and
+`43789164306-windows-job.log`; copies are evidence data, never executed.
+
+Run43789164306 attempt1, pull_request head6c385371, actually checked out merge
+`0fbbf0afd1e2898b613351387e4aca3588a9bb00` into basec104353. Linux133043430649
+succeeded; Windows133043430885 failed on the same PS5.1/.NET533509/Go1.26.11.
+Correct **current** arithmetic: agent7 + SFTP5 + upgrade2 = **14/16 top-level
+PASS, two FAIL, zero reported skips**. Original13/3 above remains historical.
+The private-files/HTTP-refusal actual-C# test now passes. Helper ordinary and
+metacharacter positives fail with inner System.ArgumentException
+HRESULT-2147024809, `The path is not of a legal form`; outer method invocation
+HRESULT-2146233087. Locked negatives report the same invalid-path error, so
+those passes do **not** yet prove sharing-lock handling. HTTPS matrix reaches
+its2min process-context boundary (120.70s) with only CLIXML progress; no existing
+phase evidence proves compilation, CA insertion or any Download executed in
+that process. Independent cleanup produced no error, **not proof of CA absence**.
+
+**Before round-2 code edits:** native PS5.1 remains unavailable locally. Keep
+native runtime TDD exception explicit: original hosted RED is real, but neither
+cross-compilation nor source contracts establish native GREEN. .NET reference
+source resolved from Microsoft main to commit
+`ec9fa9ae770d522a5b5f0607898044b7478574a3` shows File.Replace normalizing a
+backup iff non-null, and empty-path normalization throwing Arg_PathIllegal.
+The official PS5.1 NullString reference documents the supported true-null string
+argument. Context7 again returned irrelevant current environment-provider source;
+PowerShell6 source is supplementary only, not installed5.1 binder proof. An
+initial raw URL used an annotated-tag object and returned404; dereferenced source
+was obtained separately. Exact observed argument values are still missing.
+Accordingly retain production helper for now and add test-only actual-argument,
+C# literal-null and PowerShell null/NullString comparison probes on disposable
+copies. Do not substitute a speculative production fix for that evidence.
+
+HTTPS stall is likewise unlocalized. Add streamed fixed phase labels around
+runtime/assembly/compilation/certificate/store/add/download/cleanup operations,
+first exception type/HRESULT, fixture-only peer/request counts, context outcome
+and exact-CA absence checks. Preserve every production constant and TLS/chain/
+revocation check, all matrix assertions and the2min/20s fixture budgets. Test the
+portable log streaming/cancellation join seam first where feasible; native phase
+execution itself remains UNRUN locally. No timeout increase, TLS bypass, broad
+trust mutation, production C# instrumentation, new workflow/signing or live
+installer/service execution is authorized. Stop after bounded checks/report for
+parent review and a possible next diagnostic push if runtime cause stays open.
+
+### Round-2 implementation: diagnostic-only, not a production fix
+
+- `replace_source_test.go` prefixes the existing fixture-only helper diagnostics
+  with a small PS5.1/C# boundary probe. It checks the source/target strings equal
+  the exact environment values, normalizes both with .NET Path.GetFullPath and
+  requires both files exist. It never prints their paths or the ambient
+  environment. File.Replace controls operate only on exclusively copied,
+  disposable sibling marker files; ownership flags clean only successful copies.
+  C# literal-null control must replace successfully. PowerShell `$null` records
+  the actual received null/empty string and replacement/refusal result; explicit
+  `[System.Management.Automation.Language.NullString]::Value` must replace those
+  copies successfully. Nonempty backup arguments are refused before filesystem
+  use. These probes leave the actual helper inputs unchanged before its existing
+  ordinary/metacharacter success and locked-failure cases run. The portable
+  source contract removes just the probe prefix/diagnostic insertion and still
+  reconstructs the exact production helper. Probe C# compilation/execution is
+  **UNRUN locally**, not established by Go cross-compilation.
+- `installer_https_windows_test.go` now streams stdout and stderr line-by-line
+  through the same portable runner tested below. Fixed phase labels surround
+  runtime checks, HTTP assembly load, compilation of the unchanged actual C#,
+  certificate load, CurrentUser store open/add, each private directory/download,
+  and certificate cleanup. At most four exception-chain types/HRESULTs are
+  emitted; no environment, key/certificate bytes or raw URL/query is dumped.
+  Fixture-owned origin/CDN connection transitions, payload handler begin/end,
+  CRL requests and aggregate counters supplement the process labels. A handler
+  end label is **not** a goroutine-join claim. Existing httptest cleanup remains.
+- Main and independent cleanup additionally assert the exact generated
+  thumbprint is absent after removal, while independent removal still compares
+  exact DER bytes before touching any certificate. There is no LocalMachine
+  access or broad trust-store purge. Native absence assertions and store phases
+  are **UNRUN**; no prior cleanup success is retroactively promoted to proof.
+- New `powershell_fixture_test.go` owns the narrow output runner: separate
+  stdout/stderr partial-line buffers capped at1024bytes prevent unbounded CLIXML
+  buffering and prevent stderr fragments hiding stdout phase labels. Cmd.Run
+  waits for the owned process and its output-copy goroutines before flushing
+  final partial lines; the actual context error is logged after that join.
+  Native budgets remain2min matrix/20s independent cleanup; helper retains1s
+  test retry/8s subprocess and production90s retry/30s parent wait. C# download
+  budget remains5min, deliberately **not** accommodated by increasing the
+  fixture limit. A stall inside that mismatch still fails with a useful phase.
+
+No production helper/C#, installer, workflow, privilege/pin/byte/type/source/run
+check, authentication/crypto, release field or TLS/hostname/revocation policy
+changed. No atomic replacement workaround, timer inflation or assertion
+weakening. The new checks strengthen diagnostics/CA absence only. Null backup
+coercion is still a hypothesis until the actual native boundary probe reports;
+HTTPS cause is still unknown. Next native run may still fail—this is intentional
+honest diagnosis, not an all16-pass claim.
+
+### Round-2 measured RED/GREEN and validation
+
+The streaming diagnostic capability, **not the unknown HTTPS cause**, has a
+portable focused RED→GREEN. The initial extracted runner retained the old
+CombinedOutput behavior. A real child test process prints a phase then blocks;
+its observer cancels only when that phase is delivered. Before implementation:
+
+```sh
+TMPDIR=/var/tmp GOTOOLCHAIN=go1.26.11 go test ./internal/upgrade -run '^TestPowerShellFixtureCommandStreamsAndJoinsOnCancellation$' -count=1 -v
+```
+
+`stream-red.log` exit1 at02:18:57UTC: phase is buffered until the2s fallback
+context deadline, so phase-driven cancellation cannot work. Minimal streamed
+bounded writer implementation makes the same test pass (`stream-green.log`,
+exit0 at02:19:50UTC), with phase observed before cancellation and owned process
+waited. This exact runner is now used by the native HTTPS fixture. A separate
+fragment/CRLF/truncation test characterizes the1024-byte bound. Both pass race10
+(`stream-race10.log`); this is real subprocess/logging proof on Linux, not a
+PowerShell, TLS chain, CA-store or native root-cause proof.
+
+All tests use exact Go1.26.11/TMPDIR=/var/tmp and Python validation suppresses
+bytecode generation. `commands.jsonl` records test argv/UTC/exit/environment.
+Early read-only source/log investigation precedes that recorder; API URLs and
+source versions are in `api-sources.json`, and parsed actual hosted events and
+correct14/2 summary are saved separately. Full authoritative hosted logs remain
+unaltered in their original location and in this private evidence root.
+
+| Current-source command / evidence | UTC start→end, 2026-11-16 | Result |
+| --- | --- | --- |
+| `go test -race ./internal/upgrade -run '^(TestPowerShellFixture\|TestWindowsHelper\|TestInstallerDownloaderSource)' -count=1 -v` (`focused-green.log`) | 02:24:36→02:24:38 | PASS portable source/extractor/stream contracts only |
+| `go test -json ./... -count=1 -timeout=180s` (`full-go.log`) | 02:26:29→02:26:56 | PASS792 top-level tests; three explicit test skips |
+| `go test -race -json ./internal/upgrade ./internal/client/... -count=1 -timeout=180s` (`upgrade-client-race.log`) | 02:26:29→02:26:48 | PASS337 top-level tests; one explicit skip |
+| `go vet ./...` (`vet.log`) | 02:26:48→02:26:48 | PASS |
+| Windows/amd64 `go test -c` upgrade fixture (`windows-final-compile.log`) | 02:26:48→02:26:49 | PASS **compile-only**, no PS/C# execution |
+| `bash scripts/test-installers.sh` (`installers.log`) | 02:26:29→02:26:36 | PASS offline wrappers only |
+| `python3 scripts/installers_test.py` (`installer-https.log`) | 02:26:36→02:26:39 | PASS four methods/matrices, actual curl/private verified TLS |
+| `python3 -m unittest discover -s scripts/ci -v` (`ci-contracts.log`) | 02:26:39→02:26:41 | PASS all12 offline contracts; fake publication only |
+| Existing private pinned actionlint1.7.12, optional analyzers disabled (`actionlint.log`) | 02:26:41→02:26:41 | PASS; shellcheck/pyflakes unavailable/not claimed |
+| `go test -race ./internal/upgrade -run '^TestPowerShellFixture' -count=10 -timeout=30s -v` (`stream-race10.log`) | 02:28:33→02:28:34 | PASS both portable diagnostic tests10times, no native outcome inferred |
+
+`test-summary.json` records the same three full-suite skips (two opt-in browser
+fixture servers and unprivileged Unix wrong-owner); affected race skips only
+wrong-owner. Windows build-tagged cases do not execute on Linux. Unchanged
+frontend/browser/build/scan evidence stays historical; none was rerun or
+upgraded to acceptance. No full-repository race claim. The new two portable
+logging tests account for792 versus prior790, not additional native acceptance.
+
+### Round-2 self-review and handoff
+
+The complete `6c385371`→current patch includes all three changed/new test Go
+files, this chronological report append, plan checkpoint and the whole new
+ignored-ledger delta. Production inputs and0.23.0 remain baseline-identical.
+Private review files are `/var/tmp/warden-windows-r2-review.diff`, `.json`,
+`.sha256`; manifest binds task/source/runtime/evidence hashes and original
+ledger prefix/delta, including source-only assembled native program inputs and
+compile-only fixture binary. Protected content is excluded before reading or
+hashing. No index/history/remote change or unrelated cleanup is performed.
+
+**Required next step: parent independent review/fresh checks, then consider
+another bounded diagnostic push to automatic PR CI. No production bugfix or
+native GREEN is claimed in this round.** Obtain the actual argument-control
+outcomes and last streamed HTTPS phase before approving a production change.
+All16 named native tests once PASS/zero skips remains required, including
+ordinary/metacharacter atomic replacement and genuine locked-target behavior,
+actual C# trusted-HTTPS matrix/ACLs/rollback and verified exact-CA cleanup.
+Genuine PRF/production trust, privileged Unix cross-owner and hosted artifact/
+OIDC/signature gates remain open. The narrow T16 risk acceptance is not a gate
+waiver or authorization for manual signing/dispatch/public attestations/tlog
+writes. The outstanding manual-signing question is unanswered; no related work
+was implemented or run. Stop after this bounded diagnostic self-review.

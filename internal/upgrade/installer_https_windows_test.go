@@ -83,13 +83,14 @@ func TestWindowsPowerShellTrustedHTTPSReleaseMatrix(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	var forbiddenHTTP atomic.Int32
+	var forbiddenHTTP, crlRequests, peerConnections, payloadRequests atomic.Int32
 	crlServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/ca.crl" {
 			forbiddenHTTP.Add(1)
 			http.Error(w, "forbidden fixture payload", 500)
 			return
 		}
+		t.Logf("native HTTPS fixture CRL request: %d", crlRequests.Add(1))
 		w.Header().Set("Content-Type", "application/pkix-crl")
 		_, _ = w.Write(crlDER)
 	}))
@@ -115,6 +116,9 @@ func TestWindowsPowerShellTrustedHTTPSReleaseMatrix(t *testing.T) {
 			return
 		}
 		mode, asset := parts[0], parts[1]
+		payloadRequests.Add(1)
+		t.Logf("native HTTPS fixture request: mode=%q asset=%q", mode, asset)
+		defer t.Logf("native HTTPS fixture request=end: mode=%q asset=%q", mode, asset)
 		if mode == "redirect" {
 			http.Redirect(w, r, cdnURL+"/cdn/"+asset, http.StatusFound)
 			return
@@ -170,16 +174,25 @@ func TestWindowsPowerShellTrustedHTTPSReleaseMatrix(t *testing.T) {
 		}
 		_, _ = w.Write(body)
 	})
-	serve := func() *httptest.Server {
+	serve := func(peer string) *httptest.Server {
 		srv := httptest.NewUnstartedServer(handler)
+		srv.Config.ConnState = func(_ net.Conn, state http.ConnState) {
+			if state == http.StateNew {
+				peerConnections.Add(1)
+				t.Logf("native HTTPS fixture peer=%s connection=new", peer)
+			}
+			if state == http.StateActive || state == http.StateClosed {
+				t.Logf("native HTTPS fixture peer=%s connection=%s", peer, state)
+			}
+		}
 		srv.TLS = &tls.Config{Certificates: []tls.Certificate{certificate}, MinVersion: tls.VersionTLS12}
 		srv.StartTLS()
 		t.Cleanup(srv.Close)
 		return srv
 	}
-	cdn := serve()
+	cdn := serve("CDN")
 	cdnURL = strings.Replace(cdn.URL, "127.0.0.1", "localhost", 1)
-	origin := serve()
+	origin := serve("origin")
 	untrusted := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { t.Error("untrusted HTTPS reached payload handler") }))
 	defer untrusted.Close()
 	installer, err := os.ReadFile("../../scripts/install-client.ps1")
@@ -194,72 +207,117 @@ func TestWindowsPowerShellTrustedHTTPSReleaseMatrix(t *testing.T) {
 	env := append(os.Environ(), "WARDEN_FIXTURE_CA="+caFile, "WARDEN_FIXTURE_THUMBPRINT="+thumbprint,
 		"WARDEN_FIXTURE_SOURCE="+sourceFile, "WARDEN_FIXTURE_ROOT="+dir, "WARDEN_FIXTURE_ORIGIN="+origin.URL,
 		"WARDEN_FIXTURE_UNTRUSTED="+untrusted.URL, "WARDEN_FIXTURE_HTTP="+crlServer.URL)
-	runPS := func(program string, budget time.Duration) ([]byte, error) {
+	defer func() {
+		t.Logf("native HTTPS observed counts after process joins: connections=%d payload=%d CRL=%d exact=%d CDN=%d forbiddenHTTP=%d",
+			peerConnections.Load(), payloadRequests.Load(), crlRequests.Load(), goodRequests.Load(), cdnRequests.Load(), forbiddenHTTP.Load())
+	}()
+	runPS := func(phase, program string, budget time.Duration) error {
 		ctx, cancel := context.WithTimeout(context.Background(), budget)
 		defer cancel()
-		cmd := exec.CommandContext(ctx, shell, "-NoLogo", "-NoProfile", "-NonInteractive", "-EncodedCommand", encodePowerShellCommand(program))
+		cmd := exec.CommandContext(ctx, shell, "-NoLogo", "-NoProfile", "-NonInteractive", "-EncodedCommand", encodePowerShellCommand(powerShellFixtureProgram(program)))
 		cmd.Env = env
-		return cmd.CombinedOutput()
+		err := runPowerShellFixtureCommand(cmd, func(line string) { t.Logf("native HTTPS %s: %s", phase, line) })
+		t.Logf("native HTTPS %s process joined: error=%v context=%v", phase, err, ctx.Err())
+		if ctx.Err() != nil {
+			return fmt.Errorf("%s context: %w (process: %v)", phase, ctx.Err(), err)
+		}
+		return err
 	}
 	// Independent cleanup also runs if the main PowerShell process is killed.
 	// Compare the exact generated certificate bytes before removing its thumbprint.
 	cleanup := `$ErrorActionPreference = 'Stop'
+[Console]::Out.WriteLine('cleanup certificate-load:begin')
 $ca = New-Object System.Security.Cryptography.X509Certificates.X509Certificate2($env:WARDEN_FIXTURE_CA)
+if ($ca.Thumbprint -ne $env:WARDEN_FIXTURE_THUMBPRINT) { throw 'cleanup certificate mismatch' }
+[Console]::Out.WriteLine('cleanup certificate-load:end')
 $store = New-Object System.Security.Cryptography.X509Certificates.X509Store('Root', 'CurrentUser')
 try {
+    [Console]::Out.WriteLine('cleanup CurrentUser store-open:begin')
     $store.Open([System.Security.Cryptography.X509Certificates.OpenFlags]::ReadWrite)
+    [Console]::Out.WriteLine('cleanup CurrentUser store-open:end')
     foreach ($cert in $store.Certificates.Find([System.Security.Cryptography.X509Certificates.X509FindType]::FindByThumbprint, $env:WARDEN_FIXTURE_THUMBPRINT, $false)) {
         if ([Convert]::ToBase64String($cert.RawData) -ne [Convert]::ToBase64String($ca.RawData)) { throw 'refuse unrelated certificate cleanup' }
+        [Console]::Out.WriteLine('cleanup exact-certificate remove:begin')
         $store.Remove($cert)
+        [Console]::Out.WriteLine('cleanup exact-certificate remove:end')
     }
-} finally { $store.Close() }
+    if ($store.Certificates.Find([System.Security.Cryptography.X509Certificates.X509FindType]::FindByThumbprint, $env:WARDEN_FIXTURE_THUMBPRINT, $false).Count -ne 0) { throw 'fixture CA remains after independent cleanup' }
+    [Console]::Out.WriteLine('cleanup exact-certificate absence:PASS')
+} finally {
+    $store.Close()
+    [Console]::Out.WriteLine('cleanup CurrentUser store-close:end')
+}
 `
 	defer func() {
-		if output, err := runPS(cleanup, 20*time.Second); err != nil {
-			t.Errorf("exact current-user certificate cleanup: %v\n%s", err, output)
+		if err := runPS("independent-cleanup", cleanup, 20*time.Second); err != nil {
+			t.Errorf("exact current-user certificate cleanup: %v", err)
 		}
 	}()
 	program := `$ErrorActionPreference = 'Stop'
+[Console]::Out.WriteLine('runtime-check:begin')
 if ($PSVersionTable.PSEdition -ne 'Desktop' -or $PSVersionTable.PSVersion -lt [Version]'5.1') { throw 'Desktop 5.1 required' }
 $framework = Get-ItemProperty 'HKLM:\SOFTWARE\Microsoft\NET Framework Setup\NDP\v4\Full' -Name Release
 if ($framework.Release -lt 461808) { throw '.NET4.7.2+ required' }
+[Console]::Out.WriteLine('runtime-check:end')
+[Console]::Out.WriteLine('HTTP-assembly-load:begin')
 Add-Type -AssemblyName System.Net.Http
+[Console]::Out.WriteLine('HTTP-assembly-load:end')
+[Console]::Out.WriteLine('actual-CSharp-compile:begin')
 Add-Type -ReferencedAssemblies ([System.Net.Http.HttpClient].Assembly.Location) -TypeDefinition ([IO.File]::ReadAllText($env:WARDEN_FIXTURE_SOURCE))
+[Console]::Out.WriteLine('actual-CSharp-compile:end')
+[Console]::Out.WriteLine('certificate-load:begin')
 $ca = New-Object System.Security.Cryptography.X509Certificates.X509Certificate2($env:WARDEN_FIXTURE_CA)
 if ($ca.Thumbprint -ne $env:WARDEN_FIXTURE_THUMBPRINT) { throw 'fixture certificate mismatch' }
+[Console]::Out.WriteLine('certificate-load:end')
 $store = New-Object System.Security.Cryptography.X509Certificates.X509Store('Root', 'CurrentUser')
 $added = $false
 try {
+    [Console]::Out.WriteLine('CurrentUser store-open:begin')
     $store.Open([System.Security.Cryptography.X509Certificates.OpenFlags]::ReadWrite)
+    [Console]::Out.WriteLine('CurrentUser store-open:end')
     if ($store.Certificates.Find([System.Security.Cryptography.X509Certificates.X509FindType]::FindByThumbprint, $ca.Thumbprint, $false).Count -ne 0) { throw 'fixture CA already exists' }
+    [Console]::Out.WriteLine('CurrentUser unique-CA-add:begin')
     $store.Add($ca)
     $added = $true
+    [Console]::Out.WriteLine('CurrentUser unique-CA-add:end')
     foreach ($mode in @('exact', 'redirect', 'downgrade', 'bad-digest', 'duplicate', 'truncated', 'binary-oversize', 'checksum-oversize', 'slow-headers', 'HTTP', 'untrusted')) {
+        [Console]::Out.WriteLine('private-directory:begin mode='+$mode)
         $work = Join-Path $env:WARDEN_FIXTURE_ROOT $mode
         [WardenReleaseDownload]::PrivateDirectory($work)
+        [Console]::Out.WriteLine('private-directory:end mode='+$mode)
         $url = $env:WARDEN_FIXTURE_ORIGIN+'/'+$mode
         if ($mode -eq 'HTTP') { $url = $env:WARDEN_FIXTURE_HTTP+'/forbidden' }
         if ($mode -eq 'untrusted') { $url = $env:WARDEN_FIXTURE_UNTRUSTED+'/untrusted' }
         $success = $false
         $clock = [Diagnostics.Stopwatch]::StartNew()
+        [Console]::Out.WriteLine('actual-download:begin mode='+$mode)
         try {
             [WardenReleaseDownload]::Download($url, 'warden.exe', (Join-Path $work 'binary'), (Join-Path $work 'sums'))
             $success = $true
-        } catch { Write-Host ('Expected refusal candidate '+$mode+': '+$_.Exception.GetType().FullName) }
+        } catch { Write-FixtureException $_ }
+        [Console]::Out.WriteLine('actual-download:end mode='+$mode+'; success='+$success+'; seconds='+$clock.Elapsed.TotalSeconds)
         if ($success -ne ($mode -eq 'exact' -or $mode -eq 'redirect')) { throw ('unexpected native HTTPS outcome: '+$mode) }
         if ($success -and [IO.File]::ReadAllText((Join-Path $work 'binary')) -ne 'synthetic release bytes; never execute') { throw 'wrong downloaded bytes' }
         if ($mode -eq 'slow-headers' -and ($clock.Elapsed.TotalSeconds -lt 8 -or $clock.Elapsed.TotalSeconds -gt 15)) { throw '10-second establishment/header budget not exercised' }
+        [Console]::Out.WriteLine('private-directory-cleanup:begin mode='+$mode)
         Remove-Item -LiteralPath $work -Recurse -Force
-        Write-Host ('Native HTTPS PASS: '+$mode)
+        [Console]::Out.WriteLine('Native HTTPS PASS: '+$mode)
     }
 } finally {
-    if ($added) { $store.Remove($ca) }
-    $store.Close()
+    try {
+        if ($added) {
+            [Console]::Out.WriteLine('CurrentUser unique-CA-remove:begin')
+            $store.Remove($ca)
+            if ($store.Certificates.Find([System.Security.Cryptography.X509Certificates.X509FindType]::FindByThumbprint, $ca.Thumbprint, $false).Count -ne 0) { throw 'fixture CA remains after main cleanup' }
+            [Console]::Out.WriteLine('CurrentUser unique-CA absence:PASS')
+        }
+    } finally {
+        $store.Close()
+        [Console]::Out.WriteLine('CurrentUser store-close:end')
+    }
 }
 `
-	output, err := runPS(program, 2*time.Minute)
-	t.Logf("native PowerShell/.NET HTTPS matrix:\n%s", output)
-	if err != nil {
+	if err := runPS("matrix", program, 2*time.Minute); err != nil {
 		t.Fatalf("native trusted HTTPS: %v", err)
 	}
 	if goodRequests.Load() != 2 || cdnRequests.Load() != 2 {
