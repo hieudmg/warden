@@ -278,17 +278,20 @@ try {
 			t.Errorf("exact current-user certificate cleanup: %v", err)
 		}
 	}()
-	// Import argv is unchanged. Observe only the stalled owned certutil before
-	// killing it; snapshot and both output joins reserve 8s inside the same
-	// matrix deadline. A missing/empty snapshot cannot establish absence of UI.
+	// Same import argv and total deadline. The proactive owned-control checkpoint
+	// deliberately performs NO ACTION until an actual native identity/layout
+	// contract is observed. A warning requiring consent must fail closed here.
+	identity := certutilFixtureCAIdentity{File: caFile, CN: ca.Subject.CommonName, Thumbprint: thumbprint, DERSHA256: sha256.Sum256(rootDER)}
+	if err := identity.validateCertificate(); err != nil {
+		t.Fatalf("generated public CA DER/CN/thumbprint preflight: %v", err)
+	}
 	importCtx, cancelImport := certutilFixtureImportContext(matrixCtx)
 	cmd := certutilFixtureImportCommand(importCtx, certutil, caFile)
 	cmd.Env = env
-	attachCertutilFixtureDiagnostic(matrixCtx, cmd, func(ctx context.Context, pid int) (*exec.Cmd, error) {
-		return certutilFixtureSnapshotCommand(ctx, pid, env)
-	}, func(line string) { t.Logf("native HTTPS diagnostic: %s", line) })
-	t.Log("native HTTPS CurrentUser unique-CA-import:begin candidate=force-overwrite; UI behavior unverified")
-	importErr := runPowerShellFixtureCommand(cmd, func(line string) { t.Logf("native HTTPS certutil: %s", line) })
+	t.Log("native HTTPS CurrentUser unique-CA-import:begin candidate=owned-controls checkpoint; NO ACTION; native consent contract UNKNOWN")
+	importErr := runCertutilFixtureControlObservation(matrixCtx, cmd, func(ctx context.Context, pid int) (*exec.Cmd, error) {
+		return certutilFixtureOwnedControlCommand(ctx, pid, identity, env)
+	}, func(line string) { t.Logf("native HTTPS certutil: %s", line) })
 	importContextErr := importCtx.Err()
 	cancelImport()
 	t.Logf("native HTTPS certutil process joined: error=%v context=%v", importErr, importContextErr)

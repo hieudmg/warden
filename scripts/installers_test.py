@@ -4,6 +4,7 @@ import hashlib
 import http.server
 import os
 import re
+import socket
 from pathlib import Path
 import ssl
 import subprocess
@@ -11,6 +12,7 @@ import tempfile
 import threading
 import time
 import unittest
+from unittest import mock
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -63,6 +65,9 @@ class InstallerHTTPS(unittest.TestCase):
         hits = []
         class Peer(http.server.BaseHTTPRequestHandler):
             protocol_version = 'HTTP/1.1'
+            # Tiny TLS records must not consume the shared 250ms fixture budget
+            # waiting for Nagle/delayed ACKs; retain persistent HTTP/1.1 replies.
+            disable_nagle_algorithm = True
             def log_message(self, *args):
                 pass
             def do_GET(self):
@@ -147,6 +152,38 @@ class InstallerHTTPS(unittest.TestCase):
             self.assertFalse(any(hit.startswith('target') for hit in hits))
         if scenario == 'CDN':
             self.assertEqual(len([h for h in hits if h.startswith('target')]), 2)
+
+    def test_cdn_persistent_tls_socket_configuration(self):
+        for script in ('install-client.sh', 'install-server.sh'):
+            with self.subTest(script=script):
+                responses = []
+                original = http.server.BaseHTTPRequestHandler.end_headers
+
+                def observe_headers(handler):
+                    responses.append((
+                        handler.path,
+                        b''.join(handler._headers_buffer),
+                        isinstance(handler.connection, ssl.SSLSocket),
+                        handler.close_connection,
+                        handler.connection.getsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY),
+                    ))
+                    return original(handler)
+
+                with mock.patch.object(http.server.BaseHTTPRequestHandler, 'end_headers', observe_headers):
+                    self.run_case(script, 'CDN')
+                self.assertEqual(len(responses), 4, 'binary/checksum must each visit origin and CDN')
+                self.assertCountEqual(
+                    [(path, int(headers.split()[1])) for path, headers, _, _, _ in responses],
+                    [('/warden-linux-amd64', 302), ('/warden-linux-amd64', 200),
+                     ('/SHA256SUMS', 302), ('/SHA256SUMS', 200)],
+                )
+                for path, headers, tls, closed, nodelay in responses:
+                    self.assertTrue(tls, path)
+                    self.assertTrue(headers.startswith(b'HTTP/1.1 '), headers)
+                    self.assertIn(b'Content-Length: ', headers)
+                    self.assertNotIn(b'Connection: close', headers)
+                    self.assertFalse(closed, 'do not hide persistent-response behavior by forcing EOF')
+                    self.assertEqual(nodelay, 1, 'tiny fixture TLS records must not wait for Nagle/delayed ACK')
 
     def test_streaming_tls_redirect_checksum_deadlines(self):
         for script in ('install-client.sh', 'install-server.sh'):

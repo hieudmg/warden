@@ -932,3 +932,309 @@ Independent reviewer `01a1e1ea-4a07-7503-b4c7-e7dc96ff6f22` found no issues in t
 - Windows amd64 upgrade-test compilation and Windows-target upgrade vet: PASS, `/var/tmp/warden-r5-upgrade-windows.test.exe` and `/var/tmp/warden-windows-r5-parent-windows-vet.log`; **neither is native execution**.
 
 Reviewed task hashes still matched before this prose-only append. Fresh fetched approved base remains `0.22.1`; existing release `0.23.0` remains unchanged. This accepts only the diagnostic candidate for one authorized automatic PR observation. Native metadata, root cause, functional import, all eleven download modes and all16 acceptance remain unproven. Empty or unavailable metadata remains UNKNOWN. Any consent evidence requires an owner decision before GUI action or trust-scope changes. No manual dispatch, signing, merge or release is authorized.
+
+## Round 6 — owned certificate-control observation checkpoint (2026-11-16)
+
+### Before code edits: native exception and narrow consent authorization
+
+Baseline d22e9ce05da72f93cb92a77d1713786353c38576, same branch/sole writer.
+Independently reconciled actual three R5 JSONL streams: run43812138655attempt1,
+merge5b71d693ee34aa4c5221faf59b34ec49701a7e6c,16unique names once,
+**15PASS/1FAIL/0SKIP**. Helper all4native PASS; Linux pipeline PASS. Owned
+PID8384/session2/TID3196 had class`#32770`, caption`Security Warning`, ID6/7
+present; observation joined in18ms before certutil deadline/join. Independent
+exact-CA absence PASS, all6network counts0; import/DER/all11modes never ran.
+This is positive owned-window evidence, not sole-root-cause proof.
+
+Owner was asked: “Do you authorize fixture-only automated consent for this
+ test-generated certificate? It would require exact generated-certificate
+ identity checks, fail closed on ambiguity, retain CurrentUser-only trust and
+ exact-DER verification/cleanup, and use no global SendKeys or blanket
+ trust-policy changes. The risk is misidentifying a security prompt and approving
+ the wrong certificate. The safer alternative is manual approval and validation
+ in a disposable interactive Windows environment, which is not currently
+ available here.” Owner replied exactly **`approve`**. This supersedes no-GUI-action
+ only for safely identified consent for this single generated CA; it is not
+ blanket UI/trust/signing authority.
+
+**Actual child-control labels, IDs, classes and certificate text have NOT been
+observed.** This candidate uses the explicitly permitted fail-closed observational
+checkpoint, not a guessed clickable layout. No BM_CLICK/Invoke/action path will
+be added. Proactively start one owned observer during import, bind live PID plus
+creation identity and immutable public CA DER SHA256/full SHA1 thumbprint/random
+CN, collect bounded owned standard-control text with WM_GETTEXT via documented
+SendMessageTimeoutW, then decline consent even if identity-only evidence matches.
+A parent-controlled observational checkpoint is required before a recognized
+native action contract can be implemented. No passing native result is expected
+from a warning that requires consent. No speculative action framework is needed.
+
+Windows/UI runtime is unavailable locally: native UI integration is a **pre-edit
+TDD exception**, not a proof waiver. Portable tests must first fail against the
+old shared lifecycle (no proactive observer), then exercise actual shared
+identity checks/cancellation/output joins with real owned disposable Go children.
+Sanitized identity samples test strict logic only, not actual native layout;
+exact-match/one-approval action tests remain pending because this checkpoint has
+**zero approvals for every input**. Strongest native checks: official API and
+pinned x/sys0.47.0/Go1.26.11 source inspection, bounded source guards, Windows
+compile+vet only. Preserve R4 argv, preflight-before-cleanup arming, exact DER
+postcondition before any Download, both cleanup programs, all11modes/native16,
+production/helper/Unix/version0.23.0. Shared120s TOTAL, existing8s import reserve,
+observer at most6s/end by matrix-minus2s,1s each output join, independent20s cleanup;
+no retries, detached observers, global windows/text/actions, trust/TLS/policy or
+release operation. Record complete ledger delta under private `/var/tmp/ww6`.
+
+### Implemented checkpoint and proof boundaries
+
+New `certutil_control_test.go` owns immutable value-only public CA identity,
+bounded DER/CN/full-thumbprint validation, cloned target-envelope construction,
+identity-only evidence matching and the proactive import/observer lifecycle.
+New `certutil_control_windows_test.go` owns the private Windows entry and scoped
+Win32 reads. The caller additionally checks the generated CA DER SHA256/CN/full
+thumbprint before starting certutil. Parent captures live creation FILETIME after
+Start and before Wait can release the owned handle; the child pins a limited-query
+plus SYNCHRONIZE handle and repeatedly checks creation/liveness/PID/TID. No
+process memory, debugger, privileges or global window enumeration. Toolhelp THREAD
+numeric table is owner-filtered before windows; caps4096table entries/32owned
+threads/16window callbacks/32controls/32polls at100ms, child5s inside parent6s.
+Only one unambiguous owned `#32770`/`Security Warning` permits child metadata;
+unknown/duplicate warning refuses child reads. These parent facts come from R5,
+not a guessed native certificate-control layout.
+
+Nonzero owned parent/descendant membership, process/thread, class, control ID and
+parent identity are checked around text reads. Only standard Static/Button text
+is read with **WM_GETTEXT**, one specific HWND, SendMessageTimeoutW100ms,
+BLOCK|ABORTIFHUNG|ERRORONEXIT; no non-timeout flag/broadcast or action message.
+Unknown classes/IDs, incomplete/raced/truncated/failed reads remain UNKNOWN.
+Text buffer1024UTF16; quoted120-rune chunks preserve bounded public certificate
+text under the existing1024-byte streaming line bound. A whole-field full SHA1
+thumbprint (ASCII whitespace/case normalization only) and exact random CN can
+establish **identity evidence only**. Combined labels, abbreviations, unknown
+classes/parents/owners, missing/conflicting/duplicate identities are not a native
+consent contract. Synthetic IDs101/102 in tests are explicitly sanitized examples,
+never native expected IDs. Native labels/layout remain unobserved.
+
+The observer deliberately exits3 even for identity-only matches: **zero approvals
+for every input**. There is no clickable callback/BM_CLICK/Invoke path or pending
+action scaffold. Its process/output join precedes original owned kill; Cmd.Cancel
+cancels/joins that observer exactly once and preserves original cancel result.
+Normal/early process exit cancels/joins the observer; factory/nil/start/failure,
+blocked/deadline/cancel paths cannot leave a child or logging thread behind.
+A clearly naturally completed import still needs the original exact-DER store
+postcondition before downloads. Ambiguous completion stays failed closed.
+All existing R5 snapshot code/tests remain unchanged. No import variant/retry,
+production/helper/Unix/C#/mode/assertion/native16/version change.
+
+Official Microsoft SendMessageTimeoutW/WM_GETTEXT/EnumChildWindows/IsChild/
+GetParent/GetDlgCtrlID/OpenProcess/GetProcessTimes/WaitForSingleObject docs were
+read before their API coding; the official process-ID lifetime article explains
+handle-pinned reuse protection. Exact x/sys0.47.0 bindings and Go1.26.11 sources
+were checked alongside Context7 `ctx7:docs:386bcd0c610955d0fca57aad`; master snippets
+alone are not pinned-version proof. Ten full official pages and eight binding/Go
+sources archived subsequently in `api-evidence.json` (timestamps are archival,
+not native execution). These documented APIs prove no particular native layout.
+
+### Actual RED/GREEN, checks and retained failures
+
+- `control-red.log`,06:23:33UTC exit1: actual extracted R5 PID-only builder accepts
+  zero/self/missing creation/CN/partial/wrong thumbprint/DER/file/inherited target;
+  lacks the full public-identity envelope. This was a command-construction test,
+  not local certutil execution. First combined run pattern selected this test
+  only; lifecycle has its own explicit RED command, not an assumed execution.
+- `lifecycle-red.log`,06:23:57→06:24:04 exit1: real Go child cases complete/mismatch/
+  cancel call the old factory only after cancellation; normal/early exit never
+  calls it. Actual old Cancel observer/kill/output joins are under test, not
+  substring-only checks. A400ms disposable-child watchdog bounds old behavior.
+- `identity-red.log`,06:27:17→06:27:18 exit1: fail-closed missing-capability baseline
+  rejects the two complete synthetic identity samples. Negative identity cases
+  already reject; they are NOT claimed to have independently failed RED.
+- `control-green.log`,06:30:44→06:30:45 PASS actual shared helpers;10×race06:37:32→
+  06:37:42 PASS. Follow-up startup/deadline/ID/clone/original-cancel/source-scope
+  characterizations are not separate claimed REDs. Final focused/shared process
+  tests06:49:24→06:49:33 PASS; final25×control race06:49:33→06:50:01 PASS. Ownership,
+  full/missing/partial/wrong/conflicting/duplicate identities, PID/TID/process/
+  parent/class, no target/start failure, no observer, exit7, block, normal/early
+  exit, cancellation/deadline, kill-once/result and joined logging are covered.
+
+| Check (all exact argv/UTC/exits retained) | Result |
+| --- | --- |
+| Initial full Go with test-child umask077,06:51:40→06:52:29 | **FAIL801PASS/5FAIL/3existing skips**; existing fixture permission assumptions |
+| Initial affected race with test-child umask077,06:51:40→06:52:08 | **FAIL348PASS/3FAIL/1existing skip**, same mode assumptions |
+| Focused unchanged `TestUpgradeReplacesExecutable` umask077 then022,06:54:06→06:54:09 | Deterministic FAIL0700 versus expected0755, then PASS with only child umask corrected; no source change |
+| Full Go child-only normal fixture umask022,06:56:33→06:57:27 | PASS806top-level/3existing skips |
+| Affected upgrade/client race child-only umask022,06:57:27→06:57:53 | PASS351top-level/1existing skip |
+| Full vet06:52:08→06:52:09 | PASS |
+| Final Windows amd64 compile06:52:09→06:52:11, Windows vet06:52:11 | PASS, **never executed locally** |
+| Offline installers06:51:40→06:52:00 | PASS, no live installation |
+| Four-test real-curl/source-contract suite06:52:01→06:52:04 | **FAIL** server CDN positive case deadline |
+| Same unchanged suite isolated06:56:29→06:56:33 | **FAIL** client and server CDN positive deadlines; not only concurrent worker load |
+| Twelve offline CI contracts06:52:04→06:52:10 | PASS, fake publication only |
+| Existing private actionlint1.7.12,06:52:10 | PASS; optional shellcheck/pyflakes unavailable, disabled |
+
+All wrappers retain TMPDIRvar-tmp/Go1.26.11/bytecode-off, private evidence root700,
+parent umask077/logs600. The initial broad mode failures are caused by fixtures
+using os.WriteFile with0755/0640 etc and assuming unmasked modes, not new code:
+server refusal, CLI/SFTP preservation and upgrade executable cases. Controlled
+child-only umask022 leaves testing.TempDir roots700/evidence private and changes
+no process-global system policy, assertions, production or Unix code. Both
+original failed commands and A/B proof remain visible, not a passing-rerun waiver.
+Existing skips remain two opt-in browser fixtures and privileged wrong-owner;
+affected race skips wrong-owner only. Four new portable tests explain806vs802.
+
+**Required curl check is still FAILED, not waived.** Its unchanged fixture uses
+connect0.1s/total0.25s. The isolated failure falsifies a worker-concurrency-only
+explanation; root cause is UNKNOWN. Do not change the frozen installer, limits,
+assertions or claim successful current four-matrix proof. Parent must resolve or
+explicitly adjudicate this separate validation blocker before publication/CI.
+All failed logs/commands are retained. No further unrelated debugging/code changes
+or passing-rerun acceptance. Exact hashes reuse unchanged parent terminal/component
+and latest hosted whole SSH/DB race25 evidence, explicitly NOT fresh execution.
+
+### R6 review boundary — checkpoint only, acceptance blocked
+
+Complete originald22e9ce→current review bundle:
+`/var/tmp/warden-windows-r6-review.diff`, `.json`, `.sha256`; all6task paths,
+2new Go sources, full new ignored-ledger delta and unchanged prefix, safe inputs,
+actual R5 raw evidence, official API/bindings, runtime source/args/budgets,
+compile-only binary, all new successes AND failures and exact-hash reused proofs.
+Protected `mise.toml` excluded before reads/hashes/copies; unrelated cache and
+private evidence preserved. No staged/committed/pushed/CI-dispatched/trust/signing/
+service/deployment action. Version0.23.0×3 and frozen sources remain unchanged.
+
+This implements only the permitted **fail-closed observational prerequisite**.
+It does not implement native approval, the exact-match/one-approval action test,
+or resolve the HTTPS import. Parent independent review/fresh affected race/vet/
+Windows compile and the outstanding curl-validation decision precede any new
+parent-controlled observational automatic PR run. Capture actual owned controls;
+if unavailable/ambiguous, stop for interactive evidence rather than relaxing
+identity. Only after an actual recognized native contract can consent be safely
+implemented under the existing narrow approval. All16oncePASS/zero skips and all
+11real verified-HTTPS modes still required; latest native remains15/1/0. Genuine
+PRF/production trust, privileged Unix owner, hosted artifact/OIDC/signature gates
+remain open; public signing remains unanswered/unauthorized. No acceptance waiver.
+
+Closing bounded self-review: first07:22:15UTC check caught a trailing blank line
+at report EOF; fixed that documentation newline only, retained failed log. Final
+07:23:17→07:23:18 check PASS:6task paths/467safe inputs, format/whitespace/doc links,
+report+ledger prefixes, exact HEAD/empty index/versions, import-only caller seam,
+frozen sources/native16/programs/C# and nonapplying reverse patch. Entire68KB
+patch read in bounded self-review, not independent acceptance. No runtime-source
+change after final tests/compile. Final package refresh follows recorder closure
+so logs/commands have immutable hashes; `verify.py` rechecks all inputs/evidence/
+reused proofs/whole ledger delta and bundle checksums, including retained failures.
+Stop: no native approval or all16 success, and curl validation remains blocked.
+
+### R6 continuation — causal curl investigation, before fixture edits
+
+Parent returned the same R6 outcome because the two curl failures block review
+readiness; they are not waived. Same d22e9ce/sole writer, no Windows checkpoint,
+installer, budgets or assertion changes. Original bundle/evidence and complete
+ledger prefixes are preserved; continuation evidence is private `/var/tmp/ww6/curl`.
+Systematic debugging inspected the actual identical extracted downloader and
+fixture request/header/TLS/server lifecycle. Scoped traces include only public
+loopback requests and whitelisted protocol/deadline state, not environment dumps.
+
+Two bounded comparisons showed each Nagle-enabled persistent TLS response's
+roughly40ms delay between server header write and curl receipt. Four sequential
+requests (origin302/target200 for binary and checksum) consume most of250ms before
+process startup/polling. TCP_NODELAY on the accepted fixture socket removes these
+stalls without forcing Connection:close or changing CA/TLS/HTTP semantics. A
+separate case-local-cleanup comparison reduced31/64active threads to1 before CDN
+but left the per-response stalls; cleanup accumulation alone is NOT established
+as the cause and will not be changed. Instrumented old cases sometimes passed
+near250ms; that does not waive the original two actual deadline failures. Exact
+kernel ACK internals were not packet-captured; the socket-option/latency causal
+comparison is the evidence. Direct curl traces show TLS1.3 certificate/SAN
+verification and direct loopback connections, no proxy CONNECT. Budgets are
+correctly seconds: connect0.1, shared total0.25, four decreasing --max-time values.
+
+Before edits: choose only the fixture's standard StreamRequestHandler
+`disable_nagle_algorithm` setting. Read pinned Python3.12.15 socketserver setup
+source plus Context7 `ctx7:docs:61259771e3a92f0d221192d1` and curl trace/deadline
+documentation (refreshed reference `ctx7:docs:be70dd3b3d0175cb7fd6b756`). These
+upstream excerpts are cross-checked against installed Python3.12.15 and actual
+curl8.18.0 TLS traces, not treated as pinned dependency execution proof. No
+production defect inferred. Test-first add
+an actual-socket regression for both extracted installers: four verified TLS
+HTTP/1.1 responses with normal Content-Length and persistent connection state,
+TCP_NODELAY enabled on every accepted socket. Observe RED against existing
+misconfigured sockets, then change one fixture class attribute and GREEN under
+the same deadlines; all negatives/full suite must still pass. No native exception
+for this portable test, no relaxed timeout or assertion, no global network option.
+
+### R6 continuation — fixture correction and fresh proof
+
+The only fixture behavior edit is `Peer.disable_nagle_algorithm = True`; Target
+inherits it. This sets TCP_NODELAY on each accepted fixture socket, not a global
+network option. HTTP/1.1, normal Content-Length, no forced Connection:close,
+OpenSSL/TLS chain/hostname checking, actual curl, downloader code, byte limits,
+connect/total budgets and every original negative assertion remain unchanged.
+New `test_cdn_persistent_tls_socket_configuration` observes the actual accepted
+SSLSocket/header/connection state for both extracted installers, asserting all
+four origin302/target200 binary/checksum responses, persistence and TCP_NODELAY.
+It does not set the socket option or substitute a downloader/curl result.
+
+`curl-fixture-red.log`07:45:42->07:45:43 EXIT1: both script subtests receive the
+real bytes but observe socket option0 !=1. This is deterministic fixture
+misconfiguration RED, NOT falsely described as another naturally reproduced
+timeout. One class attribute correction, then `curl-fixture-green.log`
+07:46:22 EXIT0. Fresh complete suite07:46:22->07:46:25 PASS5/zero skips: all four
+original tests including32 client/server streaming scenarios and their unchanged
+negative checks, plus the new real-socket regression. Predetermined five complete
+suites07:48:49->07:49:00 PASS25/zero skips/zero errors while related offline/CI
+checks ran; this is bounded postfix stress, not retry-until-pass.
+
+For exact deadline discrimination, private probes preserve old fixture and
+actual installer source. An extra20ms server-work-before-headers hypothesis
+failed its assertion (`curl-deadline-causal-reproduction.log`07:55:18 EXIT1): both
+cases passed because work overlaps the post-handshake coalescing wait. This
+negative finding/log is retained, not a validation success or hidden rerun.
+Based on that phase evidence, one final bounded20ms-before-each-spawn comparison
+(`curl-deadline-scheduler-comparison.log`07:57:30->07:57:31 EXIT0) keeps identical
+real curl argv/CA/consumer code/budgets/scheduling delay in both variants. Original
+Nagle0 reproduces the exact extracted `fetch` line64 TimeoutError at fourth CDN
+checksum request: operation_left=-0.000950s, headers_left=+0.076722s. Shared total,
+NOT per-hop connect/headers, expires. Socket-local TCP_NODELAY=1 variant succeeds
+in0.114s with all four verified HTTPS requests. BrokenPipe after cancellation is
+an observation/consequence, not the cause. Original exact host scheduling cannot
+be reconstructed retrospectively; this controlled same-symptom reproduction,
+wire latency comparison and real-socket RED/GREEN establish the fixture's missing
+low-latency precondition under its deliberately reduced250ms operation budget.
+No higher timeout, scheduler shim or probe instrumentation enters repository code.
+
+Fresh related offline installers07:48:49->07:48:54 PASS, all12CI contracts
+07:48:54->07:48:57 PASS, actionlint1.7.12 PASS (optional ShellCheck/Pyflakes still
+unavailable/disabled). All Go, production scripts, workflow, build/embedding,
+module and Windows source inputs are exactly the preceding R6 bundle hashes;
+`curl/reuse-current-r6.json` binds the unchanged safe inputs/logs/command-prefix.
+Existing R6 fullGo806PASS/3existing skips, affected race351PASS/1existing skip,
+control race25, vet and Windows compile/vet are REUSED, NOT fresh continuation
+execution; no Go source reads/calls this Python fixture. Parent terminal/component
+and hosted SSH/DB race25 reuse remains separately bound. All original077 Go
+failures, original curl failures, self-review failure and failed probe stay intact.
+
+Curl gate is now causally corrected with fresh full proof, ready for independent
+review of this SAME authorized observational checkpoint; no waiver or parent
+acceptance claimed. Existing R6 owned-control sources are unchanged. Latest native
+remains15PASS/1FAIL/0SKIP, current observation UNRUN, actual native child layout and
+certificate-bearing controls UNKNOWN, action unimplemented/always no-click.
+All16oncePASS/zero skips/all11verifiedHTTPS modes/exact cleanup still required.
+External genuine PRF/production trust/privileged Unix/artifact-OIDC-signature gates
+and signing authorization stay open. Original baseline/branch/index/0.23.0fields,
+protected exclusions and whole original ledger prefix/delta remain fixed. Refresh
+same review paths only after recorder closure; preserve previous bundle in
+`curl/r6-before-curl-review.*`. Independent parent review owns publication/CI;
+no worker staging/commit/push/dispatch/trust/live install/service/global tool/
+signing/release/merge action. Stop at this bounded handoff.
+
+### R6 parent local acceptance checkpoint
+
+Independent reviewer `01a1e1ea-4a07-7503-b4c7-e7dc96ff6f22` resumed after a provider quota interruption and completed with no issues in the exact R6 observation/curl fixture patch against `d22e9ce`. The interrupted attempt was not approval. Completed review inspected evidence but executed no tests or native operations. Parent inspected the actual owned-control sources, lifecycle integration, curl regression and causal timing evidence; all 7 task/467 input/145 evidence hashes matched.
+
+Fresh parent checks, with child-only umask `022` and `TMPDIR=/var/tmp`:
+
+- `python3 scripts/installers_test.py`: all **5 PASS**, `/var/tmp/warden-windows-r6-parent-installer-https.log`.
+- `GOTOOLCHAIN=go1.26.11 go test -count=1 -race ./internal/upgrade ./internal/client/...`: PASS, `/var/tmp/warden-windows-r6-parent-fresh-race.log`.
+- Full `go vet ./...`: PASS, `/var/tmp/warden-windows-r6-parent-vet.log`.
+- Windows amd64 upgrade-test compilation and Windows-target upgrade vet: PASS, `/var/tmp/warden-r6-upgrade-windows.test.exe` and `/var/tmp/warden-windows-r6-parent-windows-vet.log`; **not native execution**.
+
+Reviewed task hashes remained unchanged until this prose-only append. Fresh approved base remains `0.22.1`; existing three `0.23.0` fields remain unchanged. This accepts only the no-click observation and causal fixture correction for the authorized automatic PR checkpoint. Actual native control layout, exact UI identity match and consent action remain unverified/unimplemented; all16/native HTTPS and external gates remain open. The next run is observational and must not be described as consent delivery or a native fix.

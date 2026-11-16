@@ -172,6 +172,59 @@ Version0.23.0/security contracts and external PRF/production-trust/privilegedUni
 hosted provenance/signatures remain open, manual signing authority unanswered.
 No staging/commit/push/CI/dispatch/install/deploy/service/trust/publication authority.
 
+### Native Windows round 6 — approved consent, fail-closed control checkpoint
+
+R5 published d22e9ce; run43812138655attempt1 merge5b71d693ee34aa4c5221faf59b34ec49701a7e6c
+independently reconciles16namesonce **15PASS/1FAIL/0SKIP**. Owned PID8384/TID3196
+`#32770`/`Security Warning` with ID6/7 present was observed;18ms observer join,
+then certutil deadline/exit1/join. Exact CA absence PASS,6network counts0, no DER/
+11modes. All4helper cases PASS/frozen; Linux entire pipeline PASS. Positive UI
+observation is NOT sole-cause proof or successful consent.
+
+Owner explicitly replied **approve** to fixture-only generated-CA consent with
+full UI thumbprint/random CN/exact DER identity, fail-closed ambiguity, CurrentUser
+only/exact cleanup, no global SendKeys/policy changes; wrong-certificate approval
+risk and unavailable safer interactive alternative were explicitly described.
+This supersedes no-action authority only for a safely identified single CA.
+Actual child text/layout/labels remain unknown. Use the explicitly permitted
+**first observational checkpoint**, not guessed native IDs/labels/action code.
+
+R6 adds proactive6s owned observer inside same120s/8s reserve, child5s/fixed caps,
+creation FILETIME/live handle/PID/TID/parent/control rechecks, bounded specific-target
+WM_GETTEXT100ms for owned public Static/Button text, immutable CA DER SHA256/full
+SHA1/CN preflight and identity-only matcher. Always **NO ACTION/exit3**, including
+synthetic exact-identity matches, until actual native contract is known. Join
+observer/output before original owned kill; normal/early exit cancels/joins,
+exactly-once cancel/result and no detached logger. No approval action framework.
+Native integration exception documented before edits; portable actual R5 seams
+and missing-control capability RED→GREEN, real child lifecycle/guard coverage,
+final25×race PASS, Windows compile/vet **not execution**. Fixed R4argv, production/
+helper/Unix/C#/preflight-main-cleanup/all11modes/native16/version remain unchanged.
+
+Fresh fullGo806PASS3existing skips/affected race351PASS1skip with explicit child-only
+normal fixture umask022; parent evidence umask077/logs private. Initial077 broad
+mode failures retained and deterministically explained by unchanged fixtures'
+unmasked0755/0640 assumptions; A/B source-identical upgrade test proves this is
+harness mode, no assertion/source change or erased failure. Vet/offline installers/
+12CIcontracts/actionlint PASS. **Required actual-curl suite FAILED twice**, including
+isolated client+server CDN positives with unchanged0.1s/0.25s fixture limits;
+worker-concurrency-only explanation insufficient, cause UNKNOWN. No passing rerun
+waiver, timeout inflation or unrelated installer/Unix edits. Parent must resolve/
+adjudicate this separate validation blocker before any publication/CI. Whole
+unchanged SSH/DBrace25/component/terminal proofs reused by exact hash, not rerun.
+
+[Chronological R6 report](../reports/2026-11-16-native-windows-followup.md#round-6--owned-certificate-control-observation-checkpoint-2026-11-16)
+and `/var/tmp/warden-windows-r6-review.{diff,json,sha256}` cover originald22e9ce
+through all6paths/2new Go files/entire ledger delta, all success AND failed evidence.
+Parent independent review/fresh affected race/vet/Windows compile plus curl blocker
+resolution before at most one parent-controlled observational autoPR checkpoint.
+Native consent/action test UNIMPLEMENTED by design at this allowed checkpoint;
+if text/ownership/identity unavailable stop, never weaken criteria. All16oncePASS/
+zero skips/all11verifiedHTTPS modes/exact CA cleanup still required. External
+PRF/production trust/privileged Unix/artifact-OIDC-signatures remain open; public
+signing unanswered/unauthorized. No checkbox completed or bug-resolution claim;
+no worker staging/commit/push/PR/CI/installation/service/deploy/signing/release.
+
 ## Execution, dependencies, and evidence discipline
 
 - Repository `/var/www/code/go/warden`, branch `hieudmg/security-hardening`, inspected HEAD/fetched `origin/main` both `c104353` on 2026-11-14. Only one writer in this checkout. A controller may assign sequential workers one task at a time; no parallel writers/worktrees. Each handoff names changed paths, red/green commands, remaining failures and next dependency. Preserve unrelated work, particularly protected untracked `mise.toml` (do not read/change/stage).
@@ -440,3 +493,37 @@ verification, genuine PRF/production trust, native Windows16 zero-skip proof,
 privileged Unix and hosted artifact/OIDC/signature gates remain pending. Narrow
 T16 risk disposition is unchanged; no signing/dispatch/publication authority or
 live operation. The earlier failed broad log and all native evidence stay intact.
+
+### R6 continuation — required curl gate causally corrected, review checkpoint only
+
+Parent returned the same R6 bundle for systematic debugging, not a curl waiver or
+native action. Private `/var/tmp/ww6/curl` bounded actual-downloader/wire/socket/
+lifecycle comparisons identified Nagle-enabled accepted TLS sockets adding about
+40ms per response across four sequential CDN requests inside250ms. Case-local
+cleanup alone did not remove the stalls and was not changed. TCP_NODELAY preserves
+HTTP/1.1 persistence/TLS validation; no production bug inferred. A controlled
+identical20ms-before-spawn comparison on the original fixture reproduces exact
+fetch line64 TimeoutError with shared operation expired and per-hop headers still
+76ms available; only socket-local TCP_NODELAY makes that comparison succeed.
+Original host scheduling is not retrospectively asserted. Failed overlapping
+server-work probe and all earlier failures remain in the chronology/evidence.
+
+Minimal fixture correction: one `disable_nagle_algorithm=True` class attribute;
+new real accepted-socket/CDN response regression for both installers RED option0
+then GREEN option1. No changes to original four tests, 32 streaming scenarios,
+100ms/250ms fixture limits, 10s/300s production limits, actual curl, TLS/hostname,
+redirect/byte/checksum/rollback/state/security assertions. Fresh full5tests PASS
+plus predetermined five-suite stress25PASS/zero skips; related offline installers,
+12CI contracts and actionlint PASS. Exact previous-R6 source/log hashes justify
+REUSED fullGo806/3skips, affected race351/1skip, focused race25, vet and Windows
+compile/vet, not fresh continuation Go execution. Existing Go/production/workflow
+inputs unchanged; only fixture Python and chronological docs/ledger added here.
+
+Same d22e9ce, same branch, sole writer, empty index and all three0.23.0 versions.
+Entire R6 ledger delta from original pre-R6 prefix and original bundle preserved;
+refresh same review paths for independent parent review, not parent acceptance.
+Native no-action checkpoint unchanged/unrun; actual UI layout/identity UNKNOWN,
+latest15PASS/1FAIL/0SKIP; all16oncePASS/zero skips/all11real HTTPS/exact CA cleanup
+remain required. External PRF/production trust/privileged Unix/artifact-OIDC/
+signatures and signing authorization remain open. No worker publication, CI,
+staging/commit/push, trust, installer/service/global tool/signing/release action.
