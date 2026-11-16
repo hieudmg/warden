@@ -609,3 +609,61 @@ results, not local passes. All16oncePASS/zero skips/all11verifiedHTTPS/exactclea
 and genuinePRF/productiontrust/privilegedUnix/hostedartifact-OIDC-signatures/public
 signing authorization remain open. See the existing native followup report's
 Round7 for API semantics, evidence/failures and acceptance boundary. STOP.
+
+### R8 cleanup diagnosis — bounded read-only checkpoint, not a removal fix
+
+Resume baseline39bdf67c1e34a0b0c1581ba7aa0117ddb6e82525 same branch/sole writer/
+initialHIGH/no override. R7+Linux published; actual run43848876542attempt1 proves
+one exact owned Yes/normal certutil completion/expected-vs-observed public CN/
+full SHA1+DER identity/import postcondition BEFORE all11 actual HTTPS modes PASS.
+16namesonce15PASS/1FAIL/0SKIP. Sole failure BOTH exact cleanup Remove calls hit
+existing120/20deadlines, neither removal completion nor absence proved. Observed
+counters10connections16payload1CRL2exact2CDN0forbiddenHTTP, final Go assertions
+NOT reached. Linux whole hosted pipeline genuinely PASS. Older failures retained.
+
+Compared main file-loadedCA vs independent fresh store-found exact-DERCA AFTER
+main process/output joined: both stall, falsifying either external-vs-store
+context or only live main-reference as sole sufficient cause, not ruling out
+UI/provider/global locks. Official.NET4.8.1/Win32docs+pinned family reference
+source traced FindExisting/Delete, but NOT exact serviced hosted binary/UI and
+NO documented safe noninteractive replacement established. No blindAPIvariant.
+Deliver permitted diagnostic-only outcome: separate PowerShellPID/creation pinned
+before Wait, same immutable publicCA; queries only after existing exact guarded
+Remove:begin marker; minimal R5read-only owned metadata visitor, no import handler.
+Bounded owned controls standardStatic/Button only under explicit owned#32770;
+no guessed removal-caption/layout/IDs/strings. Emit numeric metadata/expected
+public identity occurrence counts, never unknown control strings; counts are NOT
+identity/consent evidence. Missing/raced/incomplete data UNKNOWN. No GUI action,
+store mutation/flags/selector/retry/skip/timeout inflation. Reserve8s INSIDE120/20,
+observer6s/child5s/final2s kill-join reserve, operation112/12. All cancellation/
+process/output/callbacks joined; original exactly-once kill/result retained.
+
+Native-unavailable TDD exception recorded BEFORE edits. Four actual portable
+RED→GREEN guard/phase/lifecycle/incomplete-metadata proofs retained. Final fresh
+fullGo/fullrace817PASS3existing skips,1999all-levelPASS; required server/store/
+client657/3 and affectedupgrade/client361/1 included. New cleanup race25 sixnames
+150top/1100all-level PASS/zero skips, both actual process roles. Fullvet/Windows
+compile-vet/offline/actualcurl5/CI12/actionlint PASS. Native checkpoint UNRUN;
+compilation/source-freeze/simulation are NOT native acceptance. All original
+3PSprograms/Remove calls/bothabsence gates/all11modes/actualargv/finalcounter-byte-
+content assertions/R7 action/Linux source-report/production/Unix/helper/modules/
+workflows/three0.23.0 frozen;13currentdistribution assets bound, not freshnpm.
+
+Full details/API/source qualification/actual hosted identity/failure chronology
+in existing native followup Round8. Full original ledger prefix preserved and
+entireR8delta included. Deliver7task-path `/var/tmp/warden-windows-r8-review.
+{diff,json,sha256}` against39bdf67 then STOP for parent independent review/fresh
+checks/publication; no workerstagecommitpushPRCIrerun-dispatch/liveGUItrustinstall
+service/globaltools/signingtagreleasemerge/worktree. Import approval does NOT
+permit removal consent automation; new action needs owner decision based on
+actual evidence. Ultimate all16oncePASS/zero skips/all11verifiedHTTPS/finalcounters/
+bothexactcleanupabsence and genuinePRFproductiontrust/privilegedUnix/hostedartifact-
+OIDC-signatures/publicsigningauthority remain open. R8 is diagnosis ONLY.
+
+R8 packaging external verifier initially FAILed because3tool-created private
+scripts/notes were0664, not0600; root stayed0700. First bundle/logs retained under
+ww8/packaging-original. Controlled permission-ONLY change insideww8 with every
+first-manifest evidence byte hash unchanged made SAMEverifier/SAMEbundle PASS
+11:34:17Z BEFORE prose edits; not verifier weakening/rerunwaiver. Receipt and final
+rebundle include this separate required-failure disposition. No source/test/native
+status changed; final unchanged verifier must PASS after all prose updates.

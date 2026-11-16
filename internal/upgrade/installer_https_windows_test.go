@@ -215,13 +215,29 @@ func TestWindowsPowerShellTrustedHTTPSReleaseMatrix(t *testing.T) {
 		t.Logf("native HTTPS observed counts after process joins: connections=%d payload=%d CRL=%d exact=%d CDN=%d forbiddenHTTP=%d",
 			peerConnections.Load(), payloadRequests.Load(), crlRequests.Load(), goodRequests.Load(), cdnRequests.Load(), forbiddenHTTP.Load())
 	}()
+	identity := certutilFixtureCAIdentity{File: caFile, CN: ca.Subject.CommonName, Thumbprint: thumbprint, DERSHA256: sha256.Sum256(rootDER)}
 	runPS := func(ctx context.Context, phase, program string) error {
-		cmd := exec.CommandContext(ctx, shell, "-NoLogo", "-NoProfile", "-NonInteractive", "-EncodedCommand", encodePowerShellCommand(powerShellFixtureProgram(program)))
+		operationCtx := ctx
+		cancel := func() {}
+		observeCleanup := phase == "matrix" || phase == "independent-cleanup"
+		if observeCleanup {
+			operationCtx, cancel = certutilFixtureCleanupContext(ctx)
+		}
+		defer cancel()
+		cmd := exec.CommandContext(operationCtx, shell, "-NoLogo", "-NoProfile", "-NonInteractive", "-EncodedCommand", encodePowerShellCommand(powerShellFixtureProgram(program)))
 		cmd.Env = env
-		err := runPowerShellFixtureCommand(cmd, func(line string) { t.Logf("native HTTPS %s: %s", phase, line) })
-		t.Logf("native HTTPS %s process joined: error=%v context=%v", phase, err, ctx.Err())
-		if ctx.Err() != nil {
-			return fmt.Errorf("%s context: %w (process: %v)", phase, ctx.Err(), err)
+		log := func(line string) { t.Logf("native HTTPS %s: %s", phase, line) }
+		var err error
+		if observeCleanup {
+			err = runCertutilFixtureCleanupDiagnostic(ctx, cmd, func(pid int) (certutilFixtureCleanupObserver, error) {
+				return certutilFixtureBindCleanupObserver(pid, identity, phase, env)
+			}, log)
+		} else {
+			err = runPowerShellFixtureCommand(cmd, log)
+		}
+		t.Logf("native HTTPS %s process joined: error=%v context=%v parentContext=%v", phase, err, operationCtx.Err(), ctx.Err())
+		if operationCtx.Err() != nil {
+			return fmt.Errorf("%s context: %w (process: %v)", phase, operationCtx.Err(), err)
 		}
 		return err
 	}
@@ -281,7 +297,6 @@ try {
 	// Same argv/total deadline. One known owned warning may receive one guarded
 	// Yes dispatch; normal certutil exit AND exact CurrentUser DER are still
 	// mandatory before any Download. Ambiguous identity/action fails closed.
-	identity := certutilFixtureCAIdentity{File: caFile, CN: ca.Subject.CommonName, Thumbprint: thumbprint, DERSHA256: sha256.Sum256(rootDER)}
 	if err := identity.validateCertificate(); err != nil {
 		t.Fatalf("generated public CA DER/CN/thumbprint preflight: %v", err)
 	}

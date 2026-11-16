@@ -1437,3 +1437,232 @@ Fresh parent checks used child-only umask `022`, `TMPDIR=/var/tmp` and Go `1.26.
 - Actual curl suite: **5/5 PASS**, `/var/tmp/warden-windows-r7-parent-curl.log`.
 
 Reviewed task hashes remained unchanged before this prose-only append. Fresh approved base remains `0.22.1`; three existing `0.23.0` fields remain unchanged. This accepts a local R7 commit and joint push with `238411d` for one authorized automatic PR run. It does not prove native dispatch, import, DER postcondition, any HTTPS mode or cleanup. Historical expected DER remains unlogged; no retrospective matching claim. All native/external acceptance and separate signing-authority limits remain in force.
+
+## Round 8 before native edits — cleanup diagnosis only (2026-11-16)
+
+Baseline39bdf67c1e34a0b0c1581ba7aa0117ddb6e82525, same branch/sole writer/initial
+HIGH retained/no model override. R7+Linux are published. Native run43848876542
+attempt1/mergef29143f18ea4b3eb165769a3c35a506337031131/basec104353 has16unique
+names once,15PASS/1FAIL/0SKIP. Raw logs now prove ONE owned Yes dispatch, normal
+certutil exit/context, exact expected-vs-observed CA identity and exact DER-store
+postcondition BEFORE all11 actual HTTPS mode PASS markers. Observed counters
+10connections/16payload/1CRL/2exact/2CDN/0forbiddenHTTP; final Go counter ASSERTIONS
+were NOT reached because cleanup failed. Linux whole hosted pipeline now PASS;
+historical failures remain preserved, not waived. No overall native acceptance.
+
+Sole native failure: main exact CurrentUser removal begins10:27:53.1412511Z,
+process joined10:29:37.1860877Z/deadline; independent fresh-store exact-DER guarded
+removal begins10:29:37.4777917Z, joined10:29:57.2031961Z/deadline. No remove-end,
+absence PASS or store-close markers in either path. Neither eventual absence nor
+UI cause is proved; runner disposal is not cleanup evidence.
+
+Falsifiable comparison before choosing behavior: main uses file-loaded `$ca`;
+independent runs AFTER main process/output joins, opens its own store, finds and
+DER-checks its own `$cert`, yet also stalls. Thus using the external rather than
+store-returned context, or retaining only a live main-process reference, cannot
+alone explain both failures. This does NOT rule out provider/global locking/UI.
+Official CertDelete docs distinguish deletion from release of duplicated context
+memory, not a blocking/noninteractive guarantee. Public .NET Framework reference
+source commit ec9fa9ae770d522a5b5f0607898044b7478574a3 traces Remove through
+CERT_FIND_EXISTING then crypt32 CertDeleteCertificateFromStore; it is family
+reference source, NOT an exact serviced4.8.1 binary/source match. Official Remove
+view=netframework-4.8.1 and Win32 docs archived under `/var/tmp/ww8/api/`.
+CERT_SYSTEM_STORE_UNPROTECTED_FLAG changes protected-root cache behavior; it is
+not documented safe UI suppression and is NOT used. No guessed certutil CertId,
+registry/provider/policy/permission/store-scope or disposal workaround.
+
+Approved outcome here: MINIMAL READ-ONLY owned cleanup-process checkpoint, not a
+causal correction. Reuse R5 bounded owned-window reader with a pinned live process
+creation/CA guard, add bounded owned standard-control observations only. Unknown
+control strings stay unlogged: emit numeric metadata and occurrences of the exact
+expected public CN/full thumbprint, or exact known public identity values, not
+foreign text. No invented removal caption/layout/IDs/selector/action. Normal and
+independent paths bind DIFFERENT PowerShell PID/creation after Start BEFORE Wait;
+observe only before original exactly-once kill. Reserve8s INSIDE original120s/20s
+by ending the operation at parent-deadline−8s; observer≤6s, child≤5s, final2s for
+owned kill/output joins. No larger budgets/retry/skip/cleanup error suppression.
+
+PRE-EDIT native TDD exception: no Windows GUI/runtime locally. Portable real-owned
+process/guard/lifecycle RED→GREEN/race25 plus pinned API/source inspection and
+Windows compile/vet cannot prove native UI/removal/absence. This checkpoint can
+show an owned modal/dialog during the blocked Remove, or leave UNKNOWN; even a
+positive dialog is not sole-cause proof and absence cannot rule UI out. Both
+original exact Remove calls, guards, normal/independent absence assertions, all11
+modes/counter assertions, R7 import/BM_CLICK and Linux fix remain frozen except
+necessary diagnostic call-site integration. Import's narrow consent approval does
+NOT authorize another removal GUI action. Such a proposal must STOP for owner
+confirmation based on actual new evidence; no action here. No worker staging,
+commit/push/PR/CI rerun-dispatch/live installer/service/trust/GUI/global tools/
+signing/tag/release/merge/worktree. Three0.23.0fields fixed; protected content
+excluded BEFORE reads/hashes/copies, cache/private originals retained. Private
+ww8 root0700/parent077/logs600/test children only022, exact TMPDIR=/var/tmp,
+GOTOOLCHAIN=go1.26.11/PYTHONDONTWRITEBYTECODE=1, full pre-R8 ledger prefix captured.
+
+### R8 candidate — READ-ONLY owned cleanup checkpoint, NOT a removal fix
+
+Reconciliation `/var/tmp/ww8/reconciled-hosted.json` independently parses all3 raw
+R7 JSONL files, exact16-name source list, GitHub run/jobs metadata and complete
+public warning capture; preserves original evidence under `ww8/hosted/` plus its
+original parent directory. Full expected R7 public identity is CN `Warden T16
+isolated fixture d3ec8e8bd0a06ae492d925fa0cbcf547`, SHA1
+`CDACCC7270CC37C1C38828AF732DB0367D20305A`, DER-SHA256
+`a5a3c20f35e5a67f3d3a601e6156a919c036b5d9eb33dc8079affe79ecff8781`.
+The independently captured warning matches that CN3times/full grouped SHA1;
+reconstructing actual control-text chunks matches the public capture. One
+`guardedDispatch=true error=<nil>` and normal certutil completion, followed by
+exact DER postcondition before the first actual Download. Actual modes exact/
+redirect/downgrade/bad-digest/duplicate/truncated/binary-oversize/checksum-oversize/
+slow-headers/HTTP/untrusted each have ONE begin/end/PASS; slow-headers10.0235966s.
+Counter observations are meaningful actual execution, NOT reached final Go
+assertions. R6 expected DER remains unlogged/historically unproved. R7's OS/PS/
+.NET/Go banner is Windows10.0.26100.0/5.1.26100.33648/Release533509/go1.26.11;
+this still does not identify exact serviced crypt32/Framework implementation.
+
+Implementation is test-only, seven task paths including this report, plan and
+append-only ignored ledger:
+
+- New `certutil_cleanup_diagnostic_test.go`: bounded context, immutable phase/
+  PID/creation/exact public CA envelope and private read-only child argv; reject
+  inherited control/snapshot/cleanup target keys case-insensitively BEFORE child
+  creation, no caller environment mutation. Lifecycle captures identity AFTER
+  Start BEFORE Wait; cancellation waits for identity publication, runs at most
+  one observer, joins observer/output before original exactly-once Cancel and
+  retains that Cancel result. Normal cleanup exit never starts an observer.
+- Observer UI queries are additionally ARMED ONLY by either ORIGINAL exact
+  `CurrentUser unique-CA-remove:begin` or `cleanup exact-certificate remove:begin`
+  output marker, i.e. after the existing scope/ownership/identity guards. Earlier
+  matrix failures do not authorize a cleanup UI query. Missing marker/binding/
+  context/probe/error is explicitly UNKNOWN, not no-UI/no-removal/cleanup PASS.
+- New `certutil_cleanup_diagnostic_windows_test.go`: opens limited-query/sync
+  handle and captures live creation while owned original handle remains pinned;
+  observer independently opens/pins and validates same live creation, full public
+  DER/CN/thumbprint, hosted gates, strict JSON. Rechecks process/CA on every owned
+  traversal. Reuses R5 metadata reader, NOT the click-capable R7 import handler.
+  The shared reader gains only the predicate/optional read-only owned-dialog
+  visitor and4096numeric-thread traversal cap; existing ownership filters remain.
+- Bounds: thread entries4096/owned threads32/windows16, controls32 per explicitly
+  owned `#32770` parent, UTF16class64/caption128/control1024. Standard direct
+  Static/Button only; same PID/TID/parent/class/ID revalidated before and after
+  WM_GETTEXT0xD, flags0x23/100ms/primary-result checks. No assumed caption, child
+  layout/strings or control IDs; unsupported/raced/incomplete records UNKNOWN.
+  Actual captions/classes/numeric metadata are scoped to owned windows. Unknown
+  control strings are deliberately NOT emitted; only rune count and occurrences
+  of exact expected public CN/full SHA1 (plain or8hex-grouped). Those counts
+  are NOT an identity/layout/consent proof and cannot authorize an action. This
+  privacy-tight checkpoint may identify an owned dialog plus relevant public CA
+  text; it is NOT a captured removal-warning contract for future automation.
+- Observer≤6s, own child≤5s, WaitDelay1s; operation deadline parent−8s, final2s
+  reserved for owned kill/output joins, all INSIDE original matrix120/cleanup20s.
+  Thus matrix operation≤112s and independent operation≤12s, not timeout inflation.
+  Parent cancellation can leave observation unavailable; kill/error still occur.
+  All main/observer/copy workers/watchdog callbacks joined; no post-test logs.
+- Necessary call-site integration hoists the SAME CA identity and selects only
+  matrix/independent cleanup PowerShells. Preflight/import action and R7 lifecycle
+  are unchanged. ALL THREE raw PS programs (preflight, independent cleanup, main
+  postcondition/modes/cleanup) SHA256-frozen by supplementary regression; original
+  Remove calls, DER/thumbprint/preexisting-absence/owned scope, both absence gates,
+  all11actual modes/request-byte-content assertions remain byte-for-byte intact.
+  Frozen R7 consent/action/Unix/true-null/helper/production/Linux source/report/
+  scripts/crypto/auth/storage/modules/workflows and three0.23.0 fields verified.
+
+No store API, root flag, cleanup retry/skip/suppression, force-policy, certutil
+CertId, TLS bypass, elevation/LocalMachine/registry/policy, input/focus/activation
+or GUI action is added. New child argv cannot run the active import handler.
+Native root-removal cause/absence remain UNKNOWN; exact root UI is a hypothesis,
+not the checkpoint's result. The API documentation and natural two-context/
+process comparison warrant observation, not a causal API replacement. Read-only
+observation is the delivered authorized outcome; no additional removal consent
+has been requested or granted. Native observation itself is UNRUN here.
+
+### R8 local RED→GREEN and fresh final checks
+
+Exact argv/UTC/exits in `/var/tmp/ww8/commands.jsonl`; all original nonzero logs
+retained, all four are intentional regression RED, no unexplained required check
+failure or passing-rerun waiver:
+
+1.10:51:40→10:51:42 lifecycle RED against ordinary runner: no Start-time binding,
+   no snapshot join before kill, raw Cancel replay not idempotent, no WaitDelay.
+  10:53:17→10:53:19 GREEN after scoped lifecycle. Actual owned exec/PIDs, marker
+   output/Wait, original cancel-result sentinel and process/output joins tested
+   for BOTH process roles, normal/cancel/start/bind/probe failure/hang paths.
+2.10:53:17 command-guard RED: unknown phase/inherited target accepted;10:57:11→
+  10:57:13 GREEN after exact phase/inherited-namespace guards and CA validation.
+3.10:58:41 phase-guard RED in BOTH roles: pre-removal process queried;11:00:41→
+  11:00:42 GREEN after arming only on the original guarded-removal markers.
+4.11:13:59 incomplete/foreign metadata RED plus process query-error/public-CA
+   mismatch accepted;11:14:46→11:14:49 GREEN after complete PID/TID/parent/class/
+   handle/DER/creation/liveness guard. Missing/foreign data never promotes counts.
+
+FINAL after last code edits:
+
+- Full Go11:15:23→11:15:56 and full race11:15:23→11:17:02: each817top-level PASS,
+  1999all-level PASS,3existing skips. Fullrace includes required server/store/
+  client657PASS/3skips and affected upgrade/client361PASS/1skip. Existing opt-in
+  browser Setup/Runtime and privileged Unix wrong-owner skips remain explicit;
+  these do NOT waive native zero-skip or privileged/external acceptance.
+- New cleanup focused race25,11:15:23→11:16:25:6names EACH25=150top/1100all-level
+  PASS,zero skips.22actual owned-process lifecycle scenarios per run cover both
+  roles including binding/cancellation overlap, missing marker, observer failure,
+  hang/start failure/parent cancellation, natural completion and replayed Cancel.
+  Portable creation-change/query-error/full DER negatives are NOT native PID-reuse
+  observation; Windows ownership APIs themselves remain compile-only here.
+- Full vet/Windows amd64 compile-vet11:15:23→11:15:28 PASS. Compilation is NOT
+  native UI/removal or eventual absence proof. Supplemental source freeze is NOT
+  behavioral native evidence; actual portable workflows are distinct.
+- Offline installers11:11:26→11:11:31 PASS; real extracted curl5/5,11:11:32→
+  11:11:34 PASS;12CI contracts11:11:34→11:11:36 PASS,zero skips; actionlint1.7.12
+  PASS with unavailable ShellCheck/Pyflakes explicitly disabled. These inputs
+  did not change in the subsequent metadata-only Go tightening. Go1.26.11,
+  Python3.12.15/curl8.18.0/OpenSSL3.5.5 verified.13unchanged distribution assets
+  hash-bound from current files, no fresh npm/production HTTPS runner claim.
+
+Fresh R8 local tests, newly reconciled actual R7 hosted positives/failure, and
+borrowed historical R6/R7 API/capture/assets provenance remain separate. No fresh
+frontend/whole-test.sh/SSHDB25/source-scan/production-HTTPS/hosted pipeline or
+module-clean claim; actual R7 Linux whole hosted PASS is historical run evidence.
+No genuine production PRF/trust/privileged Unix/hosted artifact-OIDC-signature or
+public signing authority claim. Native overall STILL15/1/0; final Go counters and
+BOTH exact cleanup/absence gates remain OPEN. No native/live operations performed.
+
+Deliver `/var/tmp/warden-windows-r8-review.{diff,json,sha256}` against39bdf67 for
+parent independent review/fresh checks/publication authority ONLY. Full safe
+input/task/evidence/API hashes, commands/failure dispositions, complete original
+ledger prefix/full R8 delta and nonapplying reverse-patch check included. Parent
+may consider a separately authorized hosted checkpoint after review; worker does
+NOT dispatch/rerun/stage/commit/push. If actual removal UI needs another consent
+action, STOP for owner decision; this is NOT covered by import approval. Ultimate
+acceptance remains all16 exact names oncePASS/zero skips, all11 actual verified
+HTTPS modes/final counters and both exact cleanup/absence proofs. STOP here.
+
+#### R8 packaging permission failure — causally corrected, originals retained
+
+The first external package generation passed; its first external verifier FAILED
+on `/var/tmp/ww8/package.py` mode0664 vs required0600. This was NOT one of the
+four intentional test REDs above. Tool-created package.py/verify.py/self-review
+notes used the tool writer's0664 default despite the separate shell parent's077
+umask. The private root stayed0700 throughout, restricting directory traversal;
+no protected content or global permissions were touched. First bundle and both
+external logs retained under `ww8/packaging-original/`; no failing log overwritten
+without preservation. `packaging-permissions.json` records all3 offending modes.
+
+Controlled comparison11:34:17Z changed ONLY ww8 permissions (dirs0700/files0600),
+asserted ALL first-manifest evidence content hashes unchanged, and ran the SAME
+verifier against the SAME first bundle BEFORE any prose/content edits: exit0,
+`/var/tmp/warden-windows-r8-permission-controlled-verify.log`. Thus a metadata-only
+cause was isolated, not waived by rerun or weakened verifier. Source/checks never
+changed. This note/ledger are appended after that comparison; final package is
+regenerated to include the original failure and its causal correction/evidence,
+then the unchanged verifier runs again. Final verification still must pass. No
+native/cleanup/acceptance status changed; parent independent review boundary.
+
+### R8 parent local acceptance checkpoint
+
+Independent reviewer `01a1e1ea-4a07-7503-b4c7-e7dc96ff6f22` found no issues in the exact R8 read-only patch against `39bdf67`; review executed no tests or native operations. Parent inspected the actual phase/cancellation implementation, snapshot integration and frozen behavior, verified all 7 task/473 input/87 evidence hashes and 13 production asset hashes, and freshly ran with child-only umask `022`, `TMPDIR=/var/tmp`, Go `1.26.11`:
+
+- Uncached full Go: PASS, `/var/tmp/warden-windows-r8-parent-full.log`.
+- Uncached full Go race: PASS, `/var/tmp/warden-windows-r8-parent-full-race.log`.
+- Cleanup race25: PASS, `/var/tmp/warden-windows-r8-parent-cleanup-race25.log`.
+- Full vet, Windows amd64 upgrade-test compilation and Windows-target vet: PASS, `/var/tmp/warden-windows-r8-parent-vet.log`, `/var/tmp/warden-r8-upgrade-windows.test.exe`, `/var/tmp/warden-windows-r8-parent-windows-vet.log`; not native execution.
+- Actual curl suite: **5/5 PASS**, `/var/tmp/warden-windows-r8-parent-curl.log`.
+
+Reviewed task hashes remained unchanged before this prose-only append. Fresh approved base remains `0.22.1`; the three existing `0.23.0` fields remain unchanged. This accepts only one diagnostic automatic-PR checkpoint. It is not a removal fix, consent extension, absence proof or native acceptance. The 120s/20s bounds and exact cleanup gates remain intact. Any additional removal GUI action still requires separate owner approval.

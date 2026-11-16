@@ -28,6 +28,16 @@ func TestCertutilFixtureOwnedSnapshotProcess(t *testing.T) {
 }
 
 func certutilFixtureOwnedSnapshot(pid uint32) {
+	certutilFixtureOwnedSnapshotGuarded(pid, func() bool { return true }, nil)
+}
+
+// Cleanup adds a pinned process/DER guard and a read-only owned-dialog visitor;
+// the original snapshot entry retains its metadata-only behavior.
+func certutilFixtureOwnedSnapshotGuarded(pid uint32, ownsProcess func() bool, ownedDialog func(uintptr, uint32, string)) {
+	if !ownsProcess() {
+		fmt.Println("owned snapshot UNKNOWN: process/CA guard unavailable")
+		return
+	}
 	var session uint32
 	if err := windows.ProcessIdToSessionId(pid, &session); err != nil {
 		fmt.Printf("owned snapshot pid=%d session=UNKNOWN error=%v\n", pid, err)
@@ -60,6 +70,10 @@ func certutilFixtureOwnedSnapshot(pid uint32) {
 	threads, callbacks, ownedWindows := 0, 0, 0
 	ownerUnavailable, ownerRejected := 0, 0
 	ownsWindow := func(hwnd uintptr) bool {
+		if !ownsProcess() {
+			ownerUnavailable++
+			return false
+		}
 		var owner uint32
 		windowThread, err := windows.GetWindowThreadProcessId(windows.HWND(hwnd), &owner)
 		if err != nil || windowThread == 0 {
@@ -98,11 +112,20 @@ func certutilFixtureOwnedSnapshot(pid uint32) {
 		ownedWindows++
 		fmt.Printf("owned window pid=%d tid=%d class=%q classChars=%d classError=%v IDYES=%t IDNO=%t\n", pid, tid, windows.UTF16ToString(class[:]), classChars, classErr, yes != 0, no != 0)
 		fmt.Printf("owned caption pid=%d tid=%d chars=%d title=%q; empty/truncated/raced caption is inconclusive\n", pid, tid, captionChars, windows.UTF16ToString(caption[:]))
+		if ownedDialog != nil && classErr == nil && classChars > 0 && classChars < int32(len(class)-1) && windows.UTF16ToString(class[:]) == "#32770" && captionChars > 0 && captionChars < uintptr(len(caption)-1) {
+			ownedDialog(hwnd, tid, windows.UTF16ToString(caption[:]))
+		}
 		return 1
 	})
 	entry := windows.ThreadEntry32{Size: uint32(unsafe.Sizeof(windows.ThreadEntry32{}))}
 	err = windows.Thread32First(snapshot, &entry)
-	for err == nil {
+	entries := 0
+	for err == nil && ownsProcess() {
+		entries++
+		if entries > 4096 {
+			fmt.Println("owned snapshot UNKNOWN: thread traversal cap reached")
+			return
+		}
 		if entry.Size != uint32(unsafe.Sizeof(entry)) {
 			fmt.Println("owned snapshot UNKNOWN: incomplete thread entry")
 			return
