@@ -2,6 +2,8 @@ import { useEffect, useRef, useState, useSyncExternalStore } from 'react'
 import type { ReactNode } from 'react'
 import { authClient, AuthClient } from './auth'
 import { SecurityView } from './security-view'
+import { Button } from '../components/ui/button'
+import { Input } from '../components/ui/input'
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '../components/ui/dialog'
 import { securityEpoch, securitySignal, useSecurityEpoch } from './session'
 
@@ -62,27 +64,27 @@ export function AuthGate({ children, client = authClient }: { children: ReactNod
     finally { if (id === generation.current && taskEpoch === securityEpoch()) setPendingEpoch(null) }
   }
   const account = state.authMethod === 'account'
-  const passwordField = <label>Password<input type="password" autoComplete="current-password" required value={password} onChange={e => setPassword(e.target.value)} /></label>
+  const passwordField = <label>Password<Input type="password" autoComplete="current-password" required value={password} onChange={e => setPassword(e.target.value)} /></label>
   return <>
-    <Dialog open={verification} onOpenChange={open => { if (!open) closeVerification() }}><DialogContent showCloseButton={false} onCloseAutoFocus={e => { e.preventDefault(); verificationTrigger.current?.focus() }}><DialogHeader><DialogTitle>Verify your password</DialogTitle><DialogDescription>Approve only the sensitive action you just requested. Your password is not saved for the next action.</DialogDescription></DialogHeader><form onSubmit={e => { e.preventDefault(); const value = freshPassword; closeVerification(value) }}><label>Current password<input autoFocus type="password" autoComplete="current-password" required value={freshPassword} onChange={e => setFreshPassword(e.target.value)} /></label><button type="submit">Verify password</button><button type="button" onClick={() => closeVerification()}>Cancel verification</button></form></DialogContent></Dialog>
-    <section aria-label="Warden security" className="flex flex-wrap items-center gap-3 p-4 border-b">
-      <strong>Warden</strong>
+    <Dialog open={verification} onOpenChange={open => { if (!open) closeVerification() }}><DialogContent showCloseButton={false} onCloseAutoFocus={e => { e.preventDefault(); verificationTrigger.current?.focus() }}><DialogHeader><DialogTitle>Verify your password</DialogTitle><DialogDescription>Approve only the sensitive action you just requested. Your password is not saved for the next action.</DialogDescription></DialogHeader><form className="security-form space-y-4" onSubmit={e => { e.preventDefault(); const value = freshPassword; closeVerification(value) }}><label>Current password<Input autoFocus type="password" autoComplete="current-password" required value={freshPassword} onChange={e => setFreshPassword(e.target.value)} /></label><div className="flex flex-wrap justify-end gap-2"><Button type="button" variant="outline" onClick={() => closeVerification()}>Cancel verification</Button><Button type="submit">Verify password</Button></div></form></DialogContent></Dialog>
+    <section aria-label="Warden security" className="vault-strip flex flex-wrap items-center gap-x-3 gap-y-2 border-b bg-card px-4 py-3 text-sm sm:px-6">
+      <strong className="mr-1 text-sm tracking-tight">Warden <span className="font-normal text-muted-foreground">/ Vault</span></strong>
       {!state.ready ? <p>Checking session…</p> : state.recovering ? <p>Restricted recovery</p> : !state.authenticated ?
-        account ? <form onSubmit={e => { e.preventDefault(); const value = password; setPassword(''); void run(() => client.login(username, value)) }}><label>Username<input autoComplete="username" maxLength={64} required value={username} onChange={e => setUsername(e.target.value)} /></label>{passwordField}<button disabled={pending}>Log in and unlock</button></form> :
-        <button disabled={pending} onClick={() => void run(() => client.login())}>Log in with passkey</button> : <>
-          <p>{state.unlocked ? 'Vault unlocked' : 'Vault locked'}</p>
-          {!state.unlocked && (account ? <form onSubmit={e => { e.preventDefault(); const value = password; setPassword(''); void run(() => client.unlock(value)) }}>{passwordField}<button disabled={pending}>Unlock with password</button></form> : <button disabled={pending} onClick={() => void run(() => client.unlock())}>Unlock with passkey PRF</button>)}
-          {state.unlocked && <button disabled={pending} onClick={() => void run(() => client.lock())}>Lock vault</button>}
-          <button disabled={pending} onClick={() => void run(() => client.logout())}>Log out</button>
+        account ? <form onSubmit={e => { e.preventDefault(); const value = password; setPassword(''); void run(() => client.login(username, value)) }}><label>Username<Input autoComplete="username" maxLength={64} required value={username} onChange={e => setUsername(e.target.value)} /></label>{passwordField}<Button disabled={pending}>Log in and unlock</Button></form> :
+        <Button disabled={pending} onClick={() => void run(() => client.login())}>Log in with passkey</Button> : <>
+          <p className={state.unlocked ? 'vault-state bg-primary/10 text-primary' : 'vault-state bg-muted text-muted-foreground'}><span aria-hidden="true" className="size-1.5 rounded-full bg-current" />{state.unlocked ? 'Vault unlocked' : 'Vault locked'}</p>
+          {!state.unlocked && (account ? <form onSubmit={e => { e.preventDefault(); const value = password; setPassword(''); void run(() => client.unlock(value)) }}>{passwordField}<Button disabled={pending}>Unlock with password</Button></form> : <Button disabled={pending} onClick={() => void run(() => client.unlock())}>Unlock with passkey PRF</Button>)}
+          {state.unlocked && <Button variant="outline" disabled={pending} onClick={() => void run(() => client.lock())}>Lock vault</Button>}
+          <Button variant="ghost" disabled={pending} onClick={() => void run(() => client.logout())}>Log out</Button>
         </>}
-      {state.authenticated && <p>Key reveal/mutation and export/import require {account ? 'fresh password verification' : 'a new passkey assertion'} for the exact request. Legacy management transport stays blocked.</p>}
-      {state.ready && !state.authenticated && !state.recovering && <form onSubmit={e => { e.preventDefault(); const saved = recovery; setRecovery(''); void run(() => client.recover(saved)) }}><label>Offline recovery key<input type="password" autoComplete="off" aria-label="Offline recovery key" value={recovery} onChange={e => setRecovery(e.target.value)} /></label><button disabled={pending}>{account ? 'Recover and replace account password' : 'Recover and replace all passkeys'}</button></form>}
+      {state.authenticated && <p className="w-full text-xs leading-relaxed text-muted-foreground">Key reveal/mutation and export/import require {account ? 'fresh password verification' : 'a new passkey assertion'} for the exact request. Legacy management transport stays blocked.</p>}
+      {state.ready && !state.authenticated && !state.recovering && <form onSubmit={e => { e.preventDefault(); const saved = recovery; setRecovery(''); void run(() => client.recover(saved)) }}><label>Offline recovery key<Input type="password" autoComplete="off" aria-label="Offline recovery key" value={recovery} onChange={e => setRecovery(e.target.value)} /></label><Button variant="outline" disabled={pending}>{account ? 'Recover and replace account password' : 'Recover and replace all passkeys'}</Button></form>}
       {state.transition && <p role="status">Confirming server {state.transition}…</p>}
       {state.transitionError && <p role="alert">{state.transitionError}</p>}
       {error && <p role="alert">{error}</p>}
     </section>
     {(state.authenticated || state.recovering) && <SecurityView client={client} />}
-    {state.authenticated && state.unlocked && !state.recovering ? children : <main className="p-6">
+    {state.authenticated && state.unlocked && !state.recovering ? children : <main className="security-empty mx-auto my-8 max-w-2xl space-y-3 rounded-xl border bg-card p-6 shadow-sm max-sm:mx-4">
       <h1>{state.authenticated ? 'Vault locked' : account ? 'Account authentication required' : 'Passkey authentication required'}</h1>
       <p>{account ? 'Sign in with your username and password to unlock the encrypted vault. After global lock, re-enter your password. Restart always starts locked.' : 'Login does not require vault key material. Unlock requires a new verified passkey assertion and working PRF. Restart always starts locked.'}</p>
       <p>Lock closes global server key access. Logout ends only this browser session.</p>

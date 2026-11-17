@@ -84,7 +84,10 @@ test.each(['cancel', 'unmount', 'epoch'] as const)('pending transition retains %
  fireEvent.click(screen.getByRole('button', { name: 'Lock vault' }))
  await act(async () => {})
  expect(authority.signal?.aborted).toBe(false)
- if (reset === 'cancel') fireEvent.click(screen.getByRole('button', { name: 'Cancel security operation' }))
+ if (reset === 'cancel') {
+  fireEvent.click(screen.getByRole('button', { name: 'Account and recovery' }))
+  fireEvent.click(screen.getByRole('button', { name: 'Cancel security operation' }))
+ }
  else if (reset === 'unmount') h.view.unmount()
  else act(() => invalidateSecurity())
  expect(authority.signal?.aborted).toBe(true)

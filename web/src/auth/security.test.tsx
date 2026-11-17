@@ -6,12 +6,13 @@ import { SecurityView } from './security-view'
 import { encode, wrap, recoveryAuth } from '../setup/vault-wrap'
 import { invalidateSecurity } from './session'
 import { act } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
 
 beforeEach(()=>vi.stubGlobal('crypto',webcrypto))
 afterEach(()=>{cleanup();vi.unstubAllGlobals()})
 const binary=(n:number,value=0)=>new Uint8Array(n).fill(value)
 function credential(prf?:Uint8Array,id=7){return {rawId:binary(1,id).buffer,response:{clientDataJSON:binary(1).buffer,attestationObject:binary(1).buffer,authenticatorData:binary(1).buffer,signature:binary(1).buffer,userHandle:binary(32).buffer},getClientExtensionResults:()=>({prf:prf?{results:{first:prf.buffer}}:{enabled:true}})} as unknown as PublicKeyCredential}
-async function harness(){
+async function harness(method: 'account' | 'passkey' = 'passkey'){
  const prf=binary(32,4),dek=binary(32,3),root=binary(32,5),input=encode(binary(32,6)),vault=encode(binary(16,2))
  const recovery=await wrap(root,dek,'recovery',vault,'')
  const sent:{path:string,body:Record<string,unknown>,headers:Record<string,string>}[]=[]
@@ -19,7 +20,7 @@ async function harness(){
  const fetcher=vi.fn(async(path:RequestInfo|URL,init?:RequestInit)=>{
   const route=String(path);const body=init?.body?JSON.parse(String(init.body)):{};sent.push({path:route,body,headers:init?.headers as Record<string,string>})
   let data:unknown={}
-  if(route.endsWith('/method'))data={auth_method:'passkey'}
+  if(route.endsWith('/method'))data={auth_method:method}
   else if(route.endsWith('/status'))data={authenticated:true,unlocked:true,csrf:'csrf',credential_id:'Bw'}
   else if(route.endsWith('/passkeys/list'))data={credentials:['Bw']}
   else if(route.endsWith('/clients/list'))data={pending:[{id:'device-id',label:'fixture device',fingerprint:'public-fingerprint',status:'pending',expires:'2099-01-01T00:00:00Z'}],clients:[]}
@@ -34,6 +35,40 @@ async function harness(){
  const credentials={create:vi.fn(async()=>credential(undefined,9)),get:vi.fn(async(_options:CredentialRequestOptions)=>credential(new Uint8Array(prf),9))}
  return {client:new AuthClient(fetcher,credentials),fetcher,credentials,sent,root,recovery,dek,prf}
 }
+test.each(['account', 'passkey'] as const)('%s security disclosure starts collapsed and supports keyboard expansion without canceling requests', async method => {
+ const h = await harness(method); await h.client.status()
+ const cancel = vi.spyOn(h.client, 'cancel')
+ const user = userEvent.setup()
+ render(<SecurityView client={h.client} />)
+ const toggle = screen.getByRole('button', { name: method === 'account' ? 'Account and recovery' : 'Passkeys and recovery' })
+ expect(toggle).toHaveAttribute('aria-expanded', 'false')
+ expect(screen.queryByRole('button', { name: 'Rotate recovery key' })).not.toBeInTheDocument()
+ const panel = document.getElementById(toggle.getAttribute('aria-controls')!)!
+ expect(panel).not.toBeVisible()
+ await user.tab(); expect(toggle).toHaveFocus()
+ await user.keyboard('{Enter}')
+ expect(toggle).toHaveAttribute('aria-expanded', 'true')
+ expect(panel).toBeVisible()
+ expect(screen.getByRole('button', { name: 'Rotate recovery key' })).toBeEnabled()
+ await user.keyboard(' ')
+ expect(toggle).toHaveAttribute('aria-expanded', 'false')
+ await user.tab()
+ expect(screen.queryByRole('button', { name: 'Refresh devices' })).not.toBeInTheDocument()
+ expect(panel).not.toContainElement(document.activeElement as HTMLElement)
+ expect(cancel).not.toHaveBeenCalled()
+})
+test.each(['account', 'passkey'] as const)('%s restricted recovery overrides a collapsed disclosure and cannot be hidden', async method => {
+ const h = await harness(method); await h.client.status()
+ render(<SecurityView client={h.client} />)
+ await act(async () => { await h.client.recover('warden-recovery-v1:' + encode(h.root)) })
+ const toggle = screen.getByRole('button', { name: method === 'account' ? 'Account and recovery' : 'Passkeys and recovery' })
+ expect(toggle).toHaveAttribute('aria-expanded', 'true')
+ expect(toggle).toBeDisabled()
+ fireEvent.click(toggle)
+ expect(screen.getByRole('button', { name: 'Abort recovery' })).toBeVisible()
+ expect(screen.getByRole('button', { name: method === 'account' ? 'Replace account password' : 'Register replacement passkey' })).toBeVisible()
+ expect(screen.getByText(/Restricted recovery: no management/)).toBeVisible()
+})
 test('global epoch cancels an authenticator promise without AuthClient.cancel',async()=>{
  const h=await harness();await h.client.status();let resolve!:(value:PublicKeyCredential)=>void
  h.credentials.get.mockImplementationOnce(()=>new Promise(r=>{resolve=r}))
@@ -49,6 +84,7 @@ test.each(['cancel', 'epoch', 'unmount'])('late recovery rotation never restores
  let resolve!:(value:string)=>void
  vi.spyOn(h.client,'rotateRecovery').mockImplementationOnce(()=>new Promise(r=>{resolve=r}))
  const view=render(<SecurityView client={h.client}/>)
+ fireEvent.click(screen.getByRole('button', { name: 'Passkeys and recovery' }))
  fireEvent.click(screen.getByRole('button',{name:'Rotate recovery key'}))
  if(reset==='cancel')fireEvent.click(screen.getByRole('button',{name:'Cancel security operation'}))
  else if(reset==='epoch')act(()=>invalidateSecurity())
@@ -59,6 +95,7 @@ test.each(['cancel', 'epoch', 'unmount'])('late recovery rotation never restores
 })
 test('device approval UI compares fingerprint and requires a fresh exact request grant',async()=>{
  const h=await harness();await h.client.status();render(<SecurityView client={h.client}/>)
+ fireEvent.click(screen.getByRole('button', { name: 'Passkeys and recovery' }))
  expect(await screen.findByText('fixture device')).toBeInTheDocument()
  expect(screen.getByText('public-fingerprint')).toBeInTheDocument()
  fireEvent.click(screen.getByRole('button',{name:'Approve fixture device'}))
@@ -70,6 +107,7 @@ test('device approval UI compares fingerprint and requires a fresh exact request
 })
 test('device status errors clear on repeated security epochs without stale UI restoration',async()=>{
  const h=await harness();await h.client.status();render(<SecurityView client={h.client}/>)
+ fireEvent.click(screen.getByRole('button', { name: 'Passkeys and recovery' }))
  await screen.findByText('fixture device')
  fireEvent.click(screen.getByRole('button',{name:'Cancel security operation'}))
  h.fetcher.mockRejectedValue(new Error('synthetic device status failure'))
@@ -138,6 +176,7 @@ test('late recovery wrapper after cancellation cannot deliver DEK or restore rec
 })
 test('security UI lists credentials and offers add removal and recovery rotation while unlocked',async()=>{
  const h=await harness();await h.client.status();render(<SecurityView client={h.client}/>)
+ fireEvent.click(screen.getByRole('button', { name: 'Passkeys and recovery' }))
  expect(await screen.findByText('Bw')).toBeInTheDocument()
  expect(screen.getByRole('button',{name:'Add passkey'})).toBeInTheDocument()
  fireEvent.click(screen.getByRole('button',{name:'Rotate recovery key'}))
