@@ -16,7 +16,7 @@ async function harness(prf=true){
  const fetcher=vi.fn(async(path:RequestInfo|URL,options?:RequestInit)=>{
   expect(options?.cache).toBe('no-store');expect(options?.credentials).toBe('same-origin')
   const route=String(path);sent.push({path:route,body:options?.body?JSON.parse(String(options.body)):{}})
-  const data=route.endsWith('/passkeys/list')?{credentials:['Bw']}:route.endsWith('/status')?{}:route.endsWith('/begin')?{id:'challenge',credential_id:'Bw',prf_input:input,options:{publicKey:{challenge:encode(new Uint8Array(32)),userVerification:'required',allowCredentials:[{type:'public-key',id:'Bw'}]}}}:route.endsWith('/fresh/finish')?{grant:'one-use-grant',wrapper}:route.endsWith('/login/finish')?{authenticated:true,unlocked:false,csrf:'csrf',credential_id:'Bw'}:{}
+  const data=route.endsWith('/method')?{auth_method:'passkey'}:route.endsWith('/passkeys/list')?{credentials:['Bw']}:route.endsWith('/status')?{}:route.endsWith('/begin')?{id:'challenge',credential_id:'Bw',prf_input:input,options:{publicKey:{challenge:encode(new Uint8Array(32)),userVerification:'required',allowCredentials:[{type:'public-key',id:'Bw'}]}}}:route.endsWith('/fresh/finish')?{grant:'one-use-grant',wrapper}:route.endsWith('/login/finish')?{authenticated:true,unlocked:false,csrf:'csrf',credential_id:'Bw'}:{}
   return new Response(JSON.stringify(data),{status:route.endsWith('/status')?401:200,headers:{'Content-Type':'application/json'}})
  })
  const credentials={get:vi.fn(async(_options:CredentialRequestOptions)=>assertion(prf?new Uint8Array(material):undefined))}
@@ -53,7 +53,7 @@ test('login works locked without PRF; fresh signed get locally unwraps and deliv
  expect(JSON.stringify(h.sent)).not.toContain('results')
 })
 test('observing another browser lock invalidates outstanding managed promises',async()=>{
- const h=await harness();await h.client.login();await h.client.unlock();const epoch=securityEpoch()
+ const h=await harness();await h.client.status();await h.client.login();await h.client.unlock();const epoch=securityEpoch()
  h.fetcher.mockResolvedValueOnce(new Response(JSON.stringify({authenticated:true,unlocked:false,csrf:'csrf',credential_id:'Bw'}),{status:200}))
  await h.client.status();expect(securityEpoch()).toBeGreaterThan(epoch);expect(h.client.getSnapshot().unlocked).toBe(false)
 })

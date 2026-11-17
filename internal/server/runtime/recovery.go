@@ -27,7 +27,7 @@ type recoveryState struct {
 
 func recoveryRoute(path string) bool {
 	switch path {
-	case "/api/v1/auth/recovery/unlock", "/api/v1/auth/recovery/abort", "/api/v1/auth/passkeys/begin", "/api/v1/auth/passkeys/registration", "/api/v1/auth/passkeys/assertion", "/api/v1/auth/passkeys/key", "/api/v1/auth/passkeys/commit":
+	case "/api/v1/auth/account/reset", "/api/v1/auth/recovery/unlock", "/api/v1/auth/recovery/abort", "/api/v1/auth/passkeys/begin", "/api/v1/auth/passkeys/registration", "/api/v1/auth/passkeys/assertion", "/api/v1/auth/passkeys/key", "/api/v1/auth/passkeys/commit":
 		return true
 	}
 	return false

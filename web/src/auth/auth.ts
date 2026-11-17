@@ -6,7 +6,7 @@ import { invalidateSecurity, onSecurityDenied, setCSRF, securityEpoch, securityS
 
 type WireAssertion = Omit<PublicKeyCredentialRequestOptions, 'challenge' | 'allowCredentials'> & { challenge: string, allowCredentials?: { id: string, type: 'public-key' }[] }
 interface Begin { id: string, options: { publicKey: WireAssertion }, credential_id: string, prf_input?: string }
-interface State { ready: boolean, authenticated: boolean, unlocked: boolean, recovering?: boolean }
+interface State { authMethod?: 'account' | 'passkey', ready: boolean, authenticated: boolean, unlocked: boolean, recovering?: boolean, transition?: 'lock' | 'logout', transitionError?: string }
 type WireCreation = Omit<PublicKeyCredentialCreationOptions, 'challenge' | 'user' | 'excludeCredentials'> & { challenge: string, user: Omit<PublicKeyCredentialUserEntity, 'id'> & { id: string }, excludeCredentials?: { id: string, type: 'public-key' }[] }
 interface Login { authenticated: boolean, unlocked: boolean, csrf: string, credential_id: string }
 
@@ -14,17 +14,28 @@ export interface ClientDevice { id: string, label: string, fingerprint: string, 
 export interface ClientDevices { pending: ClientDevice[], clients: ClientDevice[] }
 
 export class AuthClient {
+  private method: 'account' | 'passkey' = 'passkey'
+  private discovered = false
+  private passwordRequester?: () => Promise<string>
+  setPasswordRequester(requester?: () => Promise<string>) { this.passwordRequester = requester }
   private csrf = ''
   private credential = ''
   private epoch = 0
   private controller = new AbortController()
+  private transitionOwner?: object
   private rotation?: { id: string, wrapper: Wrapper, epoch: number }
   private state: State = { ready: false, authenticated: false, unlocked: false }
   private listeners = new Set<() => void>()
   constructor(private fetcher: typeof fetch = (input, options) => fetch(input, options), private credentials: Pick<CredentialsContainer, 'get'> & Partial<Pick<CredentialsContainer, 'create'>> = { get: options => navigator.credentials.get(options), create: options => navigator.credentials.create(options) }) {}
   getSnapshot = () => this.state
   subscribe = (listener: () => void) => { this.listeners.add(listener); return () => { this.listeners.delete(listener) } }
-  private change(state: State) { this.state = state; for (const listener of this.listeners) listener() }
+  private change(state: State) {
+    // Identity/recovery replacement retires the old transition's finalizer too,
+    // so a late response cannot clear a new session's CSRF or publish old errors.
+    if (!state.transition) this.transitionOwner = undefined
+    this.state = { ...state, authMethod: this.method }
+    for (const listener of this.listeners) listener()
+  }
   private get signal() { return AbortSignal.any([this.controller.signal, securitySignal()]) }
   private generation() { return { local: this.epoch, global: securityEpoch() } }
   private check(epoch: { local: number, global: number }) { if (epoch.local !== this.epoch || epoch.global !== securityEpoch()) throw Error('Authentication operation cancelled') }
@@ -32,7 +43,7 @@ export class AuthClient {
   watch = () => onSecurityDenied(status => {
     this.cancel()
     if (status === 401) this.csrf = ''
-    this.change({ ready: true, authenticated: status !== 401 && this.state.authenticated, unlocked: false })
+    this.change({ ready: true, authenticated: status !== 401 && this.state.authenticated, unlocked: false, transition: this.state.transition, transitionError: this.state.transitionError })
   })
   private async request<T>(path: string, body?: unknown, grant?: string): Promise<T> {
     const epoch = this.generation()
@@ -44,8 +55,14 @@ export class AuthClient {
     return data
   }
   async status() {
-    if (this.state.recovering) return
+    if (this.state.recovering || this.state.transition || this.state.transitionError) return
     const epoch = this.generation()
+    if (!this.discovered) {
+      const mode = await this.request<{ auth_method: 'account' | 'passkey' }>('method')
+      this.check(epoch)
+      if (mode.auth_method !== 'account' && mode.auth_method !== 'passkey') throw Error('Invalid authentication method')
+      this.method = mode.auth_method; this.discovered = true
+    }
     try {
       const state = await this.request<Login>('status')
       this.check(epoch)
@@ -63,9 +80,22 @@ export class AuthClient {
     const wire = b.options.publicKey
     return { ...wire, challenge: decode(wire.challenge, 32), allowCredentials: wire.allowCredentials?.map(c => ({ ...c, id: decode(c.id, -1) })), ...(prf ? { extensions: { prf: { eval: { first: decode(b.prf_input ?? '', 32) } } } as AuthenticationExtensionsClientInputs } : {}) }
   }
-  async login() {
+  private requireNoTransition() {
+    if (this.state.transition) throw Error('Wait for the security transition to complete')
+  }
+  async login(username?: string, password?: string) {
+    this.requireNoTransition()
     this.cancel()
     const epoch = this.generation()
+    if (this.method === 'account') {
+      try {
+        const state = await this.request<Login>('account/login', { username, password })
+        this.check(epoch)
+        this.csrf = state.csrf; setCSRF(this.csrf); this.credential = state.credential_id
+        this.change({ ready: true, authenticated: true, unlocked: state.unlocked })
+      } finally { password = '' }
+      return
+    }
     const b = await this.request<Begin>('login/begin', {})
     const credential = await this.credentials.get({ publicKey: this.options(b, false), signal: this.signal }) as PublicKeyCredential | null
     this.check(epoch)
@@ -75,8 +105,14 @@ export class AuthClient {
     this.csrf = state.csrf; setCSRF(this.csrf); this.credential = state.credential_id
     this.change({ ready: true, authenticated: true, unlocked: state.unlocked })
   }
-  async unlock() {
+  async unlock(password?: string) {
+    this.requireNoTransition()
     const epoch = this.generation()
+    if (this.method === 'account') {
+      try { await this.request('account/unlock', { password }); this.check(epoch); this.change({ ready: true, authenticated: true, unlocked: true }) }
+      finally { password = '' }
+      return
+    }
     let prf: Uint8Array<ArrayBuffer> | undefined, dek: Uint8Array<ArrayBuffer> | undefined
     try {
       // A NEW required-UV assertion, never an age flag or login's PRF result.
@@ -98,12 +134,21 @@ export class AuthClient {
     } finally { prf?.fill(0); dek?.fill(0) }
   }
   async grantFor(method: string, path: string, body = ''): Promise<string | undefined> {
+    this.requireNoTransition()
     const action = sensitiveAction(method, path)
     if (!action) return undefined
     if (!this.state.authenticated || (!this.state.unlocked && action !== 'client_approve' && action !== 'client_revoke') || this.state.recovering) throw Error('Log in and unlock before a sensitive action')
     const epoch = this.generation()
     const digest = encode(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(body)))
     this.check(epoch)
+    if (this.method === 'account') {
+      if (!this.passwordRequester) throw Error('Fresh password verification is unavailable')
+      let password = await this.passwordRequester()
+      try {
+        this.check(epoch)
+        return (await this.request<{ grant: string }>('account/fresh', { password, action, method, path, digest })).grant
+      } finally { password = '' }
+    }
     const b = await this.request<Begin>('fresh/begin', { action, credential_id: this.credential, method, path, digest })
     const credential = await this.credentials.get({ publicKey: this.options(b, false), signal: this.signal }) as PublicKeyCredential | null
     this.check(epoch)
@@ -135,7 +180,18 @@ export class AuthClient {
     await this.request('passkeys/remove', body, grant)
     if (id === this.credential) { this.cancel(); this.csrf = ''; setCSRF(''); this.change({ ready: true, authenticated: false, unlocked: false, recovering: false }) }
   }
+  async resetPassword(password: string, confirmation: string) {
+    if (this.method !== 'account' || !this.state.recovering || !this.state.unlocked) throw Error('Restricted account recovery is required')
+    if (password !== confirmation) throw Error('Passwords must match')
+    const epoch = this.generation()
+    try {
+      await this.request('account/reset', { password, password_confirmation: confirmation })
+      this.check(epoch)
+      this.cancel(); this.csrf = ''; setCSRF(''); this.change({ ready: true, authenticated: false, unlocked: false, recovering: false })
+    } finally { password = ''; confirmation = '' }
+  }
   async addPasskey() {
+    if (this.method === 'account') throw Error('This installation uses an account, not passkeys')
     const epoch = this.generation(), recovering = !!this.state.recovering
     let prf: Uint8Array<ArrayBuffer> | undefined, dek: Uint8Array<ArrayBuffer> | undefined, round: Uint8Array<ArrayBuffer> | undefined
     try {
@@ -171,6 +227,7 @@ export class AuthClient {
     } finally { prf?.fill(0); dek?.fill(0); round?.fill(0) }
   }
   async recover(saved: string) {
+    this.requireNoTransition()
     this.cancel()
     const epoch = this.generation()
     let root: Uint8Array<ArrayBuffer> | undefined, proof: Uint8Array<ArrayBuffer> | undefined, dek: Uint8Array<ArrayBuffer> | undefined
@@ -192,6 +249,7 @@ export class AuthClient {
     } finally { root?.fill(0); proof?.fill(0); dek?.fill(0) }
   }
   async abortRecovery() {
+    this.requireNoTransition()
     this.cancel()
     try { await this.request('recovery/abort', {}) }
     finally { this.csrf = ''; setCSRF(''); this.change({ ready: true, authenticated: false, unlocked: false, recovering: false }) }
@@ -230,16 +288,28 @@ export class AuthClient {
       this.rotation = undefined
     } finally { root?.fill(0); dek?.fill(0); proof?.fill(0) }
   }
-  async lock() {
+  private async close(action: 'lock' | 'logout') {
+    this.requireNoTransition()
     this.cancel()
-    this.change({ ready: true, authenticated: this.state.authenticated, unlocked: false })
-    await this.request('lock', {})
+    const epoch = this.generation(), owner = {}
+    this.transitionOwner = owner
+    let completed = false
+    // Fence old work and polling immediately, but keep this POST owned by the
+    // gate/client lifetime, not the management view that this snapshot removes.
+    this.change({ ready: true, authenticated: action === 'lock' && this.state.authenticated, unlocked: false, transition: action })
+    try {
+      this.check(epoch)
+      await this.request(action, {})
+      this.check(epoch)
+      completed = true
+    } finally {
+      if (this.transitionOwner === owner) {
+        if (action === 'logout') { this.csrf = ''; setCSRF('') }
+        this.change({ ...this.state, transition: undefined, transitionError: completed ? undefined : `Could not confirm server ${action}. Local access remains closed; authenticate again before continuing.` })
+      }
+    }
   }
-  async logout() {
-    this.cancel()
-    this.change({ ready: true, authenticated: false, unlocked: false })
-    try { await this.request('logout', {}) }
-    finally { this.csrf = ''; setCSRF('') }
-  }
+  async lock() { await this.close('lock') }
+  async logout() { await this.close('logout') }
 }
 export const authClient = new AuthClient()

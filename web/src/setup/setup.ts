@@ -16,10 +16,12 @@ export function signedCredential(c: PublicKeyCredential,registration: boolean) {
 }
 export class SetupClient {
  private csrf=''
+ private method:'account'|'passkey'='passkey'
+ authenticationMethod=()=>this.method
  private controller=new AbortController()
  private generation=0
  private recovery?:Wrapper
- constructor(private fetcher:typeof fetch=(input,options)=>fetch(input,options),private credentials:Credentials=navigator.credentials){}
+ constructor(private fetcher:typeof fetch=(input,options)=>fetch(input,options),private credentials:Credentials={create:options=>navigator.credentials.create(options),get:options=>navigator.credentials.get(options)}){}
  private async post<T>(path:string,body:unknown):Promise<T>{
   const epoch=this.generation
   const response=await this.fetcher('/api/v1/setup/'+path,{method:'POST',cache:'no-store',credentials:'same-origin',headers:{'Content-Type':'application/json',...(this.csrf?{'X-CSRF-Token':this.csrf}:{})},body:JSON.stringify(body),signal:this.controller.signal})
@@ -29,8 +31,29 @@ export class SetupClient {
   if(epoch!==this.generation)throw Error('Setup cancelled')
   return value
  }
- async authorize(password:string):Promise<void>{const r=await this.post<{csrf:string}>('password',{password});this.csrf=r.csrf}
+ async authorize(password:string):Promise<void>{const r=await this.post<{csrf:string,auth_method?:'account'|'passkey'}>('password',{password});this.csrf=r.csrf;this.method=r.auth_method??'passkey'}
+ async registerAccount(username:string,password:string,confirmation:string):Promise<string>{
+  if(this.method!=='account')throw Error('This installation uses passkeys')
+  if(password!==confirmation)throw Error('Passwords must match')
+  if(new TextEncoder().encode(password).length<12||new TextEncoder().encode(password).length>1024)throw Error('Use a password of 12–1024 UTF-8 bytes')
+  const epoch=this.generation
+  let dek:Uint8Array<ArrayBuffer>|undefined,root:Uint8Array<ArrayBuffer>|undefined,proof:Uint8Array<ArrayBuffer>|undefined
+  try{
+   const b=await this.post<{vault_id:string}>('account/begin',{})
+   dek=randomBytes(32);root=randomBytes(32)
+   const wrapper=await wrap(root,dek,'recovery',b.vault_id,'')
+   proof=await recoveryAuth(root,wrapper.kdf_salt)
+   const verifier=encode(await crypto.subtle.digest('SHA-256',proof))
+   if(epoch!==this.generation)throw Error('Setup cancelled')
+   await this.post('account/prepare',{username,password,password_confirmation:confirmation,recovery_wrapper:wrapper,recovery_verifier:verifier,dek:encode(dek)})
+   if(epoch!==this.generation)throw Error('Setup cancelled')
+   this.recovery=wrapper
+   return 'warden-recovery-v1:'+encode(root)
+  }catch(error){this.recovery=undefined;throw error}
+  finally{password='';confirmation='';dek?.fill(0);root?.fill(0);proof?.fill(0)}
+ }
  async register():Promise<string>{
+  if(this.method!=='passkey')throw Error('This installation uses an account')
   const epoch=this.generation
   let prf:Uint8Array<ArrayBuffer>|undefined,dek:Uint8Array<ArrayBuffer>|undefined,recovery:Uint8Array<ArrayBuffer>|undefined,proof:Uint8Array<ArrayBuffer>|undefined,roundtrip:Uint8Array<ArrayBuffer>|undefined
   try {

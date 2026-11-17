@@ -7,6 +7,14 @@ import (
 	"warden/internal/server/setup"
 )
 
+func activeCredential(i setup.Installation, id string) bool {
+	if i.AuthenticationMethod() == "account" {
+		return i.Account != nil && i.Account.ID == id
+	}
+	_, ok := passkeyWrapper(i, id)
+	return ok
+}
+
 func passkeyWrapper(i setup.Installation, id string) (crypto.Wrapper, bool) {
 	for _, w := range i.Passkeys {
 		if w.CredentialID == id {

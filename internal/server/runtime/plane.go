@@ -78,16 +78,29 @@ type Plane struct {
 	recoveryRefill time.Time
 	rotations      map[string]recoveryRotation
 	// Test-only scheduling hook; nil in production and cannot authorize a request.
-	beforeVaultAcquire func(*http.Request)
+	beforeVaultAcquire   func(*http.Request)
+	beforeAccountPublish func(*http.Request)
 }
 
 func validateInstallation(raw []byte, cfg config.Setup) (setup.Installation, error) {
 	var i setup.Installation
 	invalid := errors.New("incompatible initialized storage or RP/origin: retain rollback artifacts; export using the old release and run warden-server init with fresh storage; changed RP/origin requires recovery/re-enrollment")
-	if strict(raw, &i) != nil || i.Format != 1 || i.PublicOrigin != cfg.PublicOrigin || i.RPID != cfg.RPID || len(i.Owner.ID) != 32 || len(i.Owner.Credentials) < 1 || len(i.Owner.Credentials) > 32 || len(i.Passkeys) != len(i.Owner.Credentials) {
+	if strict(raw, &i) != nil || i.Format != 1 || i.PublicOrigin != cfg.PublicOrigin || i.RPID != cfg.RPID || len(i.Owner.ID) != 32 || i.AuthenticationMethod() != cfg.AuthenticationMethod() {
 		return i, invalid
 	}
 	vault := i.KeyCheck.VaultID
+	switch i.AuthenticationMethod() {
+	case "account":
+		if i.Account == nil || !crypto.ValidUsername(i.Account.Username) || i.Account.Envelope.Validate(vault, i.Account.ID) != nil || len(i.Owner.Credentials) != 0 || len(i.Passkeys) != 0 {
+			return i, invalid
+		}
+	case "passkey":
+		if i.Account != nil || len(i.Owner.Credentials) < 1 || len(i.Owner.Credentials) > 32 || len(i.Passkeys) != len(i.Owner.Credentials) {
+			return i, invalid
+		}
+	default:
+		return i, invalid
+	}
 	seen := make(map[string]bool)
 	for _, c := range i.Owner.Credentials {
 		id := crypto.Encode(c.ID)
@@ -189,7 +202,7 @@ func (p *Plane) session(r *http.Request) (store.Session, bool) {
 	x, err := p.store.Session(r.Context(), hash(raw))
 	now := p.now().Unix()
 	i, identityErr := p.current(r.Context())
-	_, active := passkeyWrapper(i, x.CredentialID)
+	active := activeCredential(i, x.CredentialID)
 	if err != nil || identityErr != nil || !active || now >= x.Seen+1800 || now >= x.Created+43200 {
 		if err == nil {
 			p.store.RevokeSession(r.Context(), x.Hash)
@@ -259,7 +272,7 @@ func (p *Plane) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		r = requestActor(r, audit.Actor{CredentialID: x.CredentialID})
 	}
 	publicRecovery := r.URL.Path == "/api/v1/auth/recovery/begin" || r.URL.Path == "/api/v1/auth/recovery/proof"
-	publicLogin := r.URL.Path == "/api/v1/auth/login/begin" || r.URL.Path == "/api/v1/auth/login/finish" || publicRecovery
+	publicLogin := r.URL.Path == "/api/v1/auth/login/begin" || r.URL.Path == "/api/v1/auth/login/finish" || r.URL.Path == "/api/v1/auth/account/login" || r.Method == "GET" && r.URL.Path == "/api/v1/auth/method" || publicRecovery
 	if recovering && !recoveryRoute(r.URL.Path) {
 		fail(w, 403, "recovery_restricted")
 		return
@@ -361,6 +374,28 @@ func (b *responseBuffer) WriteHeader(code int) {
 func (b *responseBuffer) Write(p []byte) (int, error) { b.WriteHeader(200); return b.body.Write(p) }
 
 func (p *Plane) authHTTP(w http.ResponseWriter, r *http.Request, x store.Session) {
+	if r.Method == "GET" && r.URL.Path == "/api/v1/auth/method" {
+		server.WriteJSON(w, 200, map[string]string{"auth_method": p.cfg.AuthenticationMethod()})
+		return
+	}
+	account := p.cfg.AuthenticationMethod() == "account"
+	if strings.HasPrefix(r.URL.Path, "/api/v1/auth/account/") {
+		if !account {
+			fail(w, 403, "forbidden")
+			return
+		}
+		if r.URL.Path == "/api/v1/auth/account/reset" {
+			defer p.finishRecovery(x.Hash)
+			p.withVault(w, r, x, func(w http.ResponseWriter, r *http.Request) { p.resetAccount(w, r, x) })
+			return
+		}
+		p.accountHTTP(w, r, x)
+		return
+	}
+	if account && (strings.HasPrefix(r.URL.Path, "/api/v1/auth/passkeys/") || strings.HasPrefix(r.URL.Path, "/api/v1/auth/login/") || strings.HasPrefix(r.URL.Path, "/api/v1/auth/fresh/") || r.URL.Path == "/api/v1/auth/unlock") {
+		fail(w, 403, "forbidden")
+		return
+	}
 	if strings.HasPrefix(r.URL.Path, "/api/v1/auth/clients/") {
 		p.clientsManagement(w, r, x)
 		return
@@ -501,6 +536,10 @@ func (p *Plane) authHTTP(w http.ResponseWriter, r *http.Request, x store.Session
 		p.vault.Lock()
 		server.WriteJSON(w, 200, map[string]bool{"unlocked": false})
 	case "/api/v1/auth/logout":
+		// Final password/passkey publication and session revocation share one order.
+		// Never hold this mutex across vault.Lock (which drains delivery leases).
+		p.mu.Lock()
+		defer p.mu.Unlock()
 		if strict(body, &struct{}{}) != nil {
 			fail(w, 400, "invalid_json")
 			return

@@ -12,6 +12,7 @@ import (
 
 // Setup is non-secret immutable relying-party and HTTPS transport configuration.
 type Setup struct {
+	AuthMethod       string `json:"auth_method,omitempty"`
 	PublicOrigin     string `json:"public_origin"`
 	RPID             string `json:"rp_id"`
 	Mode             string `json:"mode"`
@@ -20,7 +21,18 @@ type Setup struct {
 	BackendAuthority string `json:"backend_authority,omitempty"`
 }
 
+// Missing mode is the legacy passkey contract, never the new-init default.
+func (s Setup) AuthenticationMethod() string {
+	if s.AuthMethod == "" {
+		return "passkey"
+	}
+	return s.AuthMethod
+}
+
 func (s Setup) Validate(bind string) error {
+	if s.AuthenticationMethod() != "passkey" && s.AuthenticationMethod() != "account" {
+		return errors.New("authentication method must be account or passkey")
+	}
 	invalid := errors.New("setup requires a canonical HTTPS origin, valid RP ID, and direct TLS or literal-loopback proxy configuration")
 	u, err := url.Parse(s.PublicOrigin)
 	if err != nil || u.Scheme != "https" || u.Host == "" || u.User != nil || u.Path != "" || u.RawQuery != "" || u.ForceQuery || u.Fragment != "" || u.Opaque != "" || u.String() != s.PublicOrigin || u.Host != strings.ToLower(u.Host) {

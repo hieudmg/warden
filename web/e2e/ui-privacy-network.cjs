@@ -24,12 +24,6 @@ function assertNetworkComplete(network, { origin, imageOrigin, assets, verifiedT
       // not exempt a missing replacement, a later failure, or any asset abort.
       const firstMountRead = url.origin === origin && request.method === 'GET' && request.phase === 'management' && mountReadPaths.has(url.pathname) && [null, 200].includes(request.status) && network.findIndex(candidate => candidate.url === request.url) === index
       if (firstMountRead && network.slice(index + 1).some(candidate => candidate.url === request.url && candidate.phase === 'management' && candidate.method === 'GET' && completed(candidate))) expectedCancellation = 'first mount read replaced by a completed response'
-      // The UI cleanup also cancels transition requests. Only admit these when
-      // separate normal-cookie HTTP probes prove the server changed state.
-      const transition = url.origin === origin && request.method === 'POST' && [null, 200].includes(request.status) && ['lock', 'logout'].includes(request.phase) && url.pathname === `/api/v1/auth/${request.phase}`
-      const verified = request.phase === 'lock' ? verifiedTransitions.locked : verifiedTransitions.loggedOut
-      const probeStatus = request.phase === 'lock' ? 200 : 401
-      if (transition && verified && network.slice(index + 1).some(candidate => candidate.url === `${origin}/api/v1/auth/status` && candidate.method === 'GET' && candidate.phase === `${request.phase} confirmation` && candidate.status === probeStatus && candidate.finished && !candidate.failure)) expectedCancellation = 'transition independently confirmed against server state'
     }
     if (expectedCancellation) {
       expectedFailures.push({ ...request, reason: expectedCancellation })

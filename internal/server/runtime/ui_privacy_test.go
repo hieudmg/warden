@@ -80,6 +80,7 @@ func TestUIFramingAndCSPProductionAssets(t *testing.T) {
 
 // Starts the real runtime against ONLY the preceding setup fixture's new DB.
 // The browser uses real signed synthetic credentials; no cookies/tokens are seeded.
+func TestUIBrowserAccountRuntimeFixture(t *testing.T) { TestUIBrowserRuntimeFixture(t) }
 func TestUIBrowserRuntimeFixture(t *testing.T) {
 	dir := os.Getenv("WARDEN_UI_BROWSER_DIR")
 	if dir == "" {

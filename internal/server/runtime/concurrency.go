@@ -15,7 +15,7 @@ func (p *Plane) admitExpensive(w http.ResponseWriter, r *http.Request) (func(), 
 	case target == "/api/v1/data/import" || target == "/api/v1/data/export":
 		slots = p.transfers
 	// Enrollment finish endpoints do not have a /finish suffix.
-	case target == "/api/v1/auth/passkeys/registration" || target == "/api/v1/auth/passkeys/assertion",
+	case strings.HasPrefix(target, "/api/v1/auth/account/"), target == "/api/v1/auth/passkeys/registration" || target == "/api/v1/auth/passkeys/assertion",
 		actionFor(r.Method, target) == "key_mutation" || actionFor(r.Method, target) == "key_reveal",
 		strings.HasPrefix(target, "/api/v1/client/transport/"),
 		strings.HasPrefix(target, "/api/v1/auth/") && (strings.HasSuffix(target, "/finish") || strings.HasSuffix(target, "/key") || strings.HasSuffix(target, "/prepare") || strings.HasSuffix(target, "/confirm") || strings.HasSuffix(target, "/unlock")):

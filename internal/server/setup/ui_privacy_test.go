@@ -73,7 +73,9 @@ func TestUIFramingAndCSPProductionAssets(t *testing.T) {
 
 // Opt-in disposable browser fixture ONLY. No production route/verifier bypass.
 // The synthetic password is accepted through the unchanged setup cookie/CSRF flow.
-func TestUIBrowserSetupFixture(t *testing.T) {
+func TestUIBrowserSetupFixture(t *testing.T)        { uiBrowserSetupFixture(t, "passkey") }
+func TestUIBrowserAccountSetupFixture(t *testing.T) { uiBrowserSetupFixture(t, "account") }
+func uiBrowserSetupFixture(t *testing.T, method string) {
 	dir := os.Getenv("WARDEN_UI_BROWSER_DIR")
 	if dir == "" {
 		t.Skip("requires opt-in disposable browser runner")
@@ -86,7 +88,7 @@ func TestUIBrowserSetupFixture(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer listener.Close()
-	cfg := config.Setup{PublicOrigin: "https://localhost:" + strings.Split(listener.Addr().String(), ":")[1], RPID: "localhost", Mode: "tls", TLSCertificate: filepath.Join(dir, "cert.pem"), TLSKey: filepath.Join(dir, "key.pem")}
+	cfg := config.Setup{AuthMethod: method, PublicOrigin: "https://localhost:" + strings.Split(listener.Addr().String(), ":")[1], RPID: "localhost", Mode: "tls", TLSCertificate: filepath.Join(dir, "cert.pem"), TLSKey: filepath.Join(dir, "key.pem")}
 	raw, _ := json.Marshal(cfg)
 	if err = os.WriteFile(filepath.Join(dir, "config.json"), raw, 0600); err != nil {
 		t.Fatal(err)

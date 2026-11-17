@@ -34,7 +34,7 @@ func run(args []string, stdout, stderr io.Writer, lookupEnv func(string) (string
 
 	switch args[0] {
 	case "init":
-		return runInit(args[1:], stdout, stderr)
+		return runInit(args[1:], stdout, stderr, lookupEnv)
 	case "serve":
 		return runServe(args[1:], stdout, stderr, lookupEnv)
 	case "upgrade":
@@ -212,6 +212,10 @@ WARDEN_RELEASE_BASE_URL to upgrade from a different release source.
 func printServeUsage(w io.Writer) {
 	fmt.Fprint(w, `Usage:
   warden-server serve [--config path]
+
+Defaults to ~/.warden/server.json; when absent, discovers /etc/warden/server.json
+without copying or migrating it. --config and WARDEN_SERVER_CONFIG take precedence.
+Unfinished initialization drafts are refused; rerun init with the same config.
 `)
 	fmt.Fprint(w, transferHelp)
 }

@@ -14,7 +14,13 @@ func TestInitConfigPrivateReusableAndNeverSilentlyReplaced(t *testing.T) {
 	cfg := config.DefaultServer()
 	cfg.DBPath = filepath.Join(t.TempDir(), "vault.db")
 	cfg.Security = &config.Setup{PublicOrigin: "https://warden.example", RPID: "warden.example", Mode: "proxy", BackendAuthority: cfg.ListenAddr}
-	if err := saveInitializationConfig(path, cfg); err != nil {
+	session, err := openInitializationConfig(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer session.lease.Close()
+	session.cfg = cfg
+	if err := session.save(); err != nil {
 		t.Fatal(err)
 	}
 	original, err := os.ReadFile(path)
@@ -25,13 +31,12 @@ func TestInitConfigPrivateReusableAndNeverSilentlyReplaced(t *testing.T) {
 	if info.Mode().Perm() != 0600 {
 		t.Fatal("nonprivate config")
 	}
-	if err := saveInitializationConfig(path, cfg); err != nil {
+	if err := session.save(); err != nil {
 		t.Fatal("cannot resume after precommit interruption", err)
 	}
-	changed := cfg
-	changed.DBPath = filepath.Join(t.TempDir(), "different-vault.db")
-	if err := saveInitializationConfig(path, changed); err == nil {
-		t.Fatal("accepted another initializer's conflicting config")
+	if other, err := openInitializationConfig(path); err == nil {
+		other.lease.Close()
+		t.Fatal("accepted another initializer's conflicting config ownership")
 	}
 	got, _ := os.ReadFile(path)
 	if !bytes.Equal(got, original) {

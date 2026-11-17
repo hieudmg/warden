@@ -29,6 +29,9 @@ export WARDEN_ACCEPTANCE_BIN="$WORK/bin"
 go test ./internal/server/runtime -list '^TestSecurityLifecycleHTTPS$' | grep -Fx TestSecurityLifecycleHTTPS
 printf '== SecurityLifecycleHTTPS (one composed journey, explicit test substitutes)\n'
 go test ./internal/server/runtime -run '^TestSecurityLifecycleHTTPS$' -count=1 -timeout=180s -v
+go test ./internal/server/runtime -list '^TestAccountSecurityLifecycleHTTPS$' | grep -Fx TestAccountSecurityLifecycleHTTPS
+printf '== AccountSecurityLifecycleHTTPS (password-protected same-DEK account journey)\n'
+go test ./internal/server/runtime -run '^TestAccountSecurityLifecycleHTTPS$' -count=1 -timeout=180s -v
 printf '== LegacyRefusalAndRollback (separate preservation/fault suites, not part of the composed journey)\n'
 go test ./cmd/warden-server ./internal/store ./internal/server/runtime \
   -run 'TestServeRefusesUninitializedAndLegacyWithoutMutation|TestLegacyDBRefusalPreservesArtifacts|TestVersion1ExportFixtureIntoInitializedEmptyVault|TestImportFailurePreservesIdentityAndManagedData|TestConcurrentInitializedImports|TestHTTPSVersion1ImportPreservesIdentityAndFailureRetry' \
