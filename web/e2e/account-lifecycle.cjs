@@ -37,6 +37,17 @@ async function main() {
  }
  const visible = locator => locator.waitFor({ state: 'visible' })
  const screenshot = name => page.screenshot({ path: path.join(output, name + '.png'), fullPage: true })
+ const responsiveScreenshots = async name => {
+  for (const [size, viewport] of [['desktop', { width: 1440, height: 1000 }], ['mobile', { width: 375, height: 812 }]]) {
+   await page.setViewportSize(viewport)
+   for (const label of ['Warden security', 'Account and recovery']) {
+    const region = page.getByRole('region', { name: label, exact: true })
+    if (await region.count()) assert(await region.evaluate(el => el.scrollWidth <= el.clientWidth && el.getBoundingClientRect().right <= innerWidth), `${label} overflows at ${size}`)
+   }
+   await screenshot(`${name}-${size}`)
+  }
+  await page.setViewportSize({ width: 1440, height: 1000 })
+ }
  try {
   assert.equal(spawnSync('openssl', ['req', '-x509', '-newkey', 'rsa:2048', '-nodes', '-keyout', path.join(dir, 'key.pem'), '-out', path.join(dir, 'cert.pem'), '-days', '1', '-subj', '/CN=localhost', '-addext', 'subjectAltName=DNS:localhost'], { stdio: 'ignore' }).status, 0)
   const setup = fixture('setup')
@@ -74,7 +85,16 @@ async function main() {
   const login = async () => { phase = 'management'; await page.getByLabel('Username', { exact: true }).fill('owner'); await page.getByLabel('Password', { exact: true }).fill(password); await page.getByRole('button', { name: 'Log in and unlock' }).click(); await visible(page.getByRole('heading', { name: 'Warden Hub' })) }
   await visible(page.getByRole('button', { name: 'Log in and unlock' })); await screenshot('04-account-login'); await login()
   assert.equal(await page.getByRole('button', { name: 'Add passkey', exact: true }).count(), 0)
-  await screenshot('05-account-management')
+  const settings = page.getByRole('button', { name: 'Account and recovery', exact: true })
+  assert.equal(await settings.getAttribute('aria-expanded'), 'false')
+  assert.equal(await page.getByRole('button', { name: 'Rotate recovery key', exact: true }).count(), 0)
+  await responsiveScreenshots('05-account-collapsed')
+  await settings.focus(); await settings.press('Enter')
+  assert.equal(await settings.getAttribute('aria-expanded'), 'true')
+  await visible(page.getByRole('button', { name: 'Rotate recovery key', exact: true }))
+  await responsiveScreenshots('05-account-expanded')
+  await settings.press('Space')
+  assert.equal(await settings.getAttribute('aria-expanded'), 'false')
   // Verify a new password modal inside the existing export dialog's focus scope.
   await page.getByRole('button', { name: 'Export data', exact: true }).click()
   const download = page.waitForEvent('download'); download.catch(() => {})
@@ -83,6 +103,7 @@ async function main() {
   await page.getByLabel('Current password', { exact: true }).fill(password); await page.getByRole('button', { name: 'Verify password', exact: true }).click()
   const exported = await download; assert.equal(exported.suggestedFilename(), 'warden-data.json'); await exported.delete()
   // Password fresh verification also protects recovery-key rotation and reentry.
+  await settings.click()
   await page.getByRole('button', { name: 'Rotate recovery key', exact: true }).click()
   await visible(page.getByRole('dialog', { name: 'Verify your password' })); assert.equal(await page.getByLabel('Current password', { exact: true }).inputValue(), '')
   await page.getByLabel('Current password', { exact: true }).fill(password); await page.getByRole('button', { name: 'Verify password', exact: true }).click()
@@ -125,7 +146,10 @@ async function main() {
   serverProofs.loggedOut = await proveLoggedOut(page, origin, logoutCookie); verifiedTransitions.loggedOut = true
   phase = 'recovery'
   await page.getByLabel('Offline recovery key', { exact: true }).fill(saved); await page.getByRole('button', { name: 'Recover and replace account password' }).click()
-  await visible(page.getByRole('button', { name: 'Replace account password' })); await screenshot('08-restricted-account-recovery')
+  await visible(page.getByRole('button', { name: 'Replace account password' }))
+  assert.equal(await settings.getAttribute('aria-expanded'), 'true')
+  assert.equal(await settings.isDisabled(), true)
+  await responsiveScreenshots('08-restricted-account-recovery')
   password = ' replacement disposable password '
   await page.getByLabel('New password', { exact: true }).fill(password); await page.getByLabel('Confirm new password', { exact: true }).fill(password); await page.getByRole('button', { name: 'Replace account password' }).click()
   await visible(page.getByRole('button', { name: 'Log in and unlock' })); await login(); await check(); await screenshot('09-recovered-management')

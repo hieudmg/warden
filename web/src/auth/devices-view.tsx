@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, useSyncExternalStore } from 'react'
 import type { AuthClient, ClientDevices } from './auth'
 import { securityEpoch, securitySignal } from './session'
+import { Button } from '../components/ui/button'
 
 export function DevicesView({ client }: { client: AuthClient }) {
  const state = useSyncExternalStore(client.subscribe, client.getSnapshot)
@@ -31,16 +32,16 @@ export function DevicesView({ client }: { client: AuthClient }) {
   finally { if (current()) setBusy(false) }
  }
  if (!state.authenticated || state.recovering) return null
- return <section aria-label="CLI devices" className="space-y-2">
-  <h3>CLI devices</h3>
+ return <section aria-label="CLI devices" className="security-card">
+  <h3 className="font-medium text-foreground">CLI devices</h3>
   <p>Compare the complete fingerprint with the CLI before {state.authMethod === 'account' ? 'fresh password verification' : 'fresh passkey approval'}. Approval cannot unlock the vault. Credentials remain in agent memory only; restart needs new approval. Revocation blocks future API retrieval, not already retrieved remote credentials or established sessions.</p>
-  <button disabled={busy} onClick={() => void run(async () => {})}>Refresh devices</button>
+  <Button variant="outline" disabled={busy} onClick={() => void run(async () => {})}>Refresh devices</Button>
   <ul>{devices.pending.map(d => <li key={d.id}>
-   <strong>{d.label}</strong> {requested === d.id && <span>Requested device</span>}<p>Request: {d.id}</p><code>{d.fingerprint}</code><p>Expires: {d.expires}</p>
-   <button disabled={busy} onClick={() => void run(() => client.approveDevice(d.id, d.fingerprint))}>Approve {d.label}</button>
-   <button disabled={busy} onClick={() => void run(() => client.approveDevice(d.id, d.fingerprint, true))}>Deny {d.label}</button>
+   <strong>{d.label}</strong> {requested === d.id && <span className="rounded-md bg-primary/10 px-2 py-1 text-xs font-medium text-primary">Requested device</span>}<p>Request: {d.id}</p><code>{d.fingerprint}</code><p>Expires: {d.expires}</p>
+   <Button disabled={busy} onClick={() => void run(() => client.approveDevice(d.id, d.fingerprint))}>Approve {d.label}</Button>
+   <Button variant="outline" disabled={busy} onClick={() => void run(() => client.approveDevice(d.id, d.fingerprint, true))}>Deny {d.label}</Button>
   </li>)}</ul>
-  <ul>{devices.clients.map(d => <li key={d.id}>{d.label} <code>{d.fingerprint}</code> {d.revoked ? 'Revoked' : <button disabled={busy} onClick={() => void run(() => client.revokeDevice(d.id))}>Revoke device {d.label}</button>}</li>)}</ul>
+  <ul>{devices.clients.map(d => <li key={d.id}>{d.label} <code>{d.fingerprint}</code> {d.revoked ? 'Revoked' : <Button variant="destructive" disabled={busy} onClick={() => void run(() => client.revokeDevice(d.id))}>Revoke device {d.label}</Button>}</li>)}</ul>
   {error && <p role="alert">{error}</p>}
  </section>
 }
