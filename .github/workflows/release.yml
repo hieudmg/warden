@@ -14,13 +14,8 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  checks:
-    permissions:
-      contents: read
-    uses: ./.github/workflows/test.yml
-
+  # Tests and security scans run on PRs; post-merge CI only builds and publishes.
   build:
-    needs: checks
     if: github.repository == 'hieudmg/warden' && github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-24.04
     timeout-minutes: 20

@@ -88,9 +88,6 @@ class WorkflowContracts(unittest.TestCase):
         automated = workflow('test.yml')
         self.assertEqual(set(automated['jobs']), {'linux'})
         self.assertNotIn('needs', automated['jobs']['linux'])
-        release = workflow('release.yml')
-        self.assertEqual(release['jobs']['checks']['uses'], './.github/workflows/test.yml')
-        self.assertEqual(release['jobs']['build']['needs'], 'checks')
         for name in ['test.yml', 'release.yml']:
             self.assertNotIn('test-windows.yml', json.dumps(workflow(name)))
 
@@ -110,13 +107,18 @@ class WorkflowContracts(unittest.TestCase):
             self.assertIn(required, harness)
         self.assertNotIn('-c ', harness)
 
+    def test_post_merge_release_only_builds_and_publishes(self):
+        release = workflow('release.yml')
+        self.assertEqual(release['on'], {'push': {'branches': ['main']}})
+        self.assertEqual(set(release['jobs']), {'build', 'publish'})
+        self.assertNotIn('needs', release['jobs']['build'])
+        self.assertEqual(release['jobs']['publish']['needs'], 'build')
+
     def test_publisher_is_isolated_and_binds_trusted_build_outputs(self):
         w = workflow('release.yml')
         self.assertEqual(w['on'], {'push': {'branches': ['main']}})
         self.assertEqual(w['concurrency'], {'group': 'release-main', 'cancel-in-progress': 'false'})
-        self.assertEqual(w['jobs']['checks']['uses'], './.github/workflows/test.yml')
-        build, publish = w['jobs']['build'], w['jobs']['publish']
-        self.assertEqual(build['needs'], 'checks')
+        publish = w['jobs']['publish']
         self.assertEqual(publish['needs'], 'build')
         self.assertEqual(publish['permissions'], {'contents': 'write', 'attestations': 'write', 'id-token': 'write'})
         self.assertEqual(publish['if'], "github.repository == 'hieudmg/warden' && github.event_name == 'push' && github.ref == 'refs/heads/main'")
