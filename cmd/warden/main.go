@@ -6,7 +6,9 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -600,7 +602,7 @@ func writeConfigSearchResults(w io.Writer, query string, sshConns []model.SSHCon
 		lines = append(lines, "SSH")
 		for i, match := range sshMatches {
 			conn := match.connection
-			entry := sanitizeConfigSearchField(conn.Name) + " — " + sanitizeConfigSearchField(conn.Host)
+			entry := sanitizeConfigSearchField(conn.Name) + " — " + sanitizeConfigSearchField(maskSearchHost(conn.Host))
 			if conn.Note != "" {
 				entry += " — Note: " + sanitizeConfigSearchField(conn.Note)
 			}
@@ -615,7 +617,7 @@ func writeConfigSearchResults(w io.Writer, query string, sshConns []model.SSHCon
 		for i, match := range dbMatches {
 			conn := match.connection
 			database := sanitizeConfigSearchField(match.name)
-			entry := sanitizeConfigSearchField(conn.Name) + "/" + database + " — " + sanitizeConfigSearchField(conn.Host) + "/" + database
+			entry := sanitizeConfigSearchField(conn.Name) + "/" + database + " — " + sanitizeConfigSearchField(maskSearchHost(conn.Host)) + "/" + database
 			if conn.SSHConnectionID != 0 {
 				sshName, ok := sshNames[conn.SSHConnectionID]
 				if !ok {
@@ -636,7 +638,7 @@ func writeConfigSearchResults(w io.Writer, query string, sshConns []model.SSHCon
 		lines = append(lines, "HTTP")
 		for i, match := range httpMatches {
 			conn := match.connection
-			entry := sanitizeConfigSearchField(conn.Name) + " — " + sanitizeConfigSearchField(conn.Origin)
+			entry := sanitizeConfigSearchField(conn.Name) + " — " + sanitizeConfigSearchField(maskSearchOrigin(conn.Origin))
 			if conn.Note != "" {
 				entry += " — Note: " + sanitizeConfigSearchField(conn.Note)
 			}
@@ -776,6 +778,39 @@ func treeEntry(index, total int, value string) string {
 		return "└── " + value
 	}
 	return "├── " + value
+}
+
+// maskSearchHost is presentation-only: matching and connection operations use
+// the original profile. Colons identify IPv6 literals, whose dots are not DNS separators.
+func maskSearchHost(host string) string {
+	if hostname, port, err := net.SplitHostPort(host); err == nil {
+		return net.JoinHostPort(maskSearchHost(hostname), port)
+	}
+	if strings.Contains(host, ":") {
+		return host
+	}
+	if first, _, ok := strings.Cut(host, "."); ok {
+		return first + ".*"
+	}
+	return host
+}
+
+func maskSearchOrigin(origin string) string {
+	u, err := url.Parse(origin)
+	if err != nil || u.Scheme == "" || u.Host == "" {
+		return origin
+	}
+	host := u.Hostname()
+	masked := maskSearchHost(host)
+	if masked == host {
+		return origin
+	}
+	port := u.Port()
+	u.Host = masked
+	if port != "" {
+		u.Host = net.JoinHostPort(masked, port)
+	}
+	return u.String()
 }
 
 func sanitizeConfigSearchField(value string) string {
@@ -1094,6 +1129,11 @@ func runAgent(args []string, stderr io.Writer) int {
 }
 
 func printCPUsage(w io.Writer) {
+	printHelpAudience(w, `Copy an upload or download using a saved SSH connection.
+Try: warden cp ./release.tar prod:/srv/releases/
+`, `Discover an exact SSH name before forming a connection:path operand.
+Copies may overwrite files; confirm both endpoints before running.
+`)
 	fmt.Fprint(w, `Copy files or directories over SFTP, recursively for directories.
 
 Usage:
@@ -1115,6 +1155,11 @@ Global flags such as --config must go before cp.
 }
 
 func printPortWatchUsage(w io.Writer) {
+	printHelpAudience(w, `Watch forwarded ports in your terminal; stop with Ctrl-C.
+Try: warden port-watch prod 3000,5000-5010
+`, `Use an exact SSH name. This workflow is long-running and requires
+remote Linux ss; arrange interruption rather than waiting for one-shot completion.
+`)
 	fmt.Fprint(w, `Usage:
   warden port-watch <ssh-connection> <port-range-list>
 
@@ -1134,6 +1179,11 @@ Global flags such as --config must go before port-watch.
 }
 
 func printUpgradeUsage(w io.Writer) {
+	printHelpAudience(w, `Update the installed client with: warden upgrade
+For a custom release source, set WARDEN_REPO or WARDEN_RELEASE_BASE_URL.
+`, `This modifies the running executable, not the server or configuration.
+A scheduled replacement is not confirmation that replacement has completed.
+`)
 	fmt.Fprint(w, `Usage:
   warden upgrade
 
@@ -1152,8 +1202,26 @@ func loadClient(configPath string, configPathSet bool, lookupEnv func(string) (s
 	})
 }
 
+// Help audience follows the output console only, never the requested command
+// output mode. Shared usage and safety contracts remain visible to both audiences.
+func printHelpAudience(w io.Writer, terminalGuidance, agentGuidance string) {
+	if writerIsTerminal(w) {
+		fmt.Fprint(w, "For terminal users:\n", terminalGuidance, "\n")
+		return
+	}
+	fmt.Fprint(w, "For agents and scripts:\n", agentGuidance, `
+For connection targets, discover with warden -n config search "query". Use exact
+returned names, not displayed hosts; quote arguments containing spaces or shell syntax.
+Global flags precede the command. Output is text/streams, not a JSON envelope.
+Exit status: 0 success; 1 operational/configuration failure; 2 invalid usage.
+SSH may return the remote exit status. Check stderr and status, not stdout alone.
+Help is offline; -n/-i change command output, not permissions or safety checks.
+
+`)
+}
+
 func printUsage(w io.Writer) {
-	fmt.Fprint(w, `Warden client: use configured SSH and database connections through Warden Hub.
+	fmt.Fprint(w, `Warden client: use configured SSH, database and HTTP connections through Warden Hub.
 
 Usage:
   warden [global flags] <command> [arguments]
@@ -1181,11 +1249,26 @@ Global flags (before the command):
 
 Output mode defaults to automatic TTY detection. -n changes presentation, not
 permissions or SSH host-key verification; it does not make xssh headless.
-DB results use tab-separated text with a column header; config search uses
-SSH/DB/HTTP headings and bullet lists. Neither format is JSON. SSH streams the remote
-command's output unchanged. See command help for details and examples.
+With -n, DB results use tab-separated text with a column header; config search
+uses SSH/DB/HTTP headings and bullet lists. With -i, they use tables and trees.
+Neither format is JSON. SSH streams the remote command's output unchanged.
+See command help for details and examples.
+The Hub HTTP timeout is not a remote command or SQL execution deadline.
+Help follows the output console TTY, independently of -n/-i.
 
-For agents and scripts:
+`)
+	if writerIsTerminal(w) {
+		fmt.Fprint(w, `For terminal users:
+  Find a saved connection: warden config search "production"
+  Run a command:          warden ssh prod "uname -a"
+  Query a database:       warden db prod/app "SELECT 1"
+  Choose an SSH shell:   warden xssh
+  Replace example names with your own. See command --help for more examples.
+  Configure the Hub URL below before connecting to a remote Hub.
+
+`)
+	} else {
+		fmt.Fprint(w, `For agents and scripts:
   1. Discover targets: warden -n config search "production"
   2. Use the exact returned connection name or DB connection/database target;
      do not guess hosts, credentials, or connection names.
@@ -1196,7 +1279,10 @@ For agents and scripts:
   until interrupted.
   Examples use placeholder connection/project names; replace them with yours.
 
-Configuration:
+`)
+	}
+	if writerIsTerminal(w) {
+		fmt.Fprint(w, `Configuration:
   Default file: client.json in the OS user config directory under warden
   (usually ~/.config/warden/client.json on Linux, %APPDATA%\warden\client.json
   on Windows). A missing default file is optional; an explicit path must exist.
@@ -1212,7 +1298,9 @@ Environment overrides:
   WARDEN_REPO                Upgrade release repository (owner/repo)
   WARDEN_RELEASE_BASE_URL     Upgrade release base URL
 
-Exit status:
+`)
+	}
+	fmt.Fprint(w, `Exit status:
   0 success (including help and config search with no matches)
   1 operational/configuration failure; 2 invalid CLI usage
   SSH commands can instead return the remote command's exit status.
@@ -1221,6 +1309,11 @@ Exit status:
 }
 
 func printSSHUsage(w io.Writer) {
+	printHelpAudience(w, `Run a command on a saved connection, or use xssh for a shell.
+Try: warden ssh prod "uname -a"
+`, `Discover the exact SSH name first. Quote the complete remote command
+and check its exit status; remote commands can modify the target.
+`)
 	fmt.Fprint(w, `Run one remote command over SSH using an exact configured SSH connection name.
 
 Usage:
@@ -1242,6 +1335,11 @@ Global flags (-n, -i, --config) must go before ssh. Use xssh for a terminal shel
 }
 
 func printDBUsage(w io.Writer) {
+	printHelpAudience(w, `Query a saved database; terminal output defaults to a formatted table.
+Try: warden db prod/app "SELECT 1"
+`, `Discover an exact connection/database target, not the displayed host.
+Use -n for tab-separated output; quote SQL and check status even with empty stdout.
+`)
 	fmt.Fprint(w, `Execute one SQL statement on a configured MySQL/MariaDB connection.
 
 Usage:
@@ -1272,6 +1370,11 @@ changes output formatting and does not make a query read-only.
 }
 
 func printXSSHUsage(w io.Writer) {
+	printHelpAudience(w, `Run warden xssh to choose a saved connection interactively.
+After disconnecting you return to the picker; press Esc to leave.
+`, `Do not use xssh as a headless command runner, even with -n.
+Use warden ssh with an exact connection name and one quoted command instead.
+`)
 	fmt.Fprint(w, `Open an interactive SSH shell in a terminal.
 
 Usage:
@@ -1297,6 +1400,11 @@ func printReportUsage(w io.Writer) {
 }
 
 func printReportCreateUsage(w io.Writer) {
+	printHelpAudience(w, `Share a project update with a title, Markdown summary and model name.
+Use your existing project name in the example below.
+`, `Use the exact project name; config search discovers connections, not projects.
+Put the project before flags and quote each title, summary and model value.
+`)
 	fmt.Fprint(w, `Create a report for a project in Warden Hub.
 
 Usage:
@@ -1319,13 +1427,22 @@ func printConfigUsage(w io.Writer) {
 }
 
 func printConfigSearchUsage(w io.Writer) {
+	printHelpAudience(w, `Find your saved connections; terminal output defaults to a tree.
+Try: warden config search "production"
+Use the returned name with ssh, db or http.
+`, `Discover targets before operating. Copy the returned connection name or
+connection/database target exactly; never reconstruct a host from a masked display.
+`)
 	fmt.Fprint(w, `Discover configured SSH, database and HTTP targets without exposing credentials.
 
 Usage:
   warden config search <query>
 
 Fuzzy-search active connection names, hosts, and database names, plus HTTP origins.
-Pass a non-empty query as one quoted argument. Results include names, hosts, and optional notes,
+Pass a non-empty query as one quoted argument. Matching uses full hosts/origins;
+displayed hosts hide the suffix after the first dot (db.example.com becomes db.*).
+Dotless hosts and IPv6 addresses are unchanged; HTTP schemes and ports are retained.
+Results include names, masked hosts/origins, and optional notes,
 not credentials. Archived profiles are excluded.
 
 SSH results show the connection name to use with ssh, xssh, cp, or port-watch.

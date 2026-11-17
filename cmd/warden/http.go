@@ -87,6 +87,11 @@ func runHTTP(args []string, configPath string, configPathSet bool, stdout, stder
 }
 
 func printHTTPUsage(w io.Writer) {
+	printHelpAudience(w, `Call a saved HTTP service without entering its credentials locally.
+Try: warden http GET service '/v1/items?limit=10'
+`, `Discover an exact HTTP connection name. Quote PATH and BODY as single
+arguments; PATH cannot override the origin. Inspect status even when a body is printed.
+`)
 	fmt.Fprint(w, `Usage:
   warden http [--content-type TYPE] METHOD CONNECTION PATH [BODY]
 
