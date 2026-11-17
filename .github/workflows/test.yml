@@ -28,11 +28,18 @@ jobs:
         with:
           node-version: '26.12.1'
           package-manager-cache: false
+          # Cache npm downloads, not node_modules; npm ci still verifies the lockfile.
+          cache: npm
+          cache-dependency-path: web/package-lock.json
       - name: Set up the complete minimum Go patch
         uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go.mod
-          cache: false
+          # Reuse modules and compiler outputs, never skip test execution on a hit.
+          cache: true
+          cache-dependency-path: |
+            go.mod
+            go.sum
       - name: Verify actual compiler and frontend runtime
         shell: bash
         run: |
