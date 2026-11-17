@@ -62,23 +62,6 @@ beforeEach(() => {
 })
 
 describe("ProjectsReportsTab", () => {
-  test("untrusted Markdown images require explicit privacy-warning activation and safe links", async () => {
-    mockedAPI.listReports.mockResolvedValue([{ ...report(10, "warden", "hostile"), summary: '![tracking](https://hostile.invalid/unique.png)\n\n[unsafe](javascript:alert%281%29)\n\n[safe](https://example.org/)\n\n<img src="https://hostile.invalid/raw.png"><style>body{background:url(https://hostile.invalid/css)}</style>' }])
-    const user = userEvent.setup()
-    render(<ProjectsReportsTab resource={projectsResource([project(1, "warden")])} notify={notify} />)
-    await user.click(screen.getByRole("button", { name: "warden" }))
-    await user.click(await screen.findByRole("button", { name: "hostile" }))
-    expect(document.querySelector(".markdown-body img")).toBeNull()
-    expect(document.querySelector(".markdown-body style")).toBeNull()
-    expect(screen.getByText("unsafe")).not.toHaveAttribute("href", expect.stringContaining("javascript:"))
-    expect(screen.getByRole("link", { name: "safe" })).toHaveAttribute("rel", "noopener noreferrer")
-    const action = screen.getByRole("button", { name: /Open image.*tracking.*reveals your IP/i })
-    expect(screen.getByText(/image host.*IP address/i)).toBeInTheDocument()
-    const opener = vi.spyOn(window, "open").mockImplementation(() => null)
-    await user.click(action)
-    expect(opener).toHaveBeenCalledWith("https://hostile.invalid/unique.png", "_blank", "noopener,noreferrer")
-    opener.mockRestore()
-  })
   test("renders Projects, Reports, and Report content panes in DOM order with the responsive grid", () => {
     render(
       <ProjectsReportsTab

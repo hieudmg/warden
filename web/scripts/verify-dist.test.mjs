@@ -4,7 +4,7 @@ import os from "node:os"
 import path from "node:path"
 import { test } from "node:test"
 
-import { verifyDist, setupAssetNames } from "./verify-dist.mjs"
+import { verifyDist } from "./verify-dist.mjs"
 
 // fixture builds a temporary distribution directory from a map of
 // relative paths to file contents and returns its root.
@@ -17,13 +17,6 @@ async function fixture(files) {
   }
   return root
 }
-
-test("setup dependency allowlist excludes management HTML, assets and manifest", () => {
- const manifest={"index.html":{file:"assets/manage.js",isEntry:true},"setup.html":{file:"assets/setup.js",isEntry:true,imports:["_shared.js"],css:["assets/setup.css"]},"_shared.js":{file:"assets/shared.js"}}
- assert.deepEqual(setupAssetNames(manifest),["assets/setup.css","assets/setup.js","assets/shared.js","setup.html"])
- assert.throws(()=>setupAssetNames({...manifest,"setup.html":{file:"assets/setup.js",imports:["index.html"]}}),/management/)
- assert.throws(()=>setupAssetNames({...manifest,"setup.html":{file:"assets/setup.js",imports:["missing"]}}),/missing/)
-})
 
 test("complete local graph passes", async () => {
   const root = await fixture({

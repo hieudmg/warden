@@ -52,9 +52,6 @@ func withMiddleware(next http.Handler) http.Handler {
 		sw := &statusWriter{ResponseWriter: w}
 		defer func() {
 			if rec := recover(); rec != nil {
-				if rec == http.ErrAbortHandler {
-					panic(rec) // net/http must abort, not finalize buffered bytes.
-				}
 				if !sw.wroteHeader {
 					WriteError(sw, http.StatusInternalServerError, ErrInternal, "internal server error")
 				}
@@ -67,16 +64,6 @@ func withMiddleware(next http.Handler) http.Handler {
 type statusWriter struct {
 	http.ResponseWriter
 	wroteHeader bool
-}
-
-// Unwrap preserves ResponseController access to underlying transport controls.
-func (w *statusWriter) Unwrap() http.ResponseWriter { return w.ResponseWriter }
-
-func (w *statusWriter) FlushError() error {
-	if !w.wroteHeader {
-		w.WriteHeader(http.StatusOK)
-	}
-	return http.NewResponseController(w.ResponseWriter).Flush()
 }
 
 func (w *statusWriter) WriteHeader(code int) {

@@ -27,12 +27,6 @@ type TunnelDialer struct {
 	target     *golangssh.Client
 	dbAddr     string
 	closeGraph func() error
-	abort      func(string)
-	lifetime   context.Context
-	cancel     context.CancelFunc
-	opens      sync.WaitGroup
-	closed     chan struct{}
-	closeErr   error
 }
 
 // NewTunnelDialer resolves the bundle's SSH graph and returns a dialer
@@ -43,33 +37,18 @@ func NewTunnelDialer(ctx context.Context, bundle model.SSHBundle, dbAddr string)
 	if err != nil {
 		return nil, err
 	}
-	d := newTunnelDialer(graph.Target(), dbAddr, func(string) { graph.Abort() })
-	d.closeGraph = graph.Close
-	return d, nil
+	return &TunnelDialer{
+		target:     graph.Target(),
+		dbAddr:     dbAddr,
+		closeGraph: graph.Close,
+	}, nil
 }
 
-// BorrowedGraph retains ownership in the pool. Invalidate must abort this
-// transport, remove it from reuse and record why; canceling an unconfirmed
-// SSH channel request necessarily disrupts other users of the SAME graph.
-type BorrowedGraph interface {
-	Target() *golangssh.Client
-	Invalidate(reason string)
-}
-
-// NewBorrowedTunnelDialer leaves a healthy graph alive on Close. Cancellation
-// during an unconfirmed channel open instead invalidates that graph explicitly.
-func NewBorrowedTunnelDialer(graph BorrowedGraph, dbAddr string) *TunnelDialer {
-	return newTunnelDialer(graph.Target(), dbAddr, graph.Invalidate)
-}
-
-func newTunnelDialer(target *golangssh.Client, addr string, abort func(string)) *TunnelDialer {
-	ctx, cancel := context.WithCancel(context.Background())
-	d := &TunnelDialer{target: target, dbAddr: addr, abort: abort, lifetime: ctx, cancel: cancel, closed: make(chan struct{})}
-	if target == nil {
-		cancel()
-		close(d.closed)
-	}
-	return d
+// NewBorrowedTunnelDialer returns a dialer that borrows an established SSH
+// target. Closing it disables future dials but never closes target or the
+// graph that owns it.
+func NewBorrowedTunnelDialer(target *golangssh.Client, dbAddr string) *TunnelDialer {
+	return &TunnelDialer{target: target, dbAddr: dbAddr}
 }
 
 // DialContext returns a direct-tcpip channel through the tunnel to the
@@ -82,53 +61,34 @@ func newTunnelDialer(target *golangssh.Client, addr string, abort func(string)) 
 func (d *TunnelDialer) DialContext(ctx context.Context, _ string, _ string) (net.Conn, error) {
 	d.mu.Lock()
 	target := d.target
+	d.mu.Unlock()
 	if target == nil {
-		d.mu.Unlock()
 		return nil, errors.New("db tunnel is closed")
 	}
-	d.opens.Add(1)
-	d.mu.Unlock()
-	defer d.opens.Done()
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	ctx, cancel := context.WithCancel(ctx)
-	cancelDone := make(chan struct{})
-	stop := context.AfterFunc(d.lifetime, func() { defer close(cancelDone); cancel() })
-	defer func() {
-		if !stop() {
-			<-cancelDone
-		}
-	}()
-	defer cancel()
-	conn, err := ssh.DialTCPContext(ctx, target, d.dbAddr, d.abort)
+	conn, err := target.Dial("tcp", d.dbAddr)
 	if err != nil {
 		return nil, fmt.Errorf("tunnel to %s: %w", d.dbAddr, err)
 	}
 	return conn, nil
 }
 
-// Close disables future dials and cancels in-progress opens. A borrowed graph
-// is untouched unless aborting a pending open requires invalidation. Owned
-// graphs always close. Close is idempotent.
+// Close disables subsequent DialContext calls. An owned dialer also closes
+// its SSH graph; a borrowed dialer leaves the target untouched. Close is
+// idempotent and returns the graph's close error, if any.
 func (d *TunnelDialer) Close() error {
 	d.mu.Lock()
+	defer d.mu.Unlock()
 	if d.target == nil {
-		d.mu.Unlock()
-		if d.closed != nil {
-			<-d.closed
-		}
-		return d.closeErr
+		return nil
 	}
 	closeGraph := d.closeGraph
 	d.target = nil
 	d.closeGraph = nil
-	d.cancel()
-	d.mu.Unlock()
 	if closeGraph != nil {
-		d.closeErr = closeGraph()
+		return closeGraph()
 	}
-	d.opens.Wait()
-	close(d.closed)
-	return d.closeErr
+	return nil
 }

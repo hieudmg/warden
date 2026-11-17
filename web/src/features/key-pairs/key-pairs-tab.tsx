@@ -1,6 +1,5 @@
 import { useEffect, useRef, useState, type ChangeEvent, type FormEvent } from "react"
 import { api } from "@/api/client"
-import { useSecurityEpoch } from '@/auth/session'
 import type {
   DependentsResponse,
   KeyPairRequest,
@@ -89,8 +88,6 @@ function KeyMaterialField({ id, label, value, rows, onChange, onFileError }: Key
     return () => {
       mounted.current = false
       readGeneration.current += 1
-      previousValue.current = null
-      if (fileInput.current) fileInput.current.value = ''
     }
   }, [])
 
@@ -166,12 +163,7 @@ function KeyMaterialField({ id, label, value, rows, onChange, onFileError }: Key
   )
 }
 
-export function KeyPairsTab(props: KeyPairsTabProps) {
-  const epoch = useSecurityEpoch()
-  return <KeyPairsContent key={epoch} {...props} />
-}
-
-function KeyPairsContent({ resource, notify }: KeyPairsTabProps) {
+export function KeyPairsTab({ resource, notify }: KeyPairsTabProps) {
   const [query, setQuery] = useState("")
   const [formDialog, setFormDialog] = useState<FormDialogState | null>(null)
   const [name, setName] = useState("")
@@ -221,8 +213,6 @@ function KeyPairsContent({ resource, notify }: KeyPairsTabProps) {
     vaultRequestRef.current += 1
     editIDRef.current = null
     setFormDialog(null)
-    setPending(false)
-    setFormError(null)
     setPublicKey("")
     setPrivateKey("")
     setPassphrase("")
@@ -264,8 +254,6 @@ function KeyPairsContent({ resource, notify }: KeyPairsTabProps) {
     event.preventDefault()
     if (!formDialog) return
     if (formDialog.mode === "edit" && formDialog.vault === null) return
-    const requestID = vaultRequestRef.current
-    const isCurrent = () => mounted.current && requestID === vaultRequestRef.current
     setPending(true)
     setFormError(null)
     let createdOrUpdated = ""
@@ -291,15 +279,13 @@ function KeyPairsContent({ resource, notify }: KeyPairsTabProps) {
         await api.createKeyPair(request)
         createdOrUpdated = "Created"
       }
-      if (!isCurrent()) return
       await resource.reload()
-      if (!isCurrent()) return
       closeFormDialog()
       notify(`${createdOrUpdated} key pair "${name}".`, "success")
     } catch (error) {
-      if (isCurrent()) setFormError(errorMessage(error))
+      setFormError(errorMessage(error))
     } finally {
-      if (isCurrent()) setPending(false)
+      setPending(false)
     }
   }
 
@@ -439,7 +425,7 @@ function KeyPairsContent({ resource, notify }: KeyPairsTabProps) {
       <Dialog
         open={formDialog !== null}
         onOpenChange={open => {
-          if (!open) closeFormDialog()
+          if (!open && !pending) closeFormDialog()
         }}
       >
         <DialogContent
@@ -526,6 +512,7 @@ function KeyPairsContent({ resource, notify }: KeyPairsTabProps) {
                 type="button"
                 variant="outline"
                 onClick={closeFormDialog}
+                disabled={pending}
               >
                 Cancel
               </Button>

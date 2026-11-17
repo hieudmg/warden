@@ -51,7 +51,9 @@ func ServeUI(api http.Handler, assets fs.FS) http.Handler {
 				http.NotFound(w, r)
 				return
 			}
-			// Assign immutable caching only after the asset has been read.
+			// Vite emits content-hashed asset filenames, so any
+			// asset that exists today is immutable for its lifetime.
+			w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
 		}
 		serveAsset(w, r, assets, name)
 	})
@@ -63,12 +65,8 @@ func ServeUI(api http.Handler, assets fs.FS) http.Handler {
 func serveAsset(w http.ResponseWriter, r *http.Request, assets fs.FS, name string) {
 	data, err := fs.ReadFile(assets, name)
 	if err != nil {
-		w.Header().Set("Cache-Control", "no-store")
 		http.NotFound(w, r)
 		return
-	}
-	if name != "index.html" {
-		w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
 	}
 	modtime := time.Time{}
 	if info, serr := fs.Stat(assets, name); serr == nil && !info.IsDir() {

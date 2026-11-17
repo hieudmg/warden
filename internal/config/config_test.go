@@ -22,13 +22,8 @@ func TestLoadServerDefaults(t *testing.T) {
 	if cfg.ListenAddr != "127.0.0.1:8080" {
 		t.Fatalf("ListenAddr = %q, want %q", cfg.ListenAddr, "127.0.0.1:8080")
 	}
-	home, err := os.UserHomeDir()
-	if err != nil {
-		t.Fatal(err)
-	}
-	wantDB := filepath.Join(home, ".warden", "warden.db")
-	if cfg.DBPath != wantDB {
-		t.Fatalf("DBPath = %q, want %q", cfg.DBPath, wantDB)
+	if cfg.DBPath != "/var/lib/warden/warden.db" {
+		t.Fatalf("DBPath = %q, want %q", cfg.DBPath, "/var/lib/warden/warden.db")
 	}
 	if cfg.MasterKeyPath != "/etc/warden/master.key" {
 		t.Fatalf("MasterKeyPath = %q, want %q", cfg.MasterKeyPath, "/etc/warden/master.key")
@@ -132,7 +127,7 @@ func TestLoadClientRejectsInvalidAPIBaseURL(t *testing.T) {
 	if err == nil {
 		t.Fatal("LoadClient() error = nil, want error")
 	}
-	if !strings.Contains(err.Error(), "HTTPS origin") {
+	if !strings.Contains(err.Error(), "api base") {
 		t.Fatalf("LoadClient() error = %v, want API base URL validation error", err)
 	}
 }
@@ -142,7 +137,7 @@ func TestLoadClientParsesTimeoutWithEnvOverride(t *testing.T) {
 
 	configPath := filepath.Join(t.TempDir(), "client.json")
 	writeTestFile(t, configPath, `{
-  "api_base_url": "https://warden.internal:8080",
+  "api_base_url": "http://warden.internal:8080",
   "timeout": "10s"
 }`)
 

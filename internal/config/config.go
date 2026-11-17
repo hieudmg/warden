@@ -7,18 +7,19 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
-	"warden/internal/client/clienthttp"
 )
 
 const (
 	defaultListenAddr    = "127.0.0.1:8080"
+	defaultDBPath        = "/var/lib/warden/warden.db"
 	defaultMasterKey     = "/etc/warden/master.key"
-	defaultAPIBaseURL    = "https://127.0.0.1:8080"
+	defaultAPIBaseURL    = "http://127.0.0.1:8080"
 	defaultClientTimeout = 30 * time.Second
 )
 
@@ -35,18 +36,15 @@ const (
 )
 
 type Server struct {
-	InitializationDraft bool
-	Security            *Setup
-	ListenAddr          string
-	DBPath              string
-	MasterKeyPath       string
-	StaticFS            string
+	ListenAddr    string
+	DBPath        string
+	MasterKeyPath string
+	StaticFS      string
 }
 
 type Client struct {
-	APIBaseURL    string
-	Timeout       time.Duration
-	CACertificate string
+	APIBaseURL string
+	Timeout    time.Duration
 }
 
 type ServerOptions struct {
@@ -54,7 +52,6 @@ type ServerOptions struct {
 	ConfigPathSet bool
 	LookupEnv     func(string) (string, bool)
 
-	legacyConfigPath  string
 	defaultConfigPath string
 	readFile          func(string) ([]byte, error)
 }
@@ -69,24 +66,21 @@ type ClientOptions struct {
 }
 
 type serverFileConfig struct {
-	InitializationDraft bool    `json:"initialization_draft,omitempty"`
-	Security            *Setup  `json:"security"`
-	ListenAddr          *string `json:"listen_addr"`
-	DBPath              *string `json:"db_path"`
-	MasterKeyPath       *string `json:"master_key_path"`
-	StaticFS            *string `json:"static_fs"`
+	ListenAddr    *string `json:"listen_addr"`
+	DBPath        *string `json:"db_path"`
+	MasterKeyPath *string `json:"master_key_path"`
+	StaticFS      *string `json:"static_fs"`
 }
 
 type clientFileConfig struct {
-	APIBaseURL    *string `json:"api_base_url"`
-	Timeout       *string `json:"timeout"`
-	CACertificate *string `json:"ca_certificate"`
+	APIBaseURL *string `json:"api_base_url"`
+	Timeout    *string `json:"timeout"`
 }
 
 func DefaultServer() Server {
 	return Server{
 		ListenAddr:    defaultListenAddr,
-		DBPath:        filepath.Join(defaultServerDir(), "warden.db"),
+		DBPath:        defaultDBPath,
 		MasterKeyPath: defaultMasterKey,
 	}
 }
@@ -98,34 +92,8 @@ func DefaultClient() Client {
 	}
 }
 
-func defaultServerDir() string {
-	home, err := os.UserHomeDir()
-	if err != nil || home == "" {
-		return ".warden"
-	}
-	return filepath.Join(home, ".warden")
-}
-
 func DefaultServerConfigPath() string {
-	return filepath.Join(defaultServerDir(), "server.json")
-}
-
-// DefaultSetup supplies file locations, not certificates or valid RP settings.
-func DefaultSetup() Setup {
-	return Setup{Mode: "tls", TLSCertificate: filepath.Join(defaultServerDir(), "tls", "fullchain.pem"), TLSKey: filepath.Join(defaultServerDir(), "tls", "private.key")}
-}
-
-// ParseServerDraft strictly decodes one non-secret setup snapshot without
-// environment overrides or runtime validation. Only init may edit drafts.
-func ParseServerDraft(path string, data []byte) (Server, error) {
-	cfg := DefaultServer()
-	if err := decodeServerFile(&cfg, data); err != nil {
-		return Server{}, err
-	}
-	if cfg.Security == nil {
-		return Server{}, errors.New("existing config has no initialization security settings; choose a fresh config path")
-	}
-	return cfg, nil
+	return "/etc/warden/server.json"
 }
 
 func DefaultClientConfigPath() string {
@@ -181,34 +149,12 @@ func LoadClient(opts ClientOptions) (Client, error) {
 	if err := validateClient(&cfg); err != nil {
 		return Client{}, err
 	}
-	if cfg.CACertificate != "" {
-		// Anchor in the invoking CLI, never in an older detached agent's cwd.
-		cfg.CACertificate, err = filepath.Abs(cfg.CACertificate)
-		if err != nil {
-			return Client{}, errors.New("resolve public CA certificate path")
-		}
-	}
 
 	return cfg, nil
 }
 
 func serverConfigPath(opts ServerOptions, lookupEnv func(string) (string, bool)) (string, bool, error) {
-	path, required, err := resolveConfigPath(opts.ConfigPath, opts.ConfigPathSet, serverConfigEnv, lookupEnv, opts.defaultConfigPath, DefaultServerConfigPath())
-	if err != nil || required {
-		return path, required, err
-	}
-	// Discovery only: never copy/migrate an old installation, and never fall
-	// back when a new default exists but is malformed, inaccessible or a link.
-	if _, err := os.Lstat(path); os.IsNotExist(err) {
-		legacy := opts.legacyConfigPath
-		if legacy == "" {
-			legacy = "/etc/warden/server.json"
-		}
-		if _, err := os.Lstat(legacy); !os.IsNotExist(err) {
-			return legacy, true, nil
-		}
-	}
-	return path, required, nil
+	return resolveConfigPath(opts.ConfigPath, opts.ConfigPathSet, serverConfigEnv, lookupEnv, opts.defaultConfigPath, DefaultServerConfigPath())
 }
 
 func clientConfigPath(opts ClientOptions, lookupEnv func(string) (string, bool)) (string, bool, error) {
@@ -240,30 +186,11 @@ func mergeServerFile(cfg *Server, path string, required bool, readFile func(stri
 		return err
 	}
 
-	if err := decodeServerFile(cfg, data); err != nil {
-		return fmt.Errorf("decode server config %q: %w", path, err)
-	}
-	return nil
-}
-
-func decodeServerFile(cfg *Server, data []byte) error {
-	if err := canonicalServerKeys(data); err != nil {
-		return err
-	}
 	var fileCfg serverFileConfig
 	if err := decodeStrictJSON(data, &fileCfg); err != nil {
-		return err
+		return fmt.Errorf("decode server config %q: %w", path, err)
 	}
 
-	// All existing unmarked configs predate the new-init path default, regardless
-	// of pathname. New init always persists an explicit DB path.
-	if fileCfg.DBPath == nil && !fileCfg.InitializationDraft {
-		cfg.DBPath = "/var/lib/warden/warden.db"
-	}
-	cfg.InitializationDraft = fileCfg.InitializationDraft
-	if fileCfg.Security != nil {
-		cfg.Security = fileCfg.Security
-	}
 	if fileCfg.ListenAddr != nil {
 		cfg.ListenAddr = *fileCfg.ListenAddr
 	}
@@ -293,9 +220,6 @@ func mergeClientFile(cfg *Client, path string, required bool, readFile func(stri
 
 	if fileCfg.APIBaseURL != nil {
 		cfg.APIBaseURL = *fileCfg.APIBaseURL
-	}
-	if fileCfg.CACertificate != nil {
-		cfg.CACertificate = *fileCfg.CACertificate
 	}
 	if fileCfg.Timeout != nil {
 		timeout, err := parseDuration(*fileCfg.Timeout)
@@ -378,14 +302,6 @@ func applyClientEnv(cfg *Client, lookupEnv func(string) (string, bool)) error {
 }
 
 func validateServer(cfg Server) error {
-	if cfg.InitializationDraft {
-		return errors.New("initialization answers are a draft; rerun warden-server init with the same config")
-	}
-	if cfg.Security != nil {
-		if err := cfg.Security.Validate(cfg.ListenAddr); err != nil {
-			return err
-		}
-	}
 	if err := validateListenAddr(cfg.ListenAddr); err != nil {
 		return err
 	}
@@ -458,7 +374,26 @@ func isAllowedListenHost(host string) bool {
 }
 
 func validateAPIBaseURL(value string) (string, error) {
-	return clienthttp.Origin(strings.TrimSpace(value))
+	trimmed := strings.TrimSpace(value)
+	if trimmed == "" {
+		return "", errors.New("api base url must not be empty")
+	}
+
+	u, err := url.Parse(trimmed)
+	if err != nil {
+		return "", fmt.Errorf("invalid api base url %q: %w", value, err)
+	}
+	if u.Scheme != "http" && u.Scheme != "https" {
+		return "", fmt.Errorf("invalid api base url %q: scheme must be http or https", value)
+	}
+	if u.Host == "" {
+		return "", fmt.Errorf("invalid api base url %q: host must not be empty", value)
+	}
+	if u.RawQuery != "" || u.Fragment != "" {
+		return "", fmt.Errorf("invalid api base url %q: query and fragment are not supported", value)
+	}
+
+	return strings.TrimRight(trimmed, "/"), nil
 }
 
 func parseDuration(value string) (time.Duration, error) {

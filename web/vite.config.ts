@@ -13,7 +13,6 @@ export default defineConfig({
     outDir: path.resolve(root, "../internal/web/dist"),
     emptyOutDir: true,
     manifest: true,
-    rolldownOptions: { input: { management: path.resolve(root, 'index.html'), setup: path.resolve(root, 'setup.html') } },
     sourcemap: false,
   },
 })

@@ -6,12 +6,12 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"net/http"
 	"os"
 	"os/signal"
 	"path/filepath"
 	"sort"
 	"strings"
-	"syscall"
 	"time"
 	"unicode"
 
@@ -88,13 +88,11 @@ func run(args []string, stdout, stderr io.Writer, lookupEnv func(string) (string
 	configPathSet := flagWasSet(root, "config")
 	mode, err := resolveOutputMode(nonInteractive, interactive, writerIsTerminal(stdout))
 	if err != nil {
-		fmt.Fprintf(stderr, "warden: %v\n", terminal.ErrorText(err))
+		fmt.Fprintf(stderr, "warden: %v\n", err)
 		return 2
 	}
 
 	switch rest[0] {
-	case "login", "logout", "status":
-		return runAuthorization(rest, *configPath, configPathSet, stdout, stderr, lookupEnv, mode)
 	case "agent":
 		return runAgent(rest[1:], stderr)
 	case "ssh":
@@ -132,16 +130,16 @@ func runSSH(args []string, configPath string, configPathSet bool, stdout, stderr
 
 	cfg, err := loadClient(configPath, configPathSet, lookupEnv)
 	if err != nil {
-		fmt.Fprintf(stderr, "invalid client config: %v\n", terminal.ErrorText(err))
+		fmt.Fprintf(stderr, "invalid client config: %v\n", err)
 		return 1
 	}
 
-	cl := newAPIClient(cfg)
+	cl := api.New(cfg.APIBaseURL, &http.Client{Timeout: cfg.Timeout})
 	ctx := context.Background()
 
 	conns, err := cl.ListSSH(ctx)
 	if err != nil {
-		fmt.Fprintf(stderr, "ssh: %v\n", terminal.ErrorText(err))
+		fmt.Fprintf(stderr, "ssh: %v\n", err)
 		return 1
 	}
 
@@ -159,7 +157,7 @@ func runSSH(args []string, configPath string, configPathSet bool, stdout, stderr
 
 	bundle, err := cl.GetSSHBundle(ctx, id)
 	if err != nil {
-		fmt.Fprintf(stderr, "ssh: %v\n", terminal.ErrorText(err))
+		fmt.Fprintf(stderr, "ssh: %v\n", err)
 		return 1
 	}
 
@@ -171,7 +169,7 @@ func runSSH(args []string, configPath string, configPathSet bool, stdout, stderr
 	if errors.As(err, &exitErr) {
 		return exitErr.Status
 	}
-	fmt.Fprintf(stderr, "ssh: %v\n", terminal.ErrorText(err))
+	fmt.Fprintf(stderr, "ssh: %v\n", err)
 	return 1
 }
 
@@ -203,17 +201,17 @@ func runDB(args []string, configPath string, configPathSet bool, stdout, stderr 
 	}
 	profileName, databaseName, err := parseDBReference(args[0])
 	if err != nil {
-		fmt.Fprintf(stderr, "db: %v\n", terminal.ErrorText(err))
+		fmt.Fprintf(stderr, "db: %v\n", err)
 		return 2
 	}
 
 	cfg, err := loadClient(configPath, configPathSet, lookupEnv)
 	if err != nil {
-		fmt.Fprintf(stderr, "invalid client config: %v\n", terminal.ErrorText(err))
+		fmt.Fprintf(stderr, "invalid client config: %v\n", err)
 		return 1
 	}
 
-	cl := newAPIClient(cfg)
+	cl := api.New(cfg.APIBaseURL, &http.Client{Timeout: cfg.Timeout})
 	// context.Background() is deliberate and mirrors runSSH: both CLI
 	// commands are one-shot processes, the default SIGINT behavior
 	// terminates them, and API calls are bounded by cfg.Timeout. A hung
@@ -224,7 +222,7 @@ func runDB(args []string, configPath string, configPathSet bool, stdout, stderr 
 
 	conns, err := cl.ListDB(ctx)
 	if err != nil {
-		fmt.Fprintf(stderr, "db: %v\n", terminal.ErrorText(err))
+		fmt.Fprintf(stderr, "db: %v\n", err)
 		return 1
 	}
 
@@ -242,7 +240,7 @@ func runDB(args []string, configPath string, configPathSet bool, stdout, stderr 
 
 	bundle, err := cl.GetDBBundle(ctx, id, databaseName)
 	if err != nil {
-		fmt.Fprintf(stderr, "db: %v\n", terminal.ErrorText(err))
+		fmt.Fprintf(stderr, "db: %v\n", err)
 		return 1
 	}
 
@@ -254,7 +252,7 @@ func runDB(args []string, configPath string, configPathSet bool, stdout, stderr 
 		runErr = runDirectDB(ctx, bundle, args[1], stdout, options)
 	}
 	if runErr != nil {
-		fmt.Fprintf(stderr, "db: %v\n", terminal.ErrorText(runErr))
+		fmt.Fprintf(stderr, "db: %v\n", runErr)
 		return 1
 	}
 	return 0
@@ -286,16 +284,16 @@ func runXSSH(args []string, configPath string, configPathSet bool, stdout, stder
 
 	cfg, err := loadClient(configPath, configPathSet, lookupEnv)
 	if err != nil {
-		fmt.Fprintf(stderr, "invalid client config: %v\n", terminal.ErrorText(err))
+		fmt.Fprintf(stderr, "invalid client config: %v\n", err)
 		return 1
 	}
 
-	cl := newAPIClient(cfg)
+	cl := api.New(cfg.APIBaseURL, &http.Client{Timeout: cfg.Timeout})
 	ctx := context.Background()
 
 	conns, err := cl.ListSSH(ctx)
 	if err != nil {
-		fmt.Fprintf(stderr, "xssh: %v\n", terminal.ErrorText(err))
+		fmt.Fprintf(stderr, "xssh: %v\n", err)
 		return 1
 	}
 
@@ -322,12 +320,12 @@ func runXSSH(args []string, configPath string, configPathSet bool, stdout, stder
 			// interactive SSH session.
 			pickerSession, err := newTerminalSession()
 			if err != nil {
-				fmt.Fprintf(stderr, "xssh: %v\n", terminal.ErrorText(err))
+				fmt.Fprintf(stderr, "xssh: %v\n", err)
 				return 1
 			}
 			sel, err = selectXSSHConnection(pickerSession, activeSSHConnections(conns))
 			if err != nil {
-				fmt.Fprintf(stderr, "xssh: %v\n", terminal.ErrorText(err))
+				fmt.Fprintf(stderr, "xssh: %v\n", err)
 				return 1
 			}
 		}
@@ -335,13 +333,13 @@ func runXSSH(args []string, configPath string, configPathSet bool, stdout, stder
 		clientssh.WriteProgress(stderr, "Fetching credentials...")
 		bundle, err := cl.GetSSHBundle(ctx, sel.ID)
 		if err != nil {
-			fmt.Fprintf(stderr, "xssh: %v\n", terminal.ErrorText(err))
+			fmt.Fprintf(stderr, "xssh: %v\n", err)
 			return 1
 		}
 
 		term, err := newTerminalSession()
 		if err != nil {
-			fmt.Fprintf(stderr, "xssh: %v\n", terminal.ErrorText(err))
+			fmt.Fprintf(stderr, "xssh: %v\n", err)
 			return 1
 		}
 
@@ -352,7 +350,7 @@ func runXSSH(args []string, configPath string, configPathSet bool, stdout, stder
 				if errors.As(err, &exitErr) {
 					return exitErr.Status
 				}
-				fmt.Fprintf(stderr, "xssh: %v\n", terminal.ErrorText(err))
+				fmt.Fprintf(stderr, "xssh: %v\n", err)
 				return 1
 			}
 			return 0
@@ -363,7 +361,7 @@ func runXSSH(args []string, configPath string, configPathSet bool, stdout, stder
 		if err != nil {
 			var exitErr *clientssh.ExitStatusError
 			if !errors.As(err, &exitErr) {
-				fmt.Fprintf(stderr, "xssh: %v\n", terminal.ErrorText(err))
+				fmt.Fprintf(stderr, "xssh: %v\n", err)
 			}
 		}
 	}
@@ -417,11 +415,11 @@ func runReportCreate(args []string, configPath string, configPathSet bool, stdou
 
 	cfg, err := loadClient(configPath, configPathSet, lookupEnv)
 	if err != nil {
-		fmt.Fprintf(stderr, "invalid client config: %v\n", terminal.ErrorText(err))
+		fmt.Fprintf(stderr, "invalid client config: %v\n", err)
 		return 1
 	}
 
-	cl := newAPIClient(cfg)
+	cl := api.New(cfg.APIBaseURL, &http.Client{Timeout: cfg.Timeout})
 	reportClient := clientreport.New(cl)
 	ctx := context.Background()
 
@@ -432,7 +430,7 @@ func runReportCreate(args []string, configPath string, configPathSet bool, stdou
 		AgentModel: *agentModel,
 	})
 	if err != nil {
-		fmt.Fprintf(stderr, "report create: %v\n", terminal.ErrorText(err))
+		fmt.Fprintf(stderr, "report create: %v\n", err)
 		return 1
 	}
 
@@ -463,20 +461,20 @@ func runConfig(args []string, configPath string, configPathSet bool, stdout, std
 
 	cfg, err := loadClient(configPath, configPathSet, lookupEnv)
 	if err != nil {
-		fmt.Fprintf(stderr, "invalid client config: %v\n", terminal.ErrorText(err))
+		fmt.Fprintf(stderr, "invalid client config: %v\n", err)
 		return 1
 	}
 
-	cl := newAPIClient(cfg)
+	cl := api.New(cfg.APIBaseURL, &http.Client{Timeout: cfg.Timeout})
 	ctx := context.Background()
 	sshConns, err := cl.ListSSH(ctx)
 	if err != nil {
-		fmt.Fprintf(stderr, "config search: %v\n", terminal.ErrorText(err))
+		fmt.Fprintf(stderr, "config search: %v\n", err)
 		return 1
 	}
 	dbConns, err := cl.ListDB(ctx)
 	if err != nil {
-		fmt.Fprintf(stderr, "config search: %v\n", terminal.ErrorText(err))
+		fmt.Fprintf(stderr, "config search: %v\n", err)
 		return 1
 	}
 
@@ -854,16 +852,16 @@ func runCP(args []string, configPath string, configPathSet bool, stdout, stderr 
 
 	cfg, err := loadClient(configPath, configPathSet, lookupEnv)
 	if err != nil {
-		fmt.Fprintf(stderr, "invalid client config: %v\n", terminal.ErrorText(err))
+		fmt.Fprintf(stderr, "invalid client config: %v\n", err)
 		return 1
 	}
 
-	cl := newAPIClient(cfg)
+	cl := api.New(cfg.APIBaseURL, &http.Client{Timeout: cfg.Timeout})
 	ctx := context.Background()
 
 	conns, err := cl.ListSSH(ctx)
 	if err != nil {
-		fmt.Fprintf(stderr, "cp: %v\n", terminal.ErrorText(err))
+		fmt.Fprintf(stderr, "cp: %v\n", err)
 		return 1
 	}
 
@@ -888,17 +886,17 @@ func runCP(args []string, configPath string, configPathSet bool, stdout, stderr 
 
 	src, err := resolveAgentCPEndpoint(source, cl, ctx)
 	if err != nil {
-		fmt.Fprintf(stderr, "cp: %v\n", terminal.ErrorText(err))
+		fmt.Fprintf(stderr, "cp: %v\n", err)
 		return 1
 	}
 	dst, err := resolveAgentCPEndpoint(destination, cl, ctx)
 	if err != nil {
-		fmt.Fprintf(stderr, "cp: %v\n", terminal.ErrorText(err))
+		fmt.Fprintf(stderr, "cp: %v\n", err)
 		return 1
 	}
 
 	if err := runAgentCopy(ctx, agent.CopyRequest{Source: src, Destination: dst}); err != nil {
-		fmt.Fprintf(stderr, "cp: %v\n", terminal.ErrorText(err))
+		fmt.Fprintf(stderr, "cp: %v\n", err)
 		return 1
 	}
 	return 0
@@ -910,10 +908,10 @@ func runCP(args []string, configPath string, configPathSet bool, stdout, stderr 
 func reportCPParseError(stderr io.Writer, err error) int {
 	var usageErr cpUsageError
 	if errors.As(err, &usageErr) {
-		fmt.Fprintf(stderr, "cp: %v\n", terminal.ErrorText(err))
+		fmt.Fprintf(stderr, "cp: %v\n", err)
 		return 2
 	}
-	fmt.Fprintf(stderr, "cp: %v\n", terminal.ErrorText(err))
+	fmt.Fprintf(stderr, "cp: %v\n", err)
 	return 1
 }
 
@@ -946,20 +944,20 @@ func runPortWatchCommand(args []string, configPath string, configPathSet bool, s
 		return 2
 	}
 	if _, err := portwatch.ParsePortRanges(args[1]); err != nil {
-		fmt.Fprintf(stderr, "port-watch: %v\n", terminal.ErrorText(err))
+		fmt.Fprintf(stderr, "port-watch: %v\n", err)
 		return 2
 	}
 
 	cfg, err := loadClient(configPath, configPathSet, lookupEnv)
 	if err != nil {
-		fmt.Fprintf(stderr, "invalid client config: %v\n", terminal.ErrorText(err))
+		fmt.Fprintf(stderr, "invalid client config: %v\n", err)
 		return 1
 	}
-	cl := newAPIClient(cfg)
+	cl := api.New(cfg.APIBaseURL, &http.Client{Timeout: cfg.Timeout})
 	ctx := context.Background()
 	connections, err := cl.ListSSH(ctx)
 	if err != nil {
-		fmt.Fprintf(stderr, "port-watch: %v\n", terminal.ErrorText(err))
+		fmt.Fprintf(stderr, "port-watch: %v\n", err)
 		return 1
 	}
 	var id int64 = -1
@@ -975,14 +973,14 @@ func runPortWatchCommand(args []string, configPath string, configPathSet bool, s
 	}
 	bundle, err := cl.GetSSHBundle(ctx, id)
 	if err != nil {
-		fmt.Fprintf(stderr, "port-watch: %v\n", terminal.ErrorText(err))
+		fmt.Fprintf(stderr, "port-watch: %v\n", err)
 		return 1
 	}
 
 	watchCtx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()
 	if err := runPortWatch(watchCtx, bundle, args[1], stdout, stderr); err != nil {
-		fmt.Fprintf(stderr, "port-watch: %v\n", terminal.ErrorText(err))
+		fmt.Fprintf(stderr, "port-watch: %v\n", err)
 		return 1
 	}
 	return 0
@@ -1008,7 +1006,7 @@ func runClientUpgrade(args []string, stdout, stderr io.Writer, lookupEnv func(st
 		ReleaseBaseURL: releaseBaseURL,
 	})
 	if err != nil {
-		fmt.Fprintf(stderr, "warden upgrade: %v\n", terminal.ErrorText(err))
+		fmt.Fprintf(stderr, "warden upgrade: %v\n", err)
 		return 1
 	}
 	writeUpgradeResult(stdout, "warden upgrade", result)
@@ -1036,26 +1034,24 @@ func runAgent(args []string, stderr io.Writer) int {
 
 	runtime, err := agent.NewRuntime()
 	if err != nil {
-		fmt.Fprintf(stderr, "agent: %v\n", terminal.ErrorText(err))
+		fmt.Fprintf(stderr, "agent: %v\n", err)
 		return 1
 	}
 	listener, err := runtime.Listen()
 	if err != nil {
-		fmt.Fprintf(stderr, "agent: %v\n", terminal.ErrorText(err))
+		fmt.Fprintf(stderr, "agent: %v\n", err)
 		return 1
 	}
 	defer runtime.Cleanup()
 
 	token, err := runtime.ReadToken()
 	if err != nil {
-		fmt.Fprintf(stderr, "agent: %v\n", terminal.ErrorText(err))
+		fmt.Fprintf(stderr, "agent: %v\n", err)
 		return 1
 	}
 	pool := agent.NewDefaultPool(time.Now, 10*time.Minute)
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer stop()
-	if err := runAgentServe(ctx, listener, token, pool); err != nil && !errors.Is(err, context.Canceled) {
-		fmt.Fprintf(stderr, "agent: %v\n", terminal.ErrorText(err))
+	if err := runAgentServe(context.Background(), listener, token, pool); err != nil {
+		fmt.Fprintf(stderr, "agent: %v\n", err)
 		return 1
 	}
 	return 0
@@ -1128,9 +1124,6 @@ Usage:
   warden <command> --help
 
 Commands:
-  login                      Fresh web approval (warden login; -n never waits for a human)
-  logout                     Attempt revocation and clear memory-only agent authorization
-  status                     Check authorization without unlocking the server
   config search <query>       Discover SSH and database connection targets
   ssh <connection> <command>  Run one remote command over SSH
   db <connection> <sql>       Execute one MySQL/MariaDB statement
@@ -1153,9 +1146,6 @@ permissions or SSH host-key verification; it does not make xssh headless.
 DB results use tab-separated text with a column header; config search uses
 SSH/DB headings and bullet lists. Neither format is JSON. SSH streams the remote
 command's output unchanged. See command help for details and examples.
-Diagnostics escape terminal controls and invalid UTF-8, capped at
-1024 encoded UTF-8 bytes before the fixed command prefix/newline.
-SSH byte streams and file transfers are not filtered.
 
 For agents and scripts:
   1. Discover targets: warden -n config search "production"
@@ -1172,22 +1162,13 @@ Configuration:
   Default file: client.json in the OS user config directory under warden
   (usually ~/.config/warden/client.json on Linux, %APPDATA%\warden\client.json
   on Windows). A missing default file is optional; an explicit path must exist.
-  JSON fields: {"api_base_url":"https://warden.example","timeout":"30s"}
-  Optional ca_certificate is a public PEM path for private-CA certificate trust.
-  HTTPS with certificate/hostname verification is mandatory, including loopback.
-  First use prints a configured-origin URL and fingerprint for fresh web approval.
-  API and polling secrets stay memory-only in the same per-user agent, never in
-  this config, IPC discovery, CLI output, argv or environment. Agent restart needs
-  reapproval; server restart preserves authorization but starts the vault locked.
-  Logout/revocation/outage/lock never terminates the daemon. Remote credentials
-  already retrieved cannot be recalled. Stolen API credentials remain usable until
-  revocation or recovery invalidation; there is no expiry, rotation or refresh.
+  JSON fields: {"api_base_url":"http://127.0.0.1:8080","timeout":"30s"}
   --config takes precedence over WARDEN_CLIENT_CONFIG for file selection.
   Environment values override JSON fields; otherwise built-in defaults apply.
 
 Environment overrides:
   WARDEN_CLIENT_CONFIG        Client config path (when --config is not supplied)
-  WARDEN_CLIENT_API_BASE_URL  Hub HTTPS origin (default https://127.0.0.1:8080)
+  WARDEN_CLIENT_API_BASE_URL  Hub API URL (default http://127.0.0.1:8080)
   WARDEN_CLIENT_TIMEOUT       Hub HTTP timeout as a duration (default 30s, e.g. 1m);
                              not a remote command or SQL execution deadline
   WARDEN_REPO                Upgrade release repository (owner/repo)
@@ -1237,9 +1218,8 @@ with config search; a host/database result is descriptive, not a connection name
 
 Output:
   -n: tab-separated text with a column header, not JSON. SQL NULL is printed as
-      NULL; cell and column headers' control characters are replaced with spaces
-      in both tables and TSV, so this is not a lossless data export.
-      Statements without a result set produce no output.
+      NULL; cell control characters are replaced with spaces, so this is not a
+      lossless data export. Statements without a result set produce no output.
   -i: formatted table, or Query OK for statements without a result set.
   Without either flag, output mode follows stdout TTY detection.
 

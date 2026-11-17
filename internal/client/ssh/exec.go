@@ -12,6 +12,7 @@ import (
 	"strconv"
 
 	golangssh "golang.org/x/crypto/ssh"
+	"golang.org/x/crypto/ssh/agent"
 
 	"warden/internal/model"
 )
@@ -86,7 +87,7 @@ func RunCommandOnClient(ctx context.Context, client *golangssh.Client, command s
 		session.Stdin = streams.Stdin
 	}
 
-	// Agent authentication never authorizes forwarding to a remote session.
+	forwardAgent(client, session)
 
 	if err := session.Start(command); err != nil {
 		return fmt.Errorf("start remote command: %w", err)
@@ -111,4 +112,22 @@ func RunCommandOnClient(ctx context.Context, client *golangssh.Client, command s
 		session.Close()
 		return ctx.Err()
 	}
+}
+
+// forwardAgent exposes the local ssh-agent to the remote session when the
+// connection was authenticated through it. Failures are non-fatal: some
+// servers disable agent forwarding.
+func forwardAgent(client *golangssh.Client, session *golangssh.Session) {
+	v, ok := clientAgents.Load(client)
+	if !ok {
+		return
+	}
+	keyring, ok := v.(agent.Agent)
+	if !ok {
+		return
+	}
+	if err := agent.ForwardToAgent(client, keyring); err != nil {
+		return
+	}
+	_ = agent.RequestAgentForwarding(session)
 }

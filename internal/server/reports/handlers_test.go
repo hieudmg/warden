@@ -272,8 +272,8 @@ func TestReportAppendOnly(t *testing.T) {
 	}
 }
 
-// TestReportAuditOmitsContents verifies caller labels and report contents are
-// absent from audit metadata; the nonsecret report ID remains.
+// TestReportAuditOmitsContents verifies audit metadata carries project and
+// agent_model but never the report title or summary.
 func TestReportAuditOmitsContents(t *testing.T) {
 	mux, path := newTestAPI(t)
 
@@ -303,8 +303,11 @@ func TestReportAuditOmitsContents(t *testing.T) {
 			if strings.Contains(metadata, "secret-title-value") || strings.Contains(metadata, "secret-summary-value") {
 				t.Errorf("audit metadata leaks report contents: %s", metadata)
 			}
-			if strings.Contains(metadata, `"project"`) || strings.Contains(metadata, `"agent_model"`) {
-				t.Errorf("audit metadata retains caller labels: %s", metadata)
+			if !strings.Contains(metadata, `"project":"audited"`) {
+				t.Errorf("audit metadata missing project: %s", metadata)
+			}
+			if !strings.Contains(metadata, `"agent_model":"m1"`) {
+				t.Errorf("audit metadata missing agent_model: %s", metadata)
 			}
 		}
 	}

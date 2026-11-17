@@ -6,7 +6,6 @@ import (
 	"crypto/ed25519"
 	"crypto/rand"
 	"crypto/subtle"
-	"crypto/tls"
 	"encoding/binary"
 	"encoding/json"
 	"errors"
@@ -36,7 +35,7 @@ func TestServerWrongTokenReturnsFinalWithoutDialing(t *testing.T) {
 	}, time.Now, time.Minute)
 	server := &Server{Pool: pool, Token: bytes.Repeat([]byte{0x22}, TokenBytes)}
 
-	clientConn, serverConn := agentTLSTestPair(t)
+	clientConn, serverConn := net.Pipe()
 	defer clientConn.Close()
 	go server.handleConn(context.Background(), serverConn, server.Token)
 
@@ -89,7 +88,7 @@ func TestServerMalformedFramesCloseRequestWithoutPanic(t *testing.T) {
 				return &clientssh.Graph{}, nil
 			}, time.Now, time.Minute)
 			server := &Server{Pool: pool, Token: bytes.Repeat([]byte{0x22}, TokenBytes)}
-			clientConn, serverConn := agentTLSTestPair(t)
+			clientConn, serverConn := net.Pipe()
 			defer clientConn.Close()
 			go server.handleConn(context.Background(), serverConn, server.Token)
 			if _, err := clientConn.Write(test.frame); err != nil {
@@ -245,11 +244,11 @@ type pipeAddr string
 func (a pipeAddr) Network() string { return "pipe" }
 func (a pipeAddr) String() string  { return string(a) }
 
-func TestSSHPoolIdleExpiryDoesNotEndAuthAgent(t *testing.T) {
+func TestServerStopsWhenPoolBecomesEmpty(t *testing.T) {
 	clock := &poolClock{now: time.Unix(500, 0)}
 	pool := NewPool(func(context.Context, model.SSHBundle) (*clientssh.Graph, error) {
 		return &clientssh.Graph{}, nil
-	}, clock.Now, 10*time.Minute)
+	}, clock.Now, time.Minute)
 	lease, err := pool.Acquire(context.Background(), testBundle("secret"))
 	if err != nil {
 		t.Fatal(err)
@@ -259,36 +258,16 @@ func TestSSHPoolIdleExpiryDoesNotEndAuthAgent(t *testing.T) {
 	listener := newPipeListener()
 	server := NewServer(listener, bytes.Repeat([]byte{0x22}, TokenBytes), pool)
 	serveDone := make(chan error, 1)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	go func() { serveDone <- server.Serve(ctx) }()
-	clock.Advance(24 * time.Hour)
+	go func() { serveDone <- server.Serve(context.Background()) }()
+	clock.Advance(time.Minute)
 	pool.Expire()
-	if !pool.Empty() {
-		t.Fatal("idle graph did not expire independently")
-	}
 	select {
 	case err := <-serveDone:
-		t.Fatalf("empty pool ended daemon: %v", err)
-	case <-time.After(50 * time.Millisecond):
-	}
-	client, peer := net.Pipe()
-	defer client.Close()
-	select {
-	case listener.conns <- peer:
-	case err := <-serveDone:
-		t.Fatalf("empty pool ended daemon: %v", err)
-	case <-time.After(time.Second):
-		t.Fatal("agent stopped accepting after pool expiry")
-	}
-	cancel()
-	select {
-	case err := <-serveDone:
-		if !errors.Is(err, context.Canceled) {
+		if err != nil {
 			t.Fatalf("Serve: %v", err)
 		}
 	case <-time.After(time.Second):
-		t.Fatal("external cancellation did not terminate agent with active connection")
+		t.Fatal("Serve did not stop after the pool became empty")
 	}
 }
 
@@ -407,8 +386,6 @@ func TestServerSequentialSSHRequestsReuseOneGraph(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	cert := testAgentCertificate(t, agentTLSName, time.Now().Add(-time.Minute), time.Now().Add(time.Hour))
-	listener = tls.NewListener(listener, agentServerTLS(cert))
 	token := bytes.Repeat([]byte{0x22}, TokenBytes)
 	server := NewServer(listener, token, pool)
 	ctx, cancel := context.WithCancel(context.Background())
@@ -421,12 +398,8 @@ func TestServerSequentialSSHRequestsReuseOneGraph(t *testing.T) {
 		if err != nil {
 			return "", "", err
 		}
-		secured, err := authenticateAgent(ctx, conn, cert.Certificate[0])
-		if err != nil {
-			return "", "", err
-		}
 		var stdout, stderr bytes.Buffer
-		err = relayRequest(ctx, secured, token, Request{Operation: operationSSH, Command: command, SSHBundle: mustJSON(bundle)}, clientssh.Streams{Stdin: bytes.NewReader(input), Stdout: &stdout, Stderr: &stderr}, true)
+		err = relayRequest(ctx, conn, token, Request{Operation: operationSSH, Command: command, SSHBundle: mustJSON(bundle)}, clientssh.Streams{Stdin: bytes.NewReader(input), Stdout: &stdout, Stderr: &stderr}, true)
 		return stdout.String(), stderr.String(), err
 	}
 	stdout, stderr, err := run("printf out; printf err >&2", nil)

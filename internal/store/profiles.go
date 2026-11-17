@@ -377,28 +377,11 @@ func (s *Store) CreateSSH(ctx context.Context, p model.SSHProfile) (model.SSHPro
 	return p, nil
 }
 
-// resolutionQuery is the row-read surface shared by ordinary getters and the
-// transport resolution transaction. It deliberately exposes no writes.
-type resolutionQuery interface {
-	QueryRowContext(context.Context, string, ...any) *sql.Row
-}
-
 func (s *Store) GetSSH(ctx context.Context, id int64) (model.SSHProfile, error) {
-	return s.getSSH(ctx, s.db, id, true)
-}
-
-func (s *Store) getSSH(ctx context.Context, q resolutionQuery, id int64, secrets bool) (model.SSHProfile, error) {
-	if err := ctx.Err(); err != nil {
-		return model.SSHProfile{}, err
-	}
-	passwordColumn, proxyPasswordColumn := "NULL", "NULL"
-	if secrets {
-		passwordColumn, proxyPasswordColumn = "s.password", "s.proxy_password"
-	}
-	row := q.QueryRowContext(ctx, `
-		SELECT s.id, s.name, s.host, s.port, s.username, `+passwordColumn+`,
+	row := s.db.QueryRowContext(ctx, `
+		SELECT s.id, s.name, s.host, s.port, s.username, s.password,
 		       s.proxy_host, s.proxy_port, s.proxy_username,
-		       `+proxyPasswordColumn+`, s.jump_connection_ids, s.default_dir,
+		       s.proxy_password, s.jump_connection_ids, s.default_dir,
 		       s.group_id, COALESCE(g.name, ''), s.key_pair_id, COALESCE(k.name, ''),
 		       COALESCE(n.note, ''), s.archived, s.created_at, s.updated_at
 		FROM ssh_connections s
@@ -710,19 +693,8 @@ func (s *Store) CreateDB(ctx context.Context, p model.DBProfile) (model.DBProfil
 }
 
 func (s *Store) GetDB(ctx context.Context, id int64) (model.DBProfile, error) {
-	return s.getDB(ctx, s.db, id, true)
-}
-
-func (s *Store) getDB(ctx context.Context, q resolutionQuery, id int64, secrets bool) (model.DBProfile, error) {
-	if err := ctx.Err(); err != nil {
-		return model.DBProfile{}, err
-	}
-	passwordColumn := "NULL"
-	if secrets {
-		passwordColumn = "d.password"
-	}
-	row := q.QueryRowContext(ctx, `
-		SELECT d.id, d.name, d.host, d.port, d.username, `+passwordColumn+`, d.database, d.ssh_connection_id,
+	row := s.db.QueryRowContext(ctx, `
+		SELECT d.id, d.name, d.host, d.port, d.username, d.password, d.database, d.ssh_connection_id,
 		       d.group_id, COALESCE(g.name, ''), COALESCE(n.note, ''), d.archived, d.created_at, d.updated_at
 		FROM db_connections d
 		LEFT JOIN groups g ON g.id = d.group_id

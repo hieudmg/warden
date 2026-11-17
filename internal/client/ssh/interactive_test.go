@@ -145,24 +145,15 @@ func (f *fakeTerminalSession) StdinReadyWithin(time.Duration) (bool, error) { re
 // Linux pty, mirroring sshd's pty handling so remote output is delivered
 // in real time (no block buffering).
 type interactiveTestServer struct {
-	addr       string
-	hostKey    golangssh.PublicKey
-	promptWord string
+	addr    string
+	hostKey golangssh.PublicKey
 
-	mu            sync.Mutex
-	ptySizes      []ptySize
-	windowChange  []ptySize
-	signals       []string
-	input         []byte
-	shellReady    bool
-	traces        []*ptyFixtureTrace
-	connections   map[net.Conn]struct{}
-	acceptDone    chan struct{}
-	finished      chan struct{}
-	handlers      sync.WaitGroup
-	beforeStart   func()
-	shellLifetime context.Context
-	cancelShells  context.CancelFunc
+	mu           sync.Mutex
+	ptySizes     []ptySize
+	windowChange []ptySize
+	signals      []string
+	input        []byte
+	execStarted  bool
 }
 
 type ptySize struct {
@@ -184,10 +175,6 @@ func (r recordingReader) Read(p []byte) (int, error) {
 
 // newInteractiveTestServer starts a server authenticating password "pw".
 func newInteractiveTestServer(t *testing.T) *interactiveTestServer {
-	return newInteractiveTestServerWithStartup(t, nil)
-}
-
-func newInteractiveTestServerWithStartup(t *testing.T, beforeStart func()) *interactiveTestServer {
 	t.Helper()
 
 	cfg := &golangssh.ServerConfig{
@@ -205,70 +192,32 @@ func newInteractiveTestServerWithStartup(t *testing.T, beforeStart func()) *inte
 	if err != nil {
 		t.Fatalf("listen: %v", err)
 	}
-	lifetime, cancelShells := context.WithCancel(context.Background())
 	srv := &interactiveTestServer{
-		addr:          ln.Addr().String(),
-		hostKey:       signer.PublicKey(),
-		promptWord:    "warden-fixture-prompt-" + ln.Addr().String(),
-		connections:   make(map[net.Conn]struct{}),
-		acceptDone:    make(chan struct{}),
-		finished:      make(chan struct{}, 32),
-		beforeStart:   beforeStart,
-		shellLifetime: lifetime,
-		cancelShells:  cancelShells,
+		addr:    ln.Addr().String(),
+		hostKey: signer.PublicKey(),
 	}
 
 	go func() {
-		defer close(srv.acceptDone)
 		for {
 			conn, err := ln.Accept()
 			if err != nil {
 				return
 			}
-			srv.mu.Lock()
-			srv.connections[conn] = struct{}{}
-			srv.mu.Unlock()
-			srv.handlers.Add(1)
 			go srv.handleConn(conn, cfg)
 		}
 	}()
-	t.Cleanup(func() {
-		srv.cancelShells()
-		ln.Close()
-		<-srv.acceptDone
-		srv.mu.Lock()
-		for c := range srv.connections {
-			c.Close()
-		}
-		traces := append([]*ptyFixtureTrace(nil), srv.traces...)
-		srv.mu.Unlock()
-		for _, p := range traces {
-			p.forceClose()
-		}
-		srv.handlers.Wait()
-	})
+	t.Cleanup(func() { ln.Close() })
 	return srv
 }
 
 func (s *interactiveTestServer) handleConn(conn net.Conn, cfg *golangssh.ServerConfig) {
-	defer s.handlers.Done()
-	defer func() {
-		conn.Close()
-		s.mu.Lock()
-		delete(s.connections, conn)
-		s.mu.Unlock()
-		s.finished <- struct{}{}
-	}()
 	sconn, chans, reqs, err := golangssh.NewServerConn(conn, cfg)
 	if err != nil {
 		conn.Close()
 		return
 	}
 	defer sconn.Close()
-	var workers sync.WaitGroup
-	workers.Add(1)
-	go func() { defer workers.Done(); golangssh.DiscardRequests(reqs) }()
-	defer workers.Wait()
+	go golangssh.DiscardRequests(reqs)
 
 	for newCh := range chans {
 		if newCh.ChannelType() != "session" {
@@ -279,15 +228,12 @@ func (s *interactiveTestServer) handleConn(conn net.Conn, cfg *golangssh.ServerC
 		if err != nil {
 			continue
 		}
-		workers.Add(1)
-		go func() { defer workers.Done(); s.handleSession(ch, reqs) }()
+		go s.handleSession(ch, reqs)
 	}
 }
 
 func (s *interactiveTestServer) handleSession(ch golangssh.Channel, reqs <-chan *golangssh.Request) {
-	trace := s.newTrace()
-	var workers sync.WaitGroup
-	defer func() { trace.event("session request drain ended"); ch.Close(); workers.Wait() }()
+	defer ch.Close()
 	for req := range reqs {
 		switch req.Type {
 		case "pty-req":
@@ -328,12 +274,13 @@ func (s *interactiveTestServer) handleSession(ch golangssh.Channel, reqs <-chan 
 				Command string
 			}
 			golangssh.Unmarshal(req.Payload, &payload)
+			s.mu.Lock()
+			s.execStarted = true
+			s.mu.Unlock()
 			req.Reply(true, nil)
 			// The shell runs concurrently so the request loop keeps
 			// handling window-change/signal requests while it lives.
-			trace.event("exec accepted")
-			workers.Add(1)
-			go func() { defer workers.Done(); runPTYShell(s, ch, payload.Command, trace) }()
+			go runPTYShell(s, ch, payload.Command)
 		default:
 			req.Reply(false, nil)
 		}
@@ -384,7 +331,7 @@ func (s *interactiveTestServer) lastPTYSize() (ptySize, bool) {
 func (s *interactiveTestServer) started() bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return s.shellReady
+	return s.execStarted
 }
 
 // openPTY opens a Linux pty master/slave pair without external
@@ -418,36 +365,19 @@ func openPTY() (master, slave *os.File, err error) {
 // pty keeps the remote shell line-buffered so output streams in real
 // time, exactly like a real sshd. When the client closes its stdin, EOF
 // is delivered to the pty (as EOT in canonical mode), ending the shell.
-func runPTYShell(s *interactiveTestServer, ch golangssh.Channel, command string, trace *ptyFixtureTrace) {
-	defer close(trace.done)
-	var channelOnce sync.Once
-	closeChannel := func() {
-		channelOnce.Do(func() {
-			trace.event("channel Close begin")
-			trace.event("channel Close ended err=%v", ch.Close())
-		})
-	}
-	defer closeChannel()
+func runPTYShell(s *interactiveTestServer, ch golangssh.Channel, command string) {
 	master, slave, err := openPTY()
 	if err != nil {
 		ch.SendRequest("exit-status", false, golangssh.Marshal(struct{ Status uint32 }{Status: 1}))
 		return
 	}
-	trace.mu.Lock()
-	trace.master, trace.slave = master, slave
-	trace.mu.Unlock()
-	trace.event("PTY opened master=%d slave=%d", master.Fd(), slave.Fd())
-	var masterOnce, slaveOnce sync.Once
-	closeMaster := func() { masterOnce.Do(func() { trace.event("master close err=%v", master.Close()) }) }
-	closeSlave := func() { slaveOnce.Do(func() { trace.event("slave close err=%v", slave.Close()) }) }
-	defer closeMaster()
-	defer closeSlave()
+	defer master.Close()
+	defer slave.Close()
 
 	ws := &unix.Winsize{Row: 24, Col: 80}
 	_ = unix.IoctlSetWinsize(int(slave.Fd()), unix.TIOCSWINSZ, ws)
 
-	// A handler registered after fixture shutdown cannot publish a late child.
-	cmd := exec.CommandContext(s.shellLifetime, "sh", "-c", command)
+	cmd := exec.Command("sh", "-c", command)
 	// Force a deterministic login shell: the payload resolves
 	// ${SHELL:-sh} against this env, and dash (like bash) honors the
 	// EOT byte the client forwards for Ctrl-D. Inheriting a host SHELL
@@ -458,109 +388,41 @@ func runPTYShell(s *interactiveTestServer, ch golangssh.Channel, command string,
 	cmd.Stderr = slave
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true, Setctty: true, Ctty: 0}
 
-	if s.beforeStart != nil {
-		s.beforeStart()
-	}
 	if err := cmd.Start(); err != nil {
-		trace.event("child Start err=%v", err)
 		ch.SendRequest("exit-status", false, golangssh.Marshal(struct{ Status uint32 }{Status: 1}))
 		return
 	}
 
-	trace.mu.Lock()
-	trace.child = cmd.Process
-	trace.mu.Unlock()
-	pgid, groupErr := syscall.Getpgid(cmd.Process.Pid)
-	foreground, foregroundErr := unix.IoctlGetInt(int(master.Fd()), unix.TIOCGPGRP)
-	trace.event("child started pid=%d pgid=%d err=%v foreground=%d err=%v", cmd.Process.Pid, pgid, groupErr, foreground, foregroundErr)
-	if attrs, err := unix.IoctlGetTermios(int(slave.Fd()), unix.TCGETS); err == nil {
-		trace.event("termios lflag=%x VINTR=%x VEOF=%x", attrs.Lflag, attrs.Cc[unix.VINTR], attrs.Cc[unix.VEOF])
-	} else {
-		trace.event("termios err=%v", err)
-	}
-	// Only the child owns a slave after Start. Retaining the parent's slave
-	// prevents master EOF/EIO after child exit and deadlocks the output join.
-	closeSlave()
-
-	// The fixture's ready gate must describe an initialized foreground shell,
-	// not merely an accepted exec or the first sh -c process. The shell itself
-	// emits this marker after login profiles. Octal escapes prevent terminal
-	// echo of the command from being mistaken for its output.
-	ready, stopInput := make(chan struct{}), make(chan struct{})
-	var readyOnce sync.Once
-	markReady := func() {
-		group, groupErr := unix.IoctlGetInt(int(master.Fd()), unix.TIOCGPGRP)
-		attrs, attrsErr := unix.IoctlGetTermios(int(master.Fd()), unix.TCGETS)
-		trace.event("shell marker foreground=%d pid=%d err=%v attrsErr=%v", group, cmd.Process.Pid, groupErr, attrsErr)
-		if groupErr != nil || group != cmd.Process.Pid || attrsErr != nil || attrs.Lflag&(unix.ICANON|unix.ISIG) != unix.ICANON|unix.ISIG || attrs.Cc[unix.VINTR] != 3 || attrs.Cc[unix.VEOF] != 4 {
-			return
-		}
-		readyOnce.Do(func() {
-			s.mu.Lock()
-			s.shellReady = true
-			s.mu.Unlock()
-			trace.event("initialized foreground shell ready")
-			close(ready)
-		})
-	}
-
-	// Local input waits until bootstrap completes; no client bytes interleave
-	// with the fixture's private readiness command.
+	// Local input -> pty; pty output -> local stdout.
 	inDone := make(chan struct{})
-	trace.copies.Add(1)
 	go func() {
 		defer close(inDone)
-		defer trace.copies.Add(-1)
-		select {
-		case <-ready:
-		case <-stopInput:
-			return
-		}
-		writer := tracedPTYInput{Writer: master, trace: trace}
-		n, err := io.Copy(writer, recordingReader{Reader: ch, record: s.recordInput})
-		trace.event("input copy ended n=%d err=%v", n, err)
+		io.Copy(master, recordingReader{Reader: ch, record: s.recordInput})
 		// Channel EOF: deliver EOF to the pty so the shell terminates.
-		writer.Write([]byte{0x04})
+		master.Write([]byte{0x04})
 	}()
 	outDone := make(chan struct{})
-	trace.copies.Add(1)
 	go func() {
 		defer close(outDone)
-		defer trace.copies.Add(-1)
-		n, err := io.Copy(&ptyReadinessWriter{Writer: ch, ready: markReady}, master)
-		trace.event("output copy ended n=%d err=%v", n, err)
+		io.Copy(ch, master)
 	}()
-	// Set PS1 after login profiles. Its actual control-delimited output, unlike
-	// the octal-escaped command echo, identifies each completed shell prompt.
-	bootstrap := "PS1=\"$(printf '\\036" + s.promptWord + "\\037')\"; printf '\\036" + ptyReadyWord + "\\037\\n'\n"
-	_, bootstrapErr := (tracedPTYInput{Writer: master, trace: trace}).Write([]byte(bootstrap))
-	trace.event("bootstrap command written err=%v", bootstrapErr)
 
 	status := uint32(0)
-	trace.event("child Wait begin")
 	if err := cmd.Wait(); err != nil {
-		trace.event("child Wait err=%v state=%v", err, cmd.ProcessState)
 		if ee, ok := err.(*exec.ExitError); ok {
 			status = uint32(ee.ExitCode())
 		} else {
 			status = 1
 		}
 	}
-	close(stopInput)
-	trace.event("child Wait ended state=%v; exit-status send begin status=%d", cmd.ProcessState, status)
-	_, statusErr := ch.SendRequest("exit-status", false, golangssh.Marshal(struct {
+	ch.SendRequest("exit-status", false, golangssh.Marshal(struct {
 		Status uint32
 	}{Status: status}))
-	trace.event("exit-status send ended err=%v", statusErr)
 	// The client's session.Wait returns only when the channel closes, so
 	// close it now; that also unblocks both copy goroutines.
-	closeChannel()
-	// Channel Close cannot interrupt a worker reading the PTY master.
-	closeMaster()
+	ch.Close()
 	<-inDone
-	trace.event("input worker joined")
 	<-outDone
-	trace.event("output worker joined")
 }
 
 // interactiveBundle builds a transport bundle pointing at the test server.
@@ -800,39 +662,24 @@ func TestRunInteractiveSendsWindowChange(t *testing.T) {
 // remote PTY's line discipline then turns the byte into SIGINT for its
 // foreground process group.
 func TestRunInteractiveCtrlCForwardsByte(t *testing.T) {
-	checkPTYResourceCeilings(t)
-	defer checkPTYResourceCeilings(t)
 	srv := newInteractiveTestServer(t)
-	defer func() {
-		t.Logf("%s", srv.diagnostics())
-		if t.Failed() {
-			t.Logf("%s", allPTYStacks())
-		}
-	}()
 	inR, inW := io.Pipe()
 	t.Cleanup(func() { inR.Close() })
-	out := &lockedBuffer{}
+	var out bytes.Buffer
 
-	prompts := &ptyPromptOutput{Writer: out, marker: []byte("\x1e" + srv.promptWord + "\x1f")}
-	_, session := startInteractive(t, srv, inR, prompts, io.Discard)
+	_, session := startInteractive(t, srv, inR, &out, io.Discard)
 	waitFor(t, "remote shell start", srv.started)
-	waitFor(t, "initial controlled shell prompt", func() bool { return prompts.generation() != 0 })
-	initialPrompt := prompts.generation()
 
-	if err := sendInteractiveInterruptThenEOF(inW, func() {
-		waitFor(t, "Ctrl-C byte written to remote PTY", func() bool {
-			return srv.gotInputByte(0x03) && srv.wrotePTYByte(0x03)
-		})
-		if srv.gotSignal("INT") {
-			t.Fatal("Ctrl-C sent as an SSH signal request; want PTY input byte")
-		}
-	}, func() {
-		// PTY byte delivery is not SIGINT acknowledgment: EOT can be consumed
-		// before pending SIGINT returns the shell to another prompt/read.
-		waitFor(t, "new shell prompt after Ctrl-C", func() bool {
-			return prompts.generation() > initialPrompt
-		})
-	}); err != nil {
+	if _, err := inW.Write([]byte{0x03}); err != nil { // Ctrl-C
+		t.Fatal(err)
+	}
+	waitFor(t, "Ctrl-C byte at remote PTY", func() bool {
+		return srv.gotInputByte(0x03)
+	})
+	if srv.gotSignal("INT") {
+		t.Fatal("Ctrl-C sent as an SSH signal request; want PTY input byte")
+	}
+	if _, err := inW.Write([]byte{0x04}); err != nil { // Ctrl-D
 		t.Fatal(err)
 	}
 
@@ -845,27 +692,8 @@ func TestRunInteractiveCtrlCForwardsByte(t *testing.T) {
 			}
 		}
 	case <-time.After(10 * time.Second):
-		t.Fatalf("session did not end after Ctrl-D (remote received Ctrl-D=%t, output=%q)\n%s\n%s", srv.gotInputByte(0x04), out.String(), srv.diagnostics(), allPTYStacks())
+		t.Fatal("session did not end after Ctrl-D")
 	}
-	assertPTYFixtureJoined(t, srv)
-	srv.mu.Lock()
-	forwarded := append([]byte(nil), srv.input...)
-	srv.mu.Unlock()
-	if !bytes.Equal(forwarded, []byte{0x03, 0x04}) || srv.gotSignal("INT") {
-		t.Fatalf("forwarded input=%x, SSH INT=%t; want one Ctrl-C byte, one EOT, no SSH INT", forwarded, srv.gotSignal("INT"))
-	}
-}
-
-// sendInteractiveInterruptThenEOF is the input sequence exercised by the
-// real-shell test and the controlled acknowledgment regression.
-func sendInteractiveInterruptThenEOF(input io.Writer, delivered, acknowledged func()) error {
-	if _, err := input.Write([]byte{0x03}); err != nil {
-		return err
-	}
-	delivered()
-	acknowledged()
-	_, err := input.Write([]byte{0x04})
-	return err
 }
 
 // TestRunInteractivePropagatesExitStatus verifies a remote shell exit

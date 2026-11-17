@@ -27,7 +27,7 @@ export function useListResource<T>(loader: (signal: AbortSignal) => Promise<T[]>
     setState((current) => ({ ...current, loading: true, error: null }))
     try {
       const data = await loader(next.signal)
-      if (!next.signal.aborted && id === requestID.current) setState({ data, loading: false, error: null })
+      if (id === requestID.current) setState({ data, loading: false, error: null })
     } catch (error) {
       if (!next.signal.aborted && id === requestID.current) {
         setState((current) => ({ ...current, loading: false, error: error as Error }))
@@ -37,7 +37,7 @@ export function useListResource<T>(loader: (signal: AbortSignal) => Promise<T[]>
 
   useEffect(() => {
     void reload()
-    return () => { requestID.current++; controller.current?.abort() }
+    return () => controller.current?.abort()
   }, [reload])
 
   return { ...state, reload }

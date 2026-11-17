@@ -1,10 +1,12 @@
 # warden-server systemd unit.
 #
 # Install: see deploy/systemd/README.md.
-# Explicit init with trusted HTTPS must complete before manual service startup.
-# Management requires passkeys and starts locked on every restart. Network
-# restrictions are defense in depth, not an authentication substitute.
-# No vault key/password/token belongs in this unit or its environment.
+# The server has no application authentication: tailnet membership is the
+# trust boundary. The listener must be loopback or a tailnet address only;
+# never bind a public interface (see README).
+#
+# Credentials (master key, passwords, private keys) are NEVER placed in
+# this file or in the environment file /etc/warden/warden-server.env.
 [Unit]
 Description=Warden Hub management server
 After=network-online.target
@@ -19,19 +21,21 @@ Group=warden
 # grants the service write access to the former.
 StateDirectory=warden
 ConfigurationDirectory=warden
-# The running service must not modify its own configuration/TLS key material.
-# Read-only wins over ConfigurationDirectory's write grant for the same path.
+# The running service must not be able to modify its own configuration
+# or key material. Read-only wins over ConfigurationDirectory's
+# read-write grant for the same path.
 ReadOnlyPaths=/etc/warden
 
-# Optional non-secret overrides only. Missing HTTPS config/identity fails closed.
+# Non-secret runtime settings only (listen address, DB path, master key
+# path, optional static UI override). The `-` prefix tolerates a missing
+# file so the unit still starts with compiled-in defaults.
 EnvironmentFile=-/etc/warden/warden-server.env
-ExecStart=/usr/local/bin/warden-server serve --config=/etc/warden/server.json
+ExecStart=/usr/local/bin/warden-server serve
 
 UMask=0077
 NoNewPrivileges=yes
 PrivateTmp=yes
 ProtectSystem=strict
-ReadWritePaths=/var/lib/warden
 ProtectHome=yes
 ProtectKernelTunables=yes
 ProtectKernelModules=yes

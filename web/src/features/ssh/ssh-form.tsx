@@ -4,7 +4,6 @@ import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { DialogFooter } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
-import { PasswordInput } from "@/components/password-input"
 import { Label } from "@/components/ui/label"
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
 import { Separator } from "@/components/ui/separator"
@@ -238,8 +237,7 @@ export function SSHForm({ connection, profiles, groups, keyPairs, pending, error
             </div>
             <div className="grid gap-1.5">
               <Label htmlFor="ssh-proxy-password">Proxy password</Label>
-              <PasswordInput
-                label="Proxy password"
+              <Input
                 id="ssh-proxy-password"
                 placeholder="Leave blank to keep the stored value"
                 value={form.proxyPassword}
@@ -321,8 +319,7 @@ export function SSHForm({ connection, profiles, groups, keyPairs, pending, error
       {form.authMode === "password" ? (
         <div className="grid gap-1.5">
           <Label htmlFor="ssh-password">Password</Label>
-          <PasswordInput
-            label="Password"
+          <Input
             id="ssh-password"
             placeholder="Leave blank to keep the stored value"
             value={form.password}

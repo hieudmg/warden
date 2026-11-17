@@ -94,8 +94,8 @@ func TestUpgradeDownloadsAndVerifies(t *testing.T) {
 	if call.executablePath != exe {
 		t.Errorf("Replace executablePath = %q, want %q", call.executablePath, exe)
 	}
-	if want := fileMode(t, exe); call.mode != want {
-		t.Errorf("Replace mode = %v, want original %v", call.mode, want)
+	if call.mode != 0o755 {
+		t.Errorf("Replace mode = %v, want 0755", call.mode)
 	}
 	if string(call.content) != payload {
 		t.Errorf("Replace content = %q, want %q", call.content, payload)
@@ -260,7 +260,7 @@ func TestUpgradeAcceptsAny2xxResponse(t *testing.T) {
 	const payload = "new warden binary"
 	dir, exe := newExecutable(t, "warden", "old warden binary")
 	// GitHub's CDN may answer with 201 rather than 200; every 2xx is success.
-	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/" + asset:
 			w.WriteHeader(http.StatusCreated)
@@ -298,7 +298,7 @@ func TestUpgradeAcceptsAny2xxResponse(t *testing.T) {
 	assertDirEntries(t, dir, "warden")
 }
 
-func TestFetchChecksumRejectsMultipleMatchingEntries(t *testing.T) {
+func TestFetchChecksumUsesFirstMatchingEntry(t *testing.T) {
 	const asset = "warden-linux-amd64"
 	const first = "1111111111111111111111111111111111111111111111111111111111111111"
 	const second = "2222222222222222222222222222222222222222222222222222222222222222"
@@ -306,8 +306,12 @@ func TestFetchChecksumRejectsMultipleMatchingEntries(t *testing.T) {
 		"/" + checksumFile: first + "  " + asset + "\n" + second + "  " + asset + "\n",
 	})
 
-	if _, err := fetchChecksum(context.Background(), srv.Client(), srv.URL+"/"+checksumFile, asset); err == nil {
-		t.Fatal("accepted ambiguous duplicate checksum entries")
+	got, err := fetchChecksum(context.Background(), srv.Client(), srv.URL+"/"+checksumFile, asset)
+	if err != nil {
+		t.Fatalf("fetchChecksum() error = %v", err)
+	}
+	if got != first {
+		t.Errorf("fetchChecksum() = %q, want first matching entry %q", got, first)
 	}
 }
 
@@ -589,7 +593,7 @@ func TestWindowsHelperDoesNotInheritParentConsole(t *testing.T) {
 	}
 }
 
-func TestWindowsHelperWaitsAndRetriesReplace(t *testing.T) {
+func TestWindowsHelperWaitsAndRetriesMove(t *testing.T) {
 	program := windowsHelperProgram
 	for _, want := range []string{
 		"$env:" + windowsHelperSourceEnv,
@@ -597,13 +601,13 @@ func TestWindowsHelperWaitsAndRetriesReplace(t *testing.T) {
 		"$env:" + windowsHelperParentPIDEnv,
 		"WaitForExit",
 		"while (",
-		"[IO.File]::Replace($source, $target, [System.Management.Automation.Language.NullString]::Value)",
+		"Move-Item -LiteralPath",
 	} {
 		if !strings.Contains(program, want) {
 			t.Errorf("helper program missing %q", want)
 		}
 	}
-	for _, unwanted := range []string{"cmd.exe", "del /f", "del /q", "ping -n", "Move-Item"} {
+	for _, unwanted := range []string{"cmd.exe", "del /f", "del /q", "ping -n"} {
 		if strings.Contains(program, unwanted) {
 			t.Errorf("helper program still contains legacy shell helper text %q", unwanted)
 		}
@@ -654,7 +658,7 @@ func (r *requestRecorder) list() []string {
 func releaseServer(t *testing.T, files map[string]string) (*httptest.Server, *requestRecorder) {
 	t.Helper()
 	requests := &requestRecorder{}
-	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		requests.add(r.URL.Path)
 		body, ok := files[r.URL.Path]
 		if !ok {
