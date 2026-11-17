@@ -60,6 +60,33 @@ class WorkflowContracts(unittest.TestCase):
                             self.assertEqual(s['with']['node-version'], '26.12.1')
                             self.assertEqual(s['with']['package-manager-cache'], 'false')
 
+    def test_pr_caches_dependencies_and_compilation_without_skipping_checks(self):
+        linux = workflow('test.yml')['jobs']['linux']
+        node = next(s for s in linux['steps'] if s.get('uses', '').startswith('actions/setup-node@'))
+        go = next(s for s in linux['steps'] if s.get('uses', '').startswith('actions/setup-go@'))
+        self.assertEqual(node['with'].get('cache'), 'npm')
+        self.assertEqual(node['with'].get('cache-dependency-path'), 'web/package-lock.json')
+        self.assertEqual(go['with'].get('cache'), 'true')
+        self.assertEqual(go['with'].get('cache-dependency-path', '').splitlines(), ['go.mod', 'go.sum'])
+        for s in linux['steps']:
+            self.assertNotIn('if', s)  # Cache hits must never bypass installs, tests or audits.
+        commands = '\n'.join(s.get('run', '') for s in linux['steps'])
+        self.assertIn('npm --prefix web ci --include=dev', commands)
+        self.assertIn('go test ./... -count=1', commands)
+        self.assertIn('go test -race ./... -count=1', commands)
+        self.assertIn('-count=25', commands)
+
+    def test_release_build_does_not_restore_pr_caches(self):
+        build = workflow('release.yml')['jobs']['build']
+        for s in build['steps']:
+            action = s.get('uses', '')
+            self.assertFalse(action.startswith('actions/cache'))
+            if action.startswith('actions/setup-node@'):
+                self.assertEqual(s['with']['package-manager-cache'], 'false')
+                self.assertNotIn('cache', s['with'])
+            if action.startswith('actions/setup-go@'):
+                self.assertEqual(s['with']['cache'], 'false')
+
     def test_unprivileged_checks_cover_web_go_race_stress_installers_and_audits(self):
         w = workflow('test.yml')
         self.assertEqual(set(w['on']), {'pull_request', 'workflow_call'})
