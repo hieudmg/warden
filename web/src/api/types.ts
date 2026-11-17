@@ -50,6 +50,37 @@ export interface DBConnection {
   updated_at: string
 }
 
+export type HTTPAuthType = "bearer" | "x_api_key" | "basic"
+
+/** Metadata only: even the Basic username is encrypted and never returned. */
+export interface HTTPConnection {
+  id: number
+  name: string
+  origin: string
+  auth_type: HTTPAuthType
+  note: string
+  group_id: number
+  group_name?: string
+  has_credential: boolean
+  has_username: boolean
+  has_password: boolean
+  archived: boolean
+  created_at: string
+  updated_at: string
+}
+
+/** Omitted secrets preserve on same-mode edits; auth changes clear old secrets. */
+export interface HTTPConnectionRequest {
+  name: string
+  origin: string
+  auth_type: HTTPAuthType
+  note: string
+  group_id: number
+  credential?: string
+  username?: string
+  password?: string
+}
+
 export interface Project {
   id: number
   name: string
@@ -60,6 +91,7 @@ export interface Group {
   name: string
   ssh_connection_count: number
   db_connection_count: number
+  http_connection_count: number
   created_at: string
   updated_at: string
 }
@@ -118,6 +150,11 @@ export interface DependentRef {
 export interface DependentsResponse {
   ssh: DependentRef[]
   db: DependentRef[]
+}
+
+/** Only groups can be referenced by HTTP profiles. */
+export interface GroupDependentsResponse extends DependentsResponse {
+  http: DependentRef[]
 }
 
 // Write payloads. Secret fields are string | null: null means "not

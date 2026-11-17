@@ -1,7 +1,9 @@
 # CLI guide
 
-The client talks to the configured Warden server. Transport work runs locally
-after the client fetches a resolved bundle from the server.
+The client talks to the configured Warden server. SSH/database transport work
+runs locally after the client fetches a resolved bundle from the server. HTTP
+requests run on the server, which injects saved credentials without returning
+them to the client.
 
 ## Commands
 
@@ -9,6 +11,7 @@ after the client fetches a resolved bundle from the server.
 warden [-n|--non-interactive|-i|--interactive] ssh <connection> <command>
 warden [-n|--non-interactive|-i|--interactive] db <connection> <sql>
 warden [-n|--non-interactive|-i|--interactive] db <connection>/<database> <sql>
+warden http [--content-type TYPE] METHOD CONNECTION PATH [BODY]
 warden [-n|--non-interactive|-i|--interactive] config search <query>
 warden report create <project> --title <title> --summary <summary> --agent-model <model>
 warden [-n|--non-interactive|-i|--interactive] xssh [connection]
@@ -34,12 +37,51 @@ mode, results retain the fixed-width CLI table and `Query OK` status.
 
 ## Configuration search
 
-`warden config search` searches redacted SSH and database profiles by words in
-name and host. Database profiles also search configured database names.
-Matching tolerates bounded typos, retains partial matches, and ranks SSH and
-DB sections independently. Interactive output uses a tree; non-interactive
-output keeps the `SSH` and `DB` sections and renders each result as a bullet
-list.
+`warden config search` searches redacted SSH, database and HTTP profiles by
+words in name and host/origin. Database profiles also search configured database
+names. Matching tolerates bounded typos, retains partial matches, and ranks
+sections independently. Interactive output uses a tree; non-interactive output
+keeps the `SSH`, `DB` and `HTTP` sections and renders each result as a bullet
+list. HTTP notes are display-only, not matched; saved credentials are neither
+fetched nor searched.
+
+## HTTP requests
+
+Create a named profile in the Warden Hub **HTTP** tab (`/http`). Its origin is
+`http://host[:port]` or `https://host[:port]`, without credentials, path (even a
+trailing slash), query or fragment. Select Bearer, X-API-Key or Basic auth. Basic
+username is secret too; management reads show only presence indicators.
+
+```bash
+warden http GET service '/v1/items?limit=10'
+warden http POST service /v1/items '{"name":"item"}'
+warden http --content-type text/plain PUT service /message 'hello'
+```
+
+- METHOD is uppercase GET, HEAD, POST, PUT, PATCH, DELETE or OPTIONS.
+- PATH starts with `/` and may include a query, but cannot be absolute,
+  scheme-relative (`//`), contain a fragment/backslash, or override the origin.
+- Quote BODY as one argument. If supplied (even empty), its default content type
+  is `application/json`. Put `--content-type` before METHOD to override it.
+  There is no stdin/file-body option.
+- The server injects only the chosen stored authentication header. No incoming
+  browser cookies or authorization headers are forwarded. Redirects are returned,
+  never followed. HTTPS verifies certificates; HTTP is permitted but unencrypted
+  and vulnerable to interception or modification of credentials and data.
+- The destination is contacted from the server, including configured private or
+  loopback hosts. This is not an arbitrary URL override facility.
+- Request bodies are limited to 1 MiB, response bodies to 2 MiB and server
+  operations to 15 seconds. Ctrl-C cancels the request.
+- The upstream body goes unchanged to stdout, without an added newline, even on
+  non-2xx responses. Non-2xx status goes to stderr and exits 1. Operational errors
+  also exit 1; invalid CLI usage exits 2. Redirects therefore exit 1 without being
+  followed. Upstream response headers are not exposed.
+- Incomplete profiles may be saved but cannot execute until their credentials
+  are set. Archive disables execution without deleting the profile.
+
+`warden http --help` works offline without client configuration or network.
+HTTP response bodies are not sanitized: an upstream may echo sensitive data, so
+handle output as untrusted and potentially confidential.
 
 ## Database targets
 
@@ -127,4 +169,9 @@ Set `WARDEN_REPO` or `WARDEN_RELEASE_BASE_URL` to upgrade from a release source
 other than the default `hieudmg/warden` GitHub releases. The server has its own
 `warden-server upgrade` command; see [Deployment](deployment.md).
 
-Archived SSH and database profiles remain available for management, but are omitted from `warden config search` and the interactive `warden xssh` picker. Attempts to connect to an archived profile (including an explicitly named `xssh` profile or an archived jump/tunnel host) are rejected by the server as `404 connection not found`.
+Archived SSH, database and HTTP profiles remain available for management but
+are omitted from `warden config search`. Archived SSH profiles are also omitted
+from the interactive `warden xssh` picker. Attempts to connect to archived
+profiles (including an explicitly named `xssh` profile or an archived jump/tunnel
+host) receive generic not-found behavior; HTTP CLI resolution excludes archived
+profiles and the server refuses their execution.

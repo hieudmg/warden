@@ -66,6 +66,9 @@ type statusWriter struct {
 	wroteHeader bool
 }
 
+// Unwrap lets ResponseController apply per-operation deadlines through middleware.
+func (w *statusWriter) Unwrap() http.ResponseWriter { return w.ResponseWriter }
+
 func (w *statusWriter) WriteHeader(code int) {
 	w.wroteHeader = true
 	w.ResponseWriter.WriteHeader(code)

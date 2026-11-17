@@ -11,6 +11,7 @@ function group(id: number, name: string): Group {
     name,
     ssh_connection_count: 0,
     db_connection_count: 0,
+    http_connection_count: 0,
     created_at: "2026-08-24T00:00:00Z",
     updated_at: "2026-08-24T00:00:00Z",
   }

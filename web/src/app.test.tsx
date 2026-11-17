@@ -10,6 +10,7 @@ vi.mock("@/api/client", () => ({
   api: {
     listSSH: vi.fn(),
     listDB: vi.fn(),
+    listHTTP: vi.fn(),
     listGroups: vi.fn(),
     listProjects: vi.fn(),
     listKeyPairs: vi.fn(),
@@ -89,6 +90,7 @@ function group(id: number, name: string): Group {
     name,
     ssh_connection_count: 0,
     db_connection_count: 0,
+    http_connection_count: 0,
     created_at: "2026-08-24T00:00:00Z",
     updated_at: "2026-08-24T00:00:00Z",
   }
@@ -110,6 +112,7 @@ beforeEach(() => {
   window.history.replaceState({}, "", "/")
   mockedAPI.listSSH.mockReset().mockResolvedValue([sshConnection(1)])
   mockedAPI.listDB.mockReset().mockResolvedValue([dbConnection(1)])
+  mockedAPI.listHTTP.mockReset().mockResolvedValue([])
   mockedAPI.listGroups.mockReset().mockResolvedValue([group(1, "prod")])
   mockedAPI.listProjects.mockReset().mockResolvedValue([project(1)])
   mockedAPI.listKeyPairs.mockReset().mockResolvedValue([keyPair(1)])
@@ -194,11 +197,12 @@ describe("App", () => {
     expect(projectsTab).toHaveAttribute("aria-selected", "false")
   })
 
-  test("loads all five list resources concurrently on mount", async () => {
+  test("loads all six list resources concurrently on mount", async () => {
     render(<App />)
 
     expect(mockedAPI.listSSH).toHaveBeenCalledTimes(1)
     expect(mockedAPI.listDB).toHaveBeenCalledTimes(1)
+    expect(mockedAPI.listHTTP).toHaveBeenCalledTimes(1)
     expect(mockedAPI.listGroups).toHaveBeenCalledTimes(1)
     expect(mockedAPI.listProjects).toHaveBeenCalledTimes(1)
     expect(mockedAPI.listKeyPairs).toHaveBeenCalledTimes(1)
@@ -250,8 +254,12 @@ describe("App", () => {
     expect(sshTab).toHaveAttribute("aria-selected", "false")
 
     await user.keyboard("{ArrowRight}")
-    expect(groupsTab).toHaveAttribute("aria-selected", "true")
+    expect(screen.getByRole("tab", { name: "HTTP" })).toHaveAttribute("aria-selected", "true")
     expect(dbTab).toHaveAttribute("aria-selected", "false")
+
+    await user.keyboard("{ArrowRight}")
+    expect(groupsTab).toHaveAttribute("aria-selected", "true")
+    expect(screen.getByRole("tab", { name: "HTTP" })).toHaveAttribute("aria-selected", "false")
 
     await user.keyboard("{ArrowRight}")
     expect(keyPairsTab).toHaveAttribute("aria-selected", "true")
@@ -276,7 +284,7 @@ describe("App", () => {
 
     await user.click(screen.getByRole("tab", { name: "Groups" }))
     expect(await screen.findByText("prod")).toBeInTheDocument()
-    expect(screen.getByText("SSH 0 · DB 0")).toBeInTheDocument()
+    expect(screen.getByText("SSH 0 · DB 0 · HTTP 0")).toBeInTheDocument()
   })
 
   test("renders key-pair rows when the Key Pairs tab is active", async () => {
@@ -399,6 +407,7 @@ describe("Data transfer", () => {
       mockedAPI.listGroups,
       mockedAPI.listProjects,
       mockedAPI.listKeyPairs,
+      mockedAPI.listHTTP,
     ]) {
       await waitFor(() => expect(loader).toHaveBeenCalledTimes(2))
     }
@@ -430,6 +439,7 @@ describe("Data transfer", () => {
       mockedAPI.listGroups,
       mockedAPI.listProjects,
       mockedAPI.listKeyPairs,
+      mockedAPI.listHTTP,
     ]) {
       expect(loader).toHaveBeenCalledTimes(1)
     }

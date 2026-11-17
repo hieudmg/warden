@@ -1,6 +1,6 @@
 import { useRef, useState, type FormEvent } from "react"
 import { api } from "@/api/client"
-import type { DependentsResponse, Group } from "@/api/types"
+import type { GroupDependentsResponse, Group } from "@/api/types"
 import { Button } from "@/components/ui/button"
 import {
   Dialog,
@@ -32,7 +32,7 @@ type FormDialogState = { mode: "create" } | { mode: "edit"; group: Group }
 
 interface DeleteDialogState {
   target: Group
-  dependents: DependentsResponse | null
+  dependents: GroupDependentsResponse | null
   loading: boolean
   error: string | null
 }
@@ -134,7 +134,7 @@ export function GroupsTab({ resource, notify }: GroupsTabProps) {
   const dependents = deleteDialog?.dependents
   const hasDependents =
     dependents !== null && dependents !== undefined &&
-    (dependents.ssh.length > 0 || dependents.db.length > 0)
+    (dependents.ssh.length > 0 || dependents.db.length > 0 || dependents.http.length > 0)
 
   const needle = query.trim().toLowerCase()
   const filtered =
@@ -191,7 +191,7 @@ export function GroupsTab({ resource, notify }: GroupsTabProps) {
                   <TableRow key={group.id}>
                     <TableCell className="font-medium">{group.name}</TableCell>
                     <TableCell>
-                      SSH {group.ssh_connection_count} · DB {group.db_connection_count}
+                      SSH {group.ssh_connection_count} · DB {group.db_connection_count} · HTTP {group.http_connection_count}
                     </TableCell>
                     <TableCell>{formatTimestamp(group.created_at)}</TableCell>
                     <TableCell>{formatTimestamp(group.updated_at)}</TableCell>
@@ -242,7 +242,7 @@ export function GroupsTab({ resource, notify }: GroupsTabProps) {
               {formDialog?.mode === "edit" ? `Edit ${formDialog.group.name}` : "New group"}
             </DialogTitle>
             <DialogDescription>
-              Groups are shared labels for SSH and database connections.
+              Groups are shared labels for SSH, database and HTTP connections.
             </DialogDescription>
           </DialogHeader>
           <form onSubmit={event => void handleSubmit(event)} autoComplete="off" className="grid gap-3">
@@ -314,6 +314,9 @@ export function GroupsTab({ resource, notify }: GroupsTabProps) {
                     ))}
                     {dependents!.db.map(dependent => (
                       <li key={`db-${dependent.id}`}>{dependent.name} (Database)</li>
+                    ))}
+                    {dependents!.http.map(dependent => (
+                      <li key={`http-${dependent.id}`}>{dependent.name} (HTTP)</li>
                     ))}
                   </ul>
                 </div>

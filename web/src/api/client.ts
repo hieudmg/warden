@@ -4,6 +4,9 @@ import type {
   DependentsResponse,
   Group,
   GroupRequest,
+  GroupDependentsResponse,
+  HTTPConnection,
+  HTTPConnectionRequest,
   KeyPairRequest,
   KeyPairSummary,
   KeyPairVault,
@@ -141,6 +144,18 @@ export const api = {
   dbDependents: (id: number): Promise<DependentsResponse> =>
     request<DependentsResponse>(`/api/v1/db-connections/${id}/dependents`) as Promise<DependentsResponse>,
 
+  // HTTP connections: management responses never contain stored credentials.
+  listHTTP: (signal?: AbortSignal): Promise<HTTPConnection[]> =>
+    request<HTTPConnection[]>("/api/v1/http-connections", { signal }) as Promise<HTTPConnection[]>,
+  createHTTP: (payload: HTTPConnectionRequest): Promise<HTTPConnection> =>
+    request<HTTPConnection>("/api/v1/http-connections", { method: "POST", json: payload }) as Promise<HTTPConnection>,
+  updateHTTP: (id: number, payload: HTTPConnectionRequest): Promise<HTTPConnection> =>
+    request<HTTPConnection>(`/api/v1/http-connections/${id}`, { method: "PUT", json: payload }) as Promise<HTTPConnection>,
+  archiveHTTP: (id: number, archived: boolean): Promise<void> =>
+    request<void>(`/api/v1/http-connections/${id}/archive`, { method: "PUT", json: { archived } }).then(() => undefined),
+  deleteHTTP: (id: number): Promise<void> =>
+    request<void>(`/api/v1/http-connections/${id}`, { method: "DELETE" }).then(() => undefined),
+
   // Connection groups
   listGroups: (signal?: AbortSignal): Promise<Group[]> =>
     request<Group[]>("/api/v1/groups", { signal }) as Promise<Group[]>,
@@ -152,8 +167,8 @@ export const api = {
     request<Group>(`/api/v1/groups/${id}`, { method: "PUT", json: payload }) as Promise<Group>,
   deleteGroup: (id: number): Promise<void> =>
     request<void>(`/api/v1/groups/${id}`, { method: "DELETE" }).then(() => undefined),
-  groupDependents: (id: number): Promise<DependentsResponse> =>
-    request<DependentsResponse>(`/api/v1/groups/${id}/dependents`) as Promise<DependentsResponse>,
+  groupDependents: (id: number): Promise<GroupDependentsResponse> =>
+    request<GroupDependentsResponse>(`/api/v1/groups/${id}/dependents`) as Promise<GroupDependentsResponse>,
 
   // Key pairs
   listKeyPairs: (signal?: AbortSignal): Promise<KeyPairSummary[]> =>

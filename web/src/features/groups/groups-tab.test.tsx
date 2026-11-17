@@ -36,6 +36,7 @@ function group(id: number, name: string, overrides: Partial<Group> = {}): Group 
     name,
     ssh_connection_count: 0,
     db_connection_count: 0,
+    http_connection_count: 0,
     created_at: "2026-08-24T00:00:00Z",
     updated_at: "2026-08-24T00:00:00Z",
     ...overrides,
@@ -63,6 +64,22 @@ beforeEach(() => {
 })
 
 describe("GroupsTab", () => {
+  test("counts HTTP profiles including archived and warns before ungrouping them", async () => {
+    const user = userEvent.setup()
+    mockedAPI.groupDependents.mockResolvedValue({ ssh: [], db: [], http: [{ id: 1, name: "api-service" }, { id: 2, name: "archived-api" }] })
+    mockedAPI.deleteGroup.mockResolvedValue(undefined)
+    const reload = vi.fn().mockResolvedValue(undefined)
+    render(<GroupsTab resource={resource({ data: [group(1, "prod", { http_connection_count: 2 })], reload })} notify={notify} />)
+    expect(screen.getByText("SSH 0 · DB 0 · HTTP 2")).toBeInTheDocument()
+    await user.click(screen.getByRole("button", { name: "Delete prod" }))
+    const dialog = await screen.findByRole("dialog")
+    expect(await within(dialog).findByText("api-service (HTTP)")).toBeInTheDocument()
+    expect(within(dialog).getByText("archived-api (HTTP)")).toBeInTheDocument()
+    expect(within(dialog).getByText(/will become ungrouped/)).toBeInTheDocument()
+    expect(mockedAPI.deleteGroup).not.toHaveBeenCalled()
+    await user.click(within(dialog).getByRole("button", { name: "Delete" }))
+    await waitFor(() => expect(reload).toHaveBeenCalledOnce())
+  })
   test("shows a loading state while the resource loads", () => {
     render(<GroupsTab resource={resource({ loading: true })} notify={notify} />)
     expect(screen.getByText("Loading…")).toBeInTheDocument()
@@ -98,7 +115,7 @@ describe("GroupsTab", () => {
     )
 
     expect(screen.getByText("prod")).toBeInTheDocument()
-    expect(screen.getByText("SSH 2 · DB 1")).toBeInTheDocument()
+    expect(screen.getByText("SSH 2 · DB 1 · HTTP 0")).toBeInTheDocument()
     expect(screen.getByText("staging")).toBeInTheDocument()
 
     await user.type(screen.getByLabelText("Search groups"), "STAG")
@@ -169,6 +186,7 @@ describe("GroupsTab", () => {
     mockedAPI.groupDependents.mockResolvedValue({
       ssh: [{ id: 2, name: "jump-a" }],
       db: [{ id: 3, name: "appdb" }],
+      http: [],
     })
     mockedAPI.deleteGroup.mockResolvedValue(undefined)
     render(<GroupsTab resource={resource({ data: [group(1, "prod")], reload })} notify={notify} />)
@@ -190,7 +208,7 @@ describe("GroupsTab", () => {
   test("confirms deletion with no dependents", async () => {
     const user = userEvent.setup()
     const reload = vi.fn().mockResolvedValue(undefined)
-    mockedAPI.groupDependents.mockResolvedValue({ ssh: [], db: [] })
+    mockedAPI.groupDependents.mockResolvedValue({ ssh: [], db: [], http: [] })
     mockedAPI.deleteGroup.mockResolvedValue(undefined)
     render(<GroupsTab resource={resource({ data: [group(1, "prod")], reload })} notify={notify} />)
 

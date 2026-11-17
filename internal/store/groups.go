@@ -24,12 +24,13 @@ func normalizeGroupName(name string) (string, error) {
 	return name, nil
 }
 
-// groupCountsSQL is the shared count subquery pair used by every group read:
-// one aggregate query per table, never a three-way join, so counts cannot
+// groupCountsSQL is shared by every group read: one aggregate query per
+// profile table, never a multi-table join, so counts cannot
 // multiply each other.
 const groupCountsSQL = `
        (SELECT COUNT(*) FROM ssh_connections ssh WHERE ssh.group_id = g.id),
-       (SELECT COUNT(*) FROM db_connections d WHERE d.group_id = g.id)`
+       (SELECT COUNT(*) FROM db_connections d WHERE d.group_id = g.id),
+       (SELECT COUNT(*) FROM http_connections h WHERE h.group_id = g.id)`
 
 // CreateGroup inserts a new group with a trimmed, validated name. The
 // returned group carries its id, timestamps, and zero connection counts.
@@ -75,7 +76,7 @@ func (s *Store) GetGroup(ctx context.Context, id int64) (model.Group, error) {
 
 	var g model.Group
 	var createdAt, updatedAt string
-	err := row.Scan(&g.ID, &g.Name, &g.SSHConnectionCount, &g.DBConnectionCount,
+	err := row.Scan(&g.ID, &g.Name, &g.SSHConnectionCount, &g.DBConnectionCount, &g.HTTPConnectionCount,
 		&createdAt, &updatedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return model.Group{}, ErrNotFound
@@ -92,8 +93,7 @@ func (s *Store) GetGroup(ctx context.Context, id int64) (model.Group, error) {
 	return g, nil
 }
 
-// ListGroups returns all groups ordered by name, each with its SSH and DB
-// connection counts.
+// ListGroups returns all groups ordered by name, each with its connection counts.
 func (s *Store) ListGroups(ctx context.Context) ([]model.Group, error) {
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT g.id, g.name, `+groupCountsSQL+`,
@@ -109,7 +109,7 @@ func (s *Store) ListGroups(ctx context.Context) ([]model.Group, error) {
 	for rows.Next() {
 		var g model.Group
 		var createdAt, updatedAt string
-		if err := rows.Scan(&g.ID, &g.Name, &g.SSHConnectionCount, &g.DBConnectionCount,
+		if err := rows.Scan(&g.ID, &g.Name, &g.SSHConnectionCount, &g.DBConnectionCount, &g.HTTPConnectionCount,
 			&createdAt, &updatedAt); err != nil {
 			return nil, fmt.Errorf("scan group: %w", err)
 		}
@@ -154,7 +154,7 @@ func (s *Store) UpdateGroup(ctx context.Context, g model.Group) error {
 	return nil
 }
 
-// DeleteGroup deletes a group after clearing every SSH/DB reference to it.
+// DeleteGroup deletes a group after clearing every SSH/DB/HTTP reference to it.
 // The clears and the delete are one transaction, so deletion is never
 // blocked by profiles referencing the group and no profile ever retains a
 // deleted group's id.
@@ -174,6 +174,9 @@ func (s *Store) DeleteGroup(ctx context.Context, id int64) error {
 		return fmt.Errorf("clear db group references: %w", err)
 	}
 
+	if _, err := tx.ExecContext(ctx, "UPDATE http_connections SET group_id=0 WHERE group_id=?", id); err != nil {
+		return fmt.Errorf("clear http group references: %w", err)
+	}
 	res, err := tx.ExecContext(ctx, "DELETE FROM groups WHERE id=?", id)
 	if err != nil {
 		return fmt.Errorf("delete group: %w", err)
@@ -235,6 +238,17 @@ func (s *Store) GroupDependents(ctx context.Context, id int64) (model.GroupDepen
 	if err := dbRows.Err(); err != nil {
 		return deps, err
 	}
-
-	return deps, nil
+	httpRows, err := s.db.QueryContext(ctx, "SELECT id, name FROM http_connections WHERE group_id=?", id)
+	if err != nil {
+		return deps, err
+	}
+	defer httpRows.Close()
+	for httpRows.Next() {
+		var ref model.DependentRef
+		if err := httpRows.Scan(&ref.ID, &ref.Name); err != nil {
+			return deps, err
+		}
+		deps.HTTP = append(deps.HTTP, ref)
+	}
+	return deps, httpRows.Err()
 }

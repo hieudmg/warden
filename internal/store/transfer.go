@@ -24,6 +24,7 @@ var managedTransferTables = []string{
 	"key_pairs",
 	"ssh_connections",
 	"db_connections",
+	"http_connections",
 	"projects",
 	"reports",
 	"connection_notes",
@@ -69,6 +70,9 @@ func (s *Store) ExportData(ctx context.Context) (model.DataBundle, error) {
 		return model.DataBundle{}, err
 	}
 	if bundle.DBConnections, err = s.exportDBConnections(ctx, tx); err != nil {
+		return model.DataBundle{}, err
+	}
+	if bundle.HTTPConnections, err = s.exportHTTPConnections(ctx, tx); err != nil {
 		return model.DataBundle{}, err
 	}
 	if bundle.Projects, err = exportProjects(ctx, tx); err != nil {
@@ -373,6 +377,9 @@ func (s *Store) ImportData(ctx context.Context, bundle model.DataBundle) error {
 	if err := s.insertDBConnections(ctx, tx, bundle.DBConnections); err != nil {
 		return err
 	}
+	if err := s.insertHTTPConnections(ctx, tx, bundle.HTTPConnections); err != nil {
+		return err
+	}
 	if err := insertProjects(ctx, tx, bundle.Projects); err != nil {
 		return err
 	}
@@ -529,6 +536,10 @@ func validateDataBundle(b model.DataBundle) error {
 		if err := validateTransferTimestamps("db connection", c.CreatedAt, c.UpdatedAt); err != nil {
 			return err
 		}
+	}
+
+	if err := validateHTTPTransfer(b.HTTPConnections); err != nil {
+		return err
 	}
 
 	projectIDs := make(map[int64]struct{}, len(b.Projects))
