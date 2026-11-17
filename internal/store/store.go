@@ -35,17 +35,11 @@ const (
 	timeLayout = time.RFC3339Nano
 )
 
-// Store owns SQLite and a field codec interface. Normal serve supplies the
-// revocable runtime Vault, never a permanently copied key.
+// Store owns the SQLite database and the master-key codec used to encrypt
+// secret fields. The server is the sole owner of both.
 type Store struct {
-	db           *sql.DB
-	codec        fieldCodec
-	runtimeLease *os.File
-}
-
-type fieldCodec interface {
-	Encrypt([]byte, []byte) ([]byte, error)
-	Decrypt([]byte, []byte) ([]byte, error)
+	db    *sql.DB
+	codec crypto.Codec
 }
 
 // Open opens (creating if needed) the SQLite database at path, applies
@@ -53,9 +47,9 @@ type fieldCodec interface {
 // FULL synchronous mode. Parent directories are created with mode 0700 and
 // the database file is tightened to 0600.
 //
-// This key-taking constructor is retained for existing isolated store tests and
-// utilities. Normal serve MUST use OpenInitialized; init publishes identity only.
-// Neither production startup path calls this constructor or loads a disk key.
+// key is the 32-byte AES-256 master key used to encrypt/decrypt secret
+// fields. This signature intentionally deviates from the task brief's
+// `Open(ctx, path)` because encryption of stored secrets requires the key.
 func Open(ctx context.Context, path string, key [32]byte) (*Store, error) {
 	if strings.TrimSpace(path) == "" {
 		return nil, errors.New("store: db path must not be empty")
@@ -87,13 +81,7 @@ func Open(ctx context.Context, path string, key [32]byte) (*Store, error) {
 
 // Close closes the underlying database.
 func (s *Store) Close() error {
-	err := s.db.Close()
-	if s.runtimeLease != nil {
-		if e := s.runtimeLease.Close(); err == nil {
-			err = e
-		}
-	}
-	return err
+	return s.db.Close()
 }
 
 // sqliteDSN builds a modernc.org/sqlite DSN that applies foreign keys, WAL

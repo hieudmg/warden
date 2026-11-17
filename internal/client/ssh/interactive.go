@@ -128,15 +128,18 @@ func runInteractive(ctx context.Context, bundle model.SSHBundle, term terminal.S
 	if promptTerminal != nil {
 		promptTerminal.prompting = true
 	}
-	graph, err := DialGraph(ctx, bundle, opts)
+	client, clients, err := DialChain(ctx, bundle, opts)
 	if promptTerminal != nil {
 		promptTerminal.prompting = false
 	}
 	if err != nil {
 		return err
 	}
-	defer graph.Close()
-	client := graph.Target()
+	defer func() {
+		for _, c := range clients {
+			c.Close()
+		}
+	}()
 
 	reportProgress(opts.Progress, "Opening interactive session...")
 	session, err := client.NewSession()
@@ -160,6 +163,7 @@ func runInteractive(ctx context.Context, bundle model.SSHBundle, term terminal.S
 	if err := session.RequestPty(termType, h, w, golangssh.TerminalModes{}); err != nil {
 		return fmt.Errorf("request pty: %w", err)
 	}
+	forwardAgent(client, session)
 
 	stdinPipe, err := session.StdinPipe()
 	if err != nil {

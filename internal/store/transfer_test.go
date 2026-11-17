@@ -380,7 +380,7 @@ func TestImportDataRoundTripsAcrossMasterKeys(t *testing.T) {
 		t.Fatalf("ExportData: %v", err)
 	}
 
-	if transferSourceKey == transferDestKey {
+	if src.codec.Key == transferDestKey {
 		t.Fatal("source and destination master keys must differ for this test")
 	}
 	dst := newStoreWithKey(t, transferDestKey)

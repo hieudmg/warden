@@ -15,28 +15,9 @@
 //
 // Usage: node scripts/verify-dist.mjs <dist-root>
 
-import { readFile, stat, writeFile } from "node:fs/promises"
+import { readFile, stat } from "node:fs/promises"
 import path from "node:path"
 import { fileURLToPath } from "node:url"
-
-export function setupAssetNames(manifest) {
-  const files = new Set(["setup.html"])
-  const visited = new Set()
-  const visit = (key) => {
-    if (visited.has(key)) return
-    visited.add(key)
-    const entry = manifest[key]
-    if (!entry) throw new Error(`setup dependency missing: ${key}`)
-    if (key !== "setup.html" && entry.isEntry) throw new Error("setup imports management entry")
-    for (const file of [entry.file, ...(entry.css ?? []), ...(entry.assets ?? [])]) {
-      if (!file || file.startsWith("/") || file.split("/").includes("..")) throw new Error("invalid setup asset")
-      files.add(file)
-    }
-    for (const imported of [...(entry.imports ?? []), ...(entry.dynamicImports ?? [])]) visit(imported)
-  }
-  visit("setup.html")
-  return [...files].sort()
-}
 
 export async function verifyDist(root) {
   const manifestPath = path.join(root, ".vite", "manifest.json")
@@ -93,11 +74,6 @@ export async function verifyDist(root) {
   }
 
   await rejectExternalReferences(root, cssFiles)
-  if (manifest["setup.html"]) {
-    for (const file of setupAssetNames(manifest)) await assertFileExists(root, file)
-    const html = await readFile(path.join(root, "setup.html"), "utf8")
-    for (const ref of extractHtmlReferences(html)) assertLocalReference("setup.html", ref)
-  }
 }
 
 async function assertFileExists(root, file) {
@@ -160,11 +136,7 @@ if (isEntry) {
     process.exit(2)
   }
   verifyDist(root).then(
-    async () => {
-      const manifest = JSON.parse(await readFile(path.join(root, ".vite/manifest.json"), "utf8"))
-      if (manifest["setup.html"]) await writeFile(path.join(root, "setup-assets.json"), JSON.stringify(setupAssetNames(manifest)))
-      console.log(`verify-dist: ok (${root})`)
-    },
+    () => console.log(`verify-dist: ok (${root})`),
     (error) => {
       console.error(`verify-dist: ${error.message}`)
       process.exit(1)

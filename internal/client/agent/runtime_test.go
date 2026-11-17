@@ -3,7 +3,6 @@ package agent
 import (
 	"bytes"
 	"context"
-	"crypto/tls"
 	"errors"
 	"net"
 	"os"
@@ -18,13 +17,9 @@ func TestRuntimeToken(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if _, err := runtime.Listen(); err != nil {
-		t.Fatal(err)
-	}
-	defer runtime.Cleanup()
-	got, err := runtime.ReadToken()
+	got, err := runtime.CreateToken()
 	if err != nil {
-		t.Fatalf("ReadToken: %v", err)
+		t.Fatalf("CreateToken: %v", err)
 	}
 	if len(got) != tokenBytes {
 		t.Fatalf("token length = %d, want %d", len(got), tokenBytes)
@@ -36,8 +31,8 @@ func TestRuntimeToken(t *testing.T) {
 	if !bytes.Equal(read, got) {
 		t.Fatalf("ReadToken() = %x, want %x", read, got)
 	}
-	if _, err := runtime.Listen(); err != nil {
-		t.Fatalf("idempotent Listen: %v", err)
+	if _, err := runtime.CreateToken(); !errors.Is(err, os.ErrExist) {
+		t.Fatalf("second CreateToken() error = %v, want os.ErrExist", err)
 	}
 }
 
@@ -56,10 +51,6 @@ func TestRuntimeListenDialAndCleanup(t *testing.T) {
 	go func() {
 		conn, err := listener.Accept()
 		if err != nil {
-			acceptErr <- err
-			return
-		}
-		if err := conn.(*tls.Conn).Handshake(); err != nil {
 			acceptErr <- err
 			return
 		}

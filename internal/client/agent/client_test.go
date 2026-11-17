@@ -3,7 +3,6 @@ package agent
 import (
 	"bytes"
 	"context"
-	"crypto/tls"
 	"errors"
 	"io"
 	"net"
@@ -138,10 +137,6 @@ func TestConnectOrStartUsesExistingRuntimeWithoutLaunching(t *testing.T) {
 	go func() {
 		conn, err := listener.Accept()
 		if err != nil {
-			acceptErr <- err
-			return
-		}
-		if err := conn.(*tls.Conn).Handshake(); err != nil {
 			acceptErr <- err
 			return
 		}

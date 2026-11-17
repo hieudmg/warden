@@ -127,9 +127,6 @@ func createStaleUnixSocket(t *testing.T, endpoint string) {
 	if err := syscall.Close(fd); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.Chmod(endpoint, 0600); err != nil {
-		t.Fatal(err)
-	}
 }
 
 func TestRuntimeUnixPermissions(t *testing.T) {

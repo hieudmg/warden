@@ -12,24 +12,17 @@ import (
 	"warden/internal/store"
 )
 
-// MaxJumpDepth bounds SSH nodes in a single path, including the SSH target.
+// MaxJumpDepth bounds the number of nodes in a resolved jump route path
+// (target plus hop chain).
 const MaxJumpDepth = 32
-
-// MaxResolutionOccurrences bounds a COMPLETE resolution: the root plus every
-// followed reference, including duplicates. A DB root and its SSH target/hops
-// share this budget. Each occurrence is charged before lookup/recursion; key
-// presence and secret loads are bounded by those validated occurrences.
-const MaxResolutionOccurrences = 1024
 
 // ErrJumpDepthExceeded reports a jump route deeper than MaxJumpDepth.
 var ErrJumpDepthExceeded = errors.New("jump route exceeds the maximum depth")
 
-// ErrJumpBudgetExceeded reports an expansion beyond MaxResolutionOccurrences.
-var ErrJumpBudgetExceeded = errors.New("jump route exceeds the maximum resolution budget")
-
-// GraphError reports invalid stored structure separately from storage/crypto
-// failures. Messages contain only fixed text and numeric IDs, never route JSON.
-// Handlers map these errors to stable 422 invalid_graph responses.
+// GraphError reports a logically invalid jump route: missing references,
+// self-reference, cycles, malformed stored JSON, or depth overflow. It is
+// distinct from storage/decryption failures so handlers can map it to a
+// stable 422 invalid_graph response.
 type GraphError struct {
 	msg   string
 	cause error
@@ -37,7 +30,8 @@ type GraphError struct {
 
 func (e *GraphError) Error() string { return e.msg }
 
-// Unwrap permits errors.Is classification of depth and budget failures.
+// Unwrap exposes the wrapped sentinel (e.g. ErrJumpDepthExceeded) so
+// callers can classify the specific graph failure with errors.Is.
 func (e *GraphError) Unwrap() error { return e.cause }
 
 func graphErrorf(format string, args ...any) error {
@@ -48,161 +42,98 @@ func graphErrorWrap(cause error, format string, args ...any) error {
 	return &GraphError{msg: fmt.Sprintf(format, args...), cause: cause}
 }
 
-type resolutionSnapshot interface {
-	GetSSHMetadata(context.Context, int64) (model.SSHProfile, error)
-	GetDBMetadata(context.Context, int64) (model.DBProfile, error)
-	HasPrivateKey(context.Context, int64) (bool, error)
-	GetSSH(context.Context, int64) (model.SSHProfile, error)
-	GetDB(context.Context, int64) (model.DBProfile, error)
-	GetKeyPair(context.Context, int64) (model.KeyPair, error)
-	Close()
-}
-
-// Resolver validates all reachable structure before loading any secrets, using
-// the same read snapshot for both phases. Route order and duplicates survive.
+// Resolver resolves connection profiles into complete transport bundles,
+// validating the full jump graph before any secret is returned.
 type Resolver struct {
-	snapshot func(context.Context) (resolutionSnapshot, error)
+	store *store.Store
 }
 
-func NewResolver(s *store.Store) *Resolver {
-	return &Resolver{snapshot: func(ctx context.Context) (resolutionSnapshot, error) {
-		return s.BeginResolution(ctx)
-	}}
-}
+func NewResolver(s *store.Store) *Resolver { return &Resolver{store: s} }
 
-type sshReference struct {
-	id        int64
-	keyPairID int64
-}
-
-type resolution struct {
-	snapshot    resolutionSnapshot
-	occurrences int
-	postorder   []sshReference
-}
-
-func (s *resolution) charge(ctx context.Context) error {
-	if err := ctx.Err(); err != nil {
-		return err
-	}
-	if s.occurrences >= MaxResolutionOccurrences {
-		return graphErrorWrap(ErrJumpBudgetExceeded, "jump route exceeds the maximum resolution budget of %d occurrences", MaxResolutionOccurrences)
-	}
-	s.occurrences++
-	return nil
-}
-
-// ResolveSSHBundle returns no partial bundle on structural, cancellation or
-// secret-loading failure. Initial missing/archived targets remain not-found.
+// ResolveSSHBundle returns the target profile plus every jump host in
+// connection order (first hop first). It validates the complete graph —
+// missing ids, self-reference, cycles, malformed stored JSON, and depth —
+// before decrypting any key-pair secrets. On failure it returns no partial
+// bundle.
 func (r *Resolver) ResolveSSHBundle(ctx context.Context, id int64) (model.SSHBundle, error) {
-	if err := ctx.Err(); err != nil {
-		return model.SSHBundle{}, err
-	}
-	snapshot, err := r.snapshot(ctx)
+	target, err := r.store.GetSSH(ctx, id)
 	if err != nil {
 		return model.SSHBundle{}, err
 	}
-	defer snapshot.Close()
-	s := resolution{snapshot: snapshot}
-	if err = s.charge(ctx); err != nil {
+	if target.Archived {
+		return model.SSHBundle{}, store.ErrNotFound
+	}
+
+	// Pass 1: validate the full jump graph and collect the ordered hop
+	// profiles. No key-pair secrets are decrypted during this pass, so a
+	// graph error always wins over target key material.
+	var hops []model.SSHProfile
+	path := map[int64]bool{id: true}
+	if err := r.resolveJumps(ctx, id, target.JumpConnectionIDs, path, &hops); err != nil {
 		return model.SSHBundle{}, err
 	}
-	if err = s.validateSSH(ctx, id, 0, map[int64]bool{}); err != nil {
-		return model.SSHBundle{}, err
-	}
-	if err = s.validateKeys(ctx); err != nil {
-		return model.SSHBundle{}, err
-	}
-	return s.sshBundle(ctx)
-}
 
-// validateSSH visits an occurrence already charged by its caller.
-func (s *resolution) validateSSH(ctx context.Context, id, ownerID int64, path map[int64]bool) error {
-	if err := ctx.Err(); err != nil {
-		return err
-	}
-	if path[id] {
-		return graphErrorf("jump route cycle detected at connection %d", id)
-	}
-	if len(path) >= MaxJumpDepth {
-		return graphErrorWrap(ErrJumpDepthExceeded, "jump route exceeds the maximum depth of %d", MaxJumpDepth)
-	}
-	p, err := s.snapshot.GetSSHMetadata(ctx, id)
-	if err != nil {
-		if ownerID != 0 && errors.Is(err, store.ErrNotFound) {
-			return graphErrorf("jump connection %d referenced by connection %d does not exist", id, ownerID)
-		}
-		return err
-	}
-	if err = ctx.Err(); err != nil {
-		return err
-	}
-	if p.Archived {
-		return store.ErrNotFound
-	}
-	path[id] = true
-	defer delete(path, id)
-	if err = walkJumpIDs(ctx, p.JumpConnectionIDs, func(jid int64) error {
-		if err := s.charge(ctx); err != nil {
-			return err
-		}
-		return s.validateSSH(ctx, jid, id, path)
-	}); err != nil {
-		return err
-	}
-	s.postorder = append(s.postorder, sshReference{id: p.ID, keyPairID: p.KeyPairID})
-	return nil
-}
-
-func (s *resolution) validateKeys(ctx context.Context) error {
-	for _, p := range s.postorder {
-		if err := ctx.Err(); err != nil {
-			return err
-		}
-		if p.keyPairID == 0 {
-			continue
-		}
-		has, err := s.snapshot.HasPrivateKey(ctx, p.keyPairID)
-		if errors.Is(err, store.ErrNotFound) {
-			return graphErrorf("connection %d references deleted key pair %d", p.id, p.keyPairID)
-		}
-		if err != nil {
-			return err
-		}
-		if !has {
-			return graphErrorf("connection %d references key pair %d without a private key", p.id, p.keyPairID)
-		}
-	}
-	return ctx.Err()
-}
-
-func (s *resolution) sshBundle(ctx context.Context) (model.SSHBundle, error) {
-	// The target is last in postorder; existing secret construction loaded the
-	// target first, then hops. Output order remains first-hop-first, with repeats.
-	target, err := s.sshNode(ctx, s.postorder[len(s.postorder)-1].id)
+	// Pass 2: inject secrets only after the graph is known to be valid.
+	targetNode, err := r.sshNode(ctx, target)
 	if err != nil {
 		return model.SSHBundle{}, err
 	}
-	jumps := make([]model.SSHNode, 0, len(s.postorder)-1)
-	for _, p := range s.postorder[:len(s.postorder)-1] {
-		node, err := s.sshNode(ctx, p.id)
+	jumps := make([]model.SSHNode, 0, len(hops))
+	for _, hop := range hops {
+		node, err := r.sshNode(ctx, hop)
 		if err != nil {
 			return model.SSHBundle{}, err
 		}
 		jumps = append(jumps, node)
 	}
-	if err = ctx.Err(); err != nil {
-		return model.SSHBundle{}, err
-	}
-	return model.SSHBundle{Target: target, Jumps: jumps}, nil
+	return model.SSHBundle{Target: targetNode, Jumps: jumps}, nil
 }
 
-// ResolveDBBundle shares a single snapshot and occurrence budget with its SSH
-// tunnel. Neither DB passwords nor SSH/key secrets load before full validation.
-func (r *Resolver) ResolveDBBundle(ctx context.Context, id int64, databaseName ...string) (model.DBBundle, error) {
-	if err := ctx.Err(); err != nil {
-		return model.DBBundle{}, err
+// resolveJumps validates ownerID's jump route and appends the ordered hop
+// profiles to hops. path tracks the ids currently being resolved so cycles
+// (including a route that loops back to the target) are detected. It
+// performs no secret decryption; node construction happens in a second
+// pass after the graph is known to be valid.
+func (r *Resolver) resolveJumps(ctx context.Context, ownerID int64, jumpJSON string, path map[int64]bool, hops *[]model.SSHProfile) error {
+	ids, err := parseJumpIDs(jumpJSON)
+	if err != nil {
+		return graphErrorf("connection %d has a malformed jump route: %v", ownerID, err)
 	}
+	for _, jid := range ids {
+		if jid == ownerID {
+			return graphErrorf("connection %d references itself in its jump route", ownerID)
+		}
+		if path[jid] {
+			return graphErrorf("jump route cycle detected at connection %d", jid)
+		}
+		if len(path) >= MaxJumpDepth {
+			return graphErrorWrap(ErrJumpDepthExceeded, "jump route exceeds the maximum depth of %d", MaxJumpDepth)
+		}
+		node, err := r.store.GetSSH(ctx, jid)
+		if err != nil {
+			if errors.Is(err, store.ErrNotFound) {
+				return graphErrorf("jump connection %d referenced by connection %d does not exist", jid, ownerID)
+			}
+			return err
+		}
+		if node.Archived {
+			return store.ErrNotFound
+		}
+		path[jid] = true
+		if err := r.resolveJumps(ctx, jid, node.JumpConnectionIDs, path, hops); err != nil {
+			return err
+		}
+		*hops = append(*hops, node)
+		delete(path, jid)
+	}
+	return nil
+}
+
+// ResolveDBBundle returns the DB profile credentials plus, when the profile
+// references an SSH connection, the complete resolved SSH bundle used to
+// tunnel to the selected database. An omitted selector uses the profile's
+// default database.
+func (r *Resolver) ResolveDBBundle(ctx context.Context, id int64, databaseName ...string) (model.DBBundle, error) {
 	if len(databaseName) > 1 {
 		return model.DBBundle{}, fmt.Errorf("%w: at most one database selector is allowed", store.ErrValidation)
 	}
@@ -210,44 +141,15 @@ func (r *Resolver) ResolveDBBundle(ctx context.Context, id int64, databaseName .
 	if len(databaseName) == 1 {
 		selector = databaseName[0]
 	}
-	snapshot, err := r.snapshot(ctx)
+
+	db, err := r.store.GetDB(ctx, id)
 	if err != nil {
-		return model.DBBundle{}, err
-	}
-	defer snapshot.Close()
-	s := resolution{snapshot: snapshot}
-	if err = s.charge(ctx); err != nil {
-		return model.DBBundle{}, err
-	}
-	db, err := snapshot.GetDBMetadata(ctx, id)
-	if err != nil {
-		return model.DBBundle{}, err
-	}
-	if err = ctx.Err(); err != nil {
 		return model.DBBundle{}, err
 	}
 	if db.Archived {
 		return model.DBBundle{}, store.ErrNotFound
 	}
 	selected, err := selectDatabase(db.Databases, selector)
-	if err != nil {
-		return model.DBBundle{}, err
-	}
-	if db.SSHConnectionID != 0 {
-		if err = s.charge(ctx); err != nil {
-			return model.DBBundle{}, err
-		}
-		if err = s.validateSSH(ctx, db.SSHConnectionID, 0, map[int64]bool{}); err != nil {
-			return model.DBBundle{}, err
-		}
-		if err = s.validateKeys(ctx); err != nil {
-			return model.DBBundle{}, err
-		}
-	}
-	if err = ctx.Err(); err != nil {
-		return model.DBBundle{}, err
-	}
-	db, err = snapshot.GetDB(ctx, id)
 	if err != nil {
 		return model.DBBundle{}, err
 	}
@@ -259,14 +161,11 @@ func (r *Resolver) ResolveDBBundle(ctx context.Context, id int64, databaseName .
 		Database: selected,
 	}
 	if db.SSHConnectionID != 0 {
-		sshBundle, err := s.sshBundle(ctx)
+		sshBundle, err := r.ResolveSSHBundle(ctx, db.SSHConnectionID)
 		if err != nil {
 			return model.DBBundle{}, err
 		}
 		bundle.SSH = &sshBundle
-	}
-	if err = ctx.Err(); err != nil {
-		return model.DBBundle{}, err
 	}
 	return bundle, nil
 }
@@ -288,14 +187,13 @@ func selectDatabase(databases []model.DatabaseInfo, selector string) (string, er
 	return "", fmt.Errorf("%w: database profile has no default database", store.ErrValidation)
 }
 
-func (s *resolution) sshNode(ctx context.Context, id int64) (model.SSHNode, error) {
-	if err := ctx.Err(); err != nil {
-		return model.SSHNode{}, err
-	}
-	p, err := s.snapshot.GetSSH(ctx, id)
-	if err != nil {
-		return model.SSHNode{}, err
-	}
+// sshNode builds a transport node from a profile. When the profile selects
+// a stored key pair, the pair's private key and passphrase are injected
+// dynamically so transport bundles never carry raw key material from the
+// profile row itself. A deleted pair or a pair whose private key was cleared
+// is a graph error naming both the connection and the pair id; decryption
+// failures propagate unchanged.
+func (r *Resolver) sshNode(ctx context.Context, p model.SSHProfile) (model.SSHNode, error) {
 	node := model.SSHNode{
 		ID:            p.ID,
 		Name:          p.Name,
@@ -312,11 +210,12 @@ func (s *resolution) sshNode(ctx context.Context, id int64) (model.SSHNode, erro
 	if p.KeyPairID == 0 {
 		return node, nil
 	}
-	if err = ctx.Err(); err != nil {
-		return model.SSHNode{}, err
-	}
-	pair, err := s.snapshot.GetKeyPair(ctx, p.KeyPairID)
+
+	pair, err := r.store.GetKeyPair(ctx, p.KeyPairID)
 	if err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			return model.SSHNode{}, graphErrorf("connection %d references deleted key pair %d", p.ID, p.KeyPairID)
+		}
 		return model.SSHNode{}, err
 	}
 	if len(pair.PrivateKey) == 0 {
@@ -327,35 +226,24 @@ func (s *resolution) sshNode(ctx context.Context, id int64) (model.SSHNode, erro
 	return node, nil
 }
 
-// walkJumpIDs streams the stored array instead of allocating a potentially
-// enormous duplicate-edge slice before enforcing the budget. Each visitor
-// charges before recursion/lookup. Parsing failures never expose stored values.
-func walkJumpIDs(ctx context.Context, raw string, visit func(int64) error) error {
-	if err := ctx.Err(); err != nil {
-		return err
+// parseJumpIDs parses a stored jump_connection_ids value. Rows are written
+// through store validation, so a parse failure here indicates external
+// tampering and is treated as a graph error. Negative ids can never name a
+// real row and are rejected as missing references.
+func parseJumpIDs(s string) ([]int64, error) {
+	var ids []int64
+	dec := json.NewDecoder(strings.NewReader(s))
+	dec.UseNumber()
+	if err := dec.Decode(&ids); err != nil {
+		return nil, err
 	}
-	dec := json.NewDecoder(strings.NewReader(raw))
-	tok, err := dec.Token()
-	if err != nil || tok != json.Delim('[') {
-		return graphErrorf("connection has a malformed jump route")
+	if _, err := dec.Token(); !errors.Is(err, io.EOF) {
+		return nil, errors.New("jump route must contain a single JSON array")
 	}
-	for dec.More() {
-		if err = ctx.Err(); err != nil {
-			return err
-		}
-		var id int64
-		if err = dec.Decode(&id); err != nil || id < 0 {
-			return graphErrorf("connection has a malformed jump route")
-		}
-		if err = visit(id); err != nil {
-			return err
+	for _, id := range ids {
+		if id < 0 {
+			return nil, fmt.Errorf("jump id %d must not be negative", id)
 		}
 	}
-	if _, err = dec.Token(); err != nil {
-		return graphErrorf("connection has a malformed jump route")
-	}
-	if _, err = dec.Token(); !errors.Is(err, io.EOF) {
-		return graphErrorf("connection has a malformed jump route")
-	}
-	return ctx.Err()
+	return ids, nil
 }

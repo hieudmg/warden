@@ -112,10 +112,6 @@ func (s *borrowedTunnelSSHServer) handleConn(conn net.Conn, cfg *golangssh.Serve
 	}
 }
 
-type borrowedTestGraph struct{ *clientssh.Graph }
-
-func (g borrowedTestGraph) Invalidate(string) { g.Abort() }
-
 func TestBorrowedTunnelDialer(t *testing.T) {
 	echo := newEchoServer(t)
 	sshSrv := newBorrowedTunnelSSHServer(t, "s3cret")
@@ -131,7 +127,7 @@ func TestBorrowedTunnelDialer(t *testing.T) {
 	}
 	defer graph.Close()
 
-	d := NewBorrowedTunnelDialer(borrowedTestGraph{graph}, echo.Addr().String())
+	d := NewBorrowedTunnelDialer(graph.Target(), echo.Addr().String())
 	conn, err := d.DialContext(context.Background(), "tcp", echo.Addr().String())
 	if err != nil {
 		t.Fatalf("DialContext: %v", err)
@@ -254,9 +250,7 @@ func TestTunnelCloseClosesWholeChain(t *testing.T) {
 	}
 	conn.Close()
 
-	if err := d.Close(); err != nil {
-		t.Fatalf("close whole chain: %v", err)
-	}
+	d.Close()
 	jumpSrv.waitClosed(t)
 	targetSrv.waitClosed(t)
 }

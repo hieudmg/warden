@@ -1,9 +1,7 @@
 @import "tailwindcss";
 @import "tw-animate-css";
-@import "../vendor/shadcn-4.19.0/tailwind.css";
+@import "shadcn/tailwind.css";
 @import "@fontsource-variable/geist";
-
-@source not "../vendor/shadcn-4.19.0";
 
 @custom-variant dark (&:is(.dark *));
 
@@ -97,64 +95,4 @@
   html {
     @apply font-sans;
     }
-}
-
-@layer components {
-  .vault-state {
-    @apply inline-flex items-center gap-2 rounded-full px-2.5 py-1 text-xs font-medium;
-  }
-  .vault-strip form {
-    @apply flex min-w-0 flex-wrap items-end gap-2;
-  }
-  .vault-strip form:has(input[autocomplete="off"]) {
-    @apply w-full border-t pt-3;
-  }
-  .vault-strip label {
-    @apply grid min-w-0 flex-1 gap-1 text-xs font-medium sm:max-w-64;
-  }
-  .vault-strip label input {
-    @apply min-w-40;
-  }
-  .security-card {
-    @apply min-w-0 space-y-3 rounded-xl border bg-card p-4 text-sm leading-relaxed text-muted-foreground shadow-sm;
-  }
-  .security-card h3 {
-    @apply text-sm;
-  }
-  .security-card form, .security-form label {
-    @apply grid min-w-0 gap-3;
-  }
-  .security-card label, .security-form label {
-    @apply grid gap-1.5 text-sm font-medium text-foreground;
-  }
-  .security-card ul {
-    @apply space-y-2 empty:hidden;
-  }
-  .security-card li {
-    @apply min-w-0 space-y-2 rounded-lg border bg-muted/30 p-3;
-  }
-  .security-card code {
-    @apply break-all text-xs text-foreground;
-  }
-  .security-card pre {
-    @apply my-3 whitespace-pre-wrap break-all rounded-lg border bg-muted p-3 text-xs text-foreground;
-  }
-  .vault-strip > [role="alert"], .security-card [role="alert"] {
-    @apply w-full rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm text-destructive;
-  }
-  .vault-strip > [role="status"], .security-card [role="status"] {
-    @apply w-full rounded-lg border bg-muted px-3 py-2 text-sm text-foreground;
-  }
-  .security-empty h1 {
-    @apply text-lg font-semibold tracking-tight;
-  }
-  .security-empty p {
-    @apply text-sm leading-relaxed text-muted-foreground;
-  }
-}
-
-@layer utilities {
-  .security-card button {
-    @apply mr-2 h-auto min-h-8 max-w-full whitespace-normal py-1.5 text-left;
-  }
 }

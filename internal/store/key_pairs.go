@@ -82,14 +82,7 @@ func (s *Store) CreateKeyPair(ctx context.Context, p model.KeyPair) (model.KeyPa
 
 // GetKeyPair returns a key pair with every stored field decrypted.
 func (s *Store) GetKeyPair(ctx context.Context, id int64) (model.KeyPair, error) {
-	return s.getKeyPair(ctx, s.db, id)
-}
-
-func (s *Store) getKeyPair(ctx context.Context, q resolutionQuery, id int64) (model.KeyPair, error) {
-	if err := ctx.Err(); err != nil {
-		return model.KeyPair{}, err
-	}
-	row := q.QueryRowContext(ctx, `
+	row := s.db.QueryRowContext(ctx, `
 		SELECT id, name, public_key, private_key, private_key_passphrase,
 		       created_at, updated_at
 		FROM key_pairs WHERE id = ?`, id)

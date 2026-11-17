@@ -426,16 +426,11 @@ describe("DBForm", () => {
     expect(onSubmit).toHaveBeenCalledWith(expect.objectContaining({ note: "new note" }))
   })
 
-  test("masks passwords by default with explicit reveal and disables browser autoComplete", async () => {
-    const user = userEvent.setup()
+  test("uses plain text inputs for credentials and disables browser autoComplete", () => {
     renderForm()
     const form = screen.getByRole("button", { name: "Save" }).closest("form")
     expect(form).not.toBeNull()
     expect(form!.getAttribute("autocomplete")).toBe("off")
-    expect(screen.getByLabelText("Password")).toHaveAttribute("type", "password")
-    await user.click(screen.getByRole("button", { name: "Reveal password" }))
-    expect(screen.getByLabelText("Password")).toHaveAttribute("type", "text")
-    await user.click(screen.getByRole("button", { name: "Hide password" }))
-    expect(screen.getByLabelText("Password")).toHaveAttribute("type", "password")
+    expect(document.getElementById("db-password")!.getAttribute("type")).toBeNull()
   })
 })

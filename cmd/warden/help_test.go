@@ -12,9 +12,9 @@ func TestClientHelpGuidesConsumers(t *testing.T) {
 		command []string
 		want    []string
 	}{
-		{nil, []string{"Commands:", "Global flags (before the command):", "For agents and scripts:", `warden -n config search "production"`, "do not guess", "Exit status:", "WARDEN_CLIENT_TIMEOUT", "30s", "warden <command> --help", "1024 encoded UTF-8 bytes", "terminal controls", "SSH byte streams and file transfers are not filtered"}},
+		{nil, []string{"Commands:", "Global flags (before the command):", "For agents and scripts:", `warden -n config search "production"`, "do not guess", "Exit status:", "WARDEN_CLIENT_TIMEOUT", "30s", "warden <command> --help"}},
 		{[]string{"ssh"}, []string{"Run one remote command", "exact configured SSH connection name", `warden -n ssh prod "uname -a"`, "one quoted argument", "remote command's exit status"}},
-		{[]string{"db"}, []string{"MySQL/MariaDB", "<connection>/<database>", "default database", "multiple databases", `warden -n db prod/app "SELECT 1"`, "tab-separated", "column header", "not JSON", "NULL", "control characters", "column headers", "both tables and TSV", "no output"}},
+		{[]string{"db"}, []string{"MySQL/MariaDB", "<connection>/<database>", "default database", "multiple databases", `warden -n db prod/app "SELECT 1"`, "tab-separated", "column header", "not JSON", "NULL", "control characters", "no output"}},
 		{[]string{"xssh"}, []string{"interactive SSH shell", "terminal", "picker", "Use ssh", "warden xssh prod"}},
 		{[]string{"config"}, []string{"Discover", "config search", `warden -n config search "production"`}},
 		{[]string{"config", "search"}, []string{"Discover", "names, hosts, and database names", "not credentials", "not JSON", "No matching connections.", `warden -n config search "production"`}},

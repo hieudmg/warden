@@ -1,7 +1,6 @@
 package ssh
 
 import (
-	"context"
 	"crypto/ed25519"
 	"crypto/rand"
 	"crypto/subtle"
@@ -24,9 +23,9 @@ var errAuthFailed = errors.New("authentication failed")
 // supports password and public-key authentication, session exec (via
 // /bin/sh), and direct-tcpip forwarding so jump chains can be tested.
 type testSSHServer struct {
-	addr     string
-	hostKey  ssh.PublicKey
-	listener *sshFixtureListener
+	addr    string
+	hostKey ssh.PublicKey
+	ln      net.Listener
 }
 
 // newTestSSHServer starts a server that authenticates either a fixed
@@ -62,25 +61,31 @@ func newTestSSHServer(t *testing.T, password string, authorizedKey ssh.PublicKey
 	srv := &testSSHServer{
 		addr:    ln.Addr().String(),
 		hostKey: hostSigner.PublicKey(),
+		ln:      ln,
 	}
-	srv.listener = newSSHFixtureListener(t, ln, func(ctx context.Context, conn net.Conn) {
-		srv.handleConn(ctx, conn, cfg)
-	})
+
+	go func() {
+		for {
+			conn, err := ln.Accept()
+			if err != nil {
+				return
+			}
+			go srv.handleConn(conn, cfg)
+		}
+	}()
+
+	t.Cleanup(func() { ln.Close() })
 	return srv
 }
 
-func (s *testSSHServer) handleConn(parent context.Context, conn net.Conn, cfg *ssh.ServerConfig) {
+func (s *testSSHServer) handleConn(conn net.Conn, cfg *ssh.ServerConfig) {
 	sconn, chans, reqs, err := ssh.NewServerConn(conn, cfg)
 	if err != nil {
 		conn.Close()
 		return
 	}
 	defer sconn.Close()
-	ctx, cancel := context.WithCancel(parent)
-	defer cancel()
-	var workers sync.WaitGroup
-	workers.Add(1)
-	go func() { defer workers.Done(); ssh.DiscardRequests(reqs) }()
+	go ssh.DiscardRequests(reqs)
 
 	for newCh := range chans {
 		switch newCh.ChannelType() {
@@ -89,23 +94,18 @@ func (s *testSSHServer) handleConn(parent context.Context, conn net.Conn, cfg *s
 			if err != nil {
 				continue
 			}
-			workers.Add(1)
-			go func() { defer workers.Done(); handleSession(ctx, ch, reqs) }()
+			go handleSession(ch, reqs)
 		case "direct-tcpip":
-			workers.Add(1)
-			go func() { defer workers.Done(); handleDirectTCPIP(ctx, newCh) }()
+			go handleDirectTCPIP(newCh)
 		default:
 			newCh.Reject(ssh.UnknownChannelType, "unsupported channel type")
 		}
 	}
-	cancel()
-	sconn.Close()
-	workers.Wait()
 }
 
 // handleDirectTCPIP forwards a direct-tcpip channel to the requested host,
 // enabling ssh.Client.Dial through a jump server.
-func handleDirectTCPIP(ctx context.Context, newCh ssh.NewChannel) {
+func handleDirectTCPIP(newCh ssh.NewChannel) {
 	var dest struct {
 		Host       string
 		Port       uint32
@@ -116,39 +116,31 @@ func handleDirectTCPIP(ctx context.Context, newCh ssh.NewChannel) {
 		newCh.Reject(ssh.ConnectionFailed, "malformed direct-tcpip request")
 		return
 	}
-	dialer := net.Dialer{}
-	upstream, err := dialer.DialContext(ctx, "tcp", net.JoinHostPort(dest.Host, strconv.FormatUint(uint64(dest.Port), 10)))
+	upstream, err := net.Dial("tcp", net.JoinHostPort(dest.Host, strconv.FormatUint(uint64(dest.Port), 10)))
 	if err != nil {
 		newCh.Reject(ssh.ConnectionFailed, "dial failed")
 		return
 	}
-	defer closeFixtureConnOnCancel(ctx, upstream)()
 	ch, reqs, err := newCh.Accept()
 	if err != nil {
 		upstream.Close()
 		return
 	}
-	requestsDone := make(chan struct{})
-	go func() { defer close(requestsDone); ssh.DiscardRequests(reqs) }()
-	relaySSHFixture(ch, upstream)
-	<-requestsDone
-}
-
-// A peer EOF must close upstream before joining the reverse read. Waiting for
-// both copies before closing leaves the target SSH server waiting for TCP EOF.
-func relaySSHFixture(ch io.ReadWriteCloser, upstream net.Conn) {
-	defer ch.Close()
-	defer upstream.Close()
-	var copies sync.WaitGroup
-	copies.Add(2)
-	go func() { defer copies.Done(); io.Copy(ch, upstream); ch.Close(); upstream.Close() }()
-	go func() { defer copies.Done(); io.Copy(upstream, ch); upstream.Close(); ch.Close() }()
-	copies.Wait()
+	go ssh.DiscardRequests(reqs)
+	go func() {
+		defer ch.Close()
+		defer upstream.Close()
+		var wg sync.WaitGroup
+		wg.Add(2)
+		go func() { defer wg.Done(); io.Copy(ch, upstream) }()
+		go func() { defer wg.Done(); io.Copy(upstream, ch) }()
+		wg.Wait()
+	}()
 }
 
 // handleSession answers exec requests by running the command via /bin/sh
 // and reporting the exit status.
-func handleSession(ctx context.Context, ch ssh.Channel, reqs <-chan *ssh.Request) {
+func handleSession(ch ssh.Channel, reqs <-chan *ssh.Request) {
 	defer ch.Close()
 	for req := range reqs {
 		switch req.Type {
@@ -158,7 +150,7 @@ func handleSession(ctx context.Context, ch ssh.Channel, reqs <-chan *ssh.Request
 			}
 			ssh.Unmarshal(req.Payload, &payload)
 			req.Reply(true, nil)
-			runShellCommand(ctx, ch, payload.Command)
+			runShellCommand(ch, payload.Command)
 			return
 		case "shell", "pty-req", "window-change":
 			req.Reply(true, nil)
@@ -168,8 +160,8 @@ func handleSession(ctx context.Context, ch ssh.Channel, reqs <-chan *ssh.Request
 	}
 }
 
-func runShellCommand(ctx context.Context, ch ssh.Channel, command string) {
-	cmd := exec.CommandContext(ctx, "sh", "-c", command)
+func runShellCommand(ch ssh.Channel, command string) {
+	cmd := exec.Command("sh", "-c", command)
 	cmd.Stdout = ch
 	cmd.Stderr = ch.Stderr()
 	cmd.Stdin = ch

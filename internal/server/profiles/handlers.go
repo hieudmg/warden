@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"strconv"
 
@@ -35,19 +36,17 @@ func New(s *store.Store, a *audit.Recorder) *Handler {
 }
 
 // record writes an audit event for an HTTP request and surfaces recorder
-// failures as a generic server warning so audit loss is never silent.
+// failures as a server warning so audit loss is never silent. Only
+// operation/resource identifiers and the sanitized recorder error are
+// logged — never secrets, SQL text, or request bodies.
 func (h *Handler) record(r *http.Request, op, resourceType, resourceID, result string, err error, metadata map[string]any) {
-	var graphErr *GraphError
-	switch {
-	case errors.Is(err, errInvalidJSON):
-		err = audit.InvalidJSON
-	case errors.Is(err, errPayloadTooLarge):
-		err = audit.PayloadTooLarge
-	case errors.As(err, &graphErr):
-		err = audit.InvalidGraph
-	}
 	if aerr := h.audit.RecordRequest(r.Context(), r, op, resourceType, resourceID, result, err, metadata); aerr != nil {
-		audit.WarnFailure(op, resourceType, resourceID)
+		slog.Warn("audit write failed",
+			"op", op,
+			"resource_type", resourceType,
+			"resource_id", resourceID,
+			"error", aerr,
+		)
 	}
 }
 
@@ -88,20 +87,6 @@ func (h *Handler) Register(mux *http.ServeMux) {
 
 	mux.HandleFunc("GET /api/v1/transport/ssh/{id}", h.transportSSH)
 	mux.HandleFunc("GET /api/v1/transport/db/{id}", h.transportDB)
-}
-
-// RegisterClient is the complete CLI capability allowlist, not a mux alias.
-func (h *Handler) RegisterClient(mux *http.ServeMux) {
-	mux.HandleFunc("GET /api/v1/client/ssh-connections", h.listSSH)
-	mux.HandleFunc("GET /api/v1/client/ssh-connections/{id}", h.getSSH)
-	mux.HandleFunc("GET /api/v1/client/ssh-connections/{id}/dependents", h.sshDependents)
-	mux.HandleFunc("PUT /api/v1/client/ssh-connections/{id}/archive", h.archiveSSH)
-	mux.HandleFunc("GET /api/v1/client/db-connections", h.listDB)
-	mux.HandleFunc("GET /api/v1/client/db-connections/{id}", h.getDB)
-	mux.HandleFunc("GET /api/v1/client/db-connections/{id}/dependents", h.dbDependents)
-	mux.HandleFunc("PUT /api/v1/client/db-connections/{id}/archive", h.archiveDB)
-	mux.HandleFunc("GET /api/v1/client/transport/ssh/{id}", h.transportSSH)
-	mux.HandleFunc("GET /api/v1/client/transport/db/{id}", h.transportDB)
 }
 
 type archiveRequest struct {
