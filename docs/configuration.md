@@ -65,6 +65,34 @@ Environment overrides:
 Environment values override file values. `WARDEN_SERVER_CONFIG` and the
 `--config` flag select a different JSON file.
 
+## HTTP connection profiles
+
+HTTP profiles are managed in Warden Hub's **HTTP** tab (`/http`), not in client or
+server configuration JSON. No additional server setting is required. Each stores:
+
+- A unique name (`[A-Za-z0-9._-]`, 1–100 characters).
+- An HTTP or HTTPS origin (`scheme://host[:port]`, at most 2048 bytes). No embedded
+  credentials, path, trailing slash, query or fragment. Ports are 1–65535;
+  IPv6 literals require brackets. Private and loopback hosts are allowed.
+- Exactly one auth mode: `bearer`, `x_api_key` or `basic`. Bearer and X-API-Key use
+  a credential; Basic uses username and password. Each secret field is encrypted
+  independently, limited to 8192 bytes, and cannot contain ASCII controls/DEL.
+  Basic username cannot contain `:`.
+- Optional shared group and note (up to 4096 bytes), plus archive state.
+
+Management responses expose `has_credential`, `has_username`, `has_password`,
+never saved secret values. Inputs are masked and blank on edit. Blank inputs
+omit secret fields and preserve existing values only for the same auth mode;
+switching modes clears all old secrets. Closing the editor or switching modes
+clears local secret drafts. Incomplete profiles can be saved, but cannot execute.
+At the API level, an explicitly supplied empty secret string clears that field;
+omitted/null fields preserve it on same-mode edits.
+
+Changing the origin deliberately changes where the server sends the saved
+credentials. Any reachable management caller is trusted to do so. HTTP is
+unencrypted; prefer HTTPS, whose certificates are verified. See
+[Security](security.md) and [CLI HTTP requests](cli.md#http-requests).
+
 ## Installer layout
 
 Server installer defaults:

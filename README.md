@@ -1,7 +1,7 @@
 # Warden
 
 Warden is a cross-platform CLI and Linux server for personal development aid.
-It keeps SSH and MySQL/MariaDB connection profiles in one place, lets you
+It keeps SSH, MySQL/MariaDB and HTTP connection profiles in one place, lets you
 run development operations through them, and records agent change reports.
 
 > **Vibe-coded software:** Warden is a personal aid while developing. Treat it
@@ -127,7 +127,11 @@ warden db <connection>/<database> "SELECT 1"
 warden -n db <connection> "SELECT 1"
 warden -i db <connection> "SELECT 1"
 
-# Search connection names, hosts, and database names.
+# Send an HTTP request through the server using stored credentials.
+warden http GET service '/v1/items?limit=10'
+warden http POST service /v1/items '{"name":"item"}'
+
+# Search connection names, hosts/origins, and database names.
 warden config search "production"
 
 # Record an immutable development report.
@@ -158,10 +162,31 @@ top/end, and `q` or Ctrl-C to quit. URLs assume HTTP; use the forwarded port wit
 the appropriate client for non-HTTP services. Redirected output keeps the
 plain-text forwarding/closure log without terminal escape sequences.
 
+### HTTP connections
+
+Use the **HTTP** tab in Warden Hub (`/http`) to create, edit, group, annotate,
+archive/restore or delete named profiles. Save an origin such as
+`https://api.example.com:8443` (no path, query or trailing slash), then supply the
+path/query separately with `warden http`. The web view manages profiles only;
+it is not a request builder.
+
+Choose Bearer, X-API-Key or Basic authentication. All HTTP credential fields,
+including Basic username, are encrypted at rest and never returned by management
+reads. Edit fields start blank; leave them blank to keep saved values when the
+authentication mode is unchanged. Changing modes clears the old credentials.
+Archived profiles remain manageable but cannot execute requests.
+
+Requests run on the Warden server, not the client. Both HTTP and HTTPS and any
+configured host (including private/loopback hosts) are allowed. **HTTP is
+unencrypted and exposes credentials and data to interception or modification.**
+HTTPS certificates are verified and redirects are not followed. This capability
+does not add application authentication: every peer that can reach Warden is
+trusted to configure destinations and use the stored credentials.
+
 ### Migrate data to another server
 
-The Warden Hub web view exports and imports every managed record: SSH and
-database connections, groups, key pairs, projects, reports, and connection notes.
+The Warden Hub web view exports and imports every managed record: SSH, database
+and HTTP connections, groups, key pairs, projects, reports, and connection notes.
 
 1. On the source server, open Warden Hub and choose **Export data**.
 2. Transfer the downloaded `warden-data.json` file securely.
@@ -169,11 +194,15 @@ database connections, groups, key pairs, projects, reports, and connection notes
    select the file.
 
 The export is unencrypted JSON containing plaintext credentials, including
-passwords, private keys, and passphrases. Store it securely and delete it once
+passwords, private keys, passphrases and HTTP credentials (including Basic
+usernames). Store it securely and delete it once
 the migration is complete. Import only succeeds when the destination has no
 managed data, so it never overwrites or merges existing records; a failed import
 leaves the destination unchanged. The destination re-encrypts imported secrets
 with its own master key, so the source and destination do not need the same key.
+Legacy version-1 exports without HTTP records still import; new exports include
+`http_connections` and may not be accepted by older strict-decoding servers.
+Import reloads every web list, including HTTP profiles.
 
 See [CLI guide](docs/cli.md) for advanced behavior, picker details, database
 targets, copy semantics, and host-key handling.

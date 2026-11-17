@@ -85,12 +85,12 @@ type SSHDependents struct {
 	DB  []DependentRef
 }
 
-// GroupDependents lists profiles referencing a group id: SSH profiles and
-// DB profiles whose group_id equals it. It is the warning payload shown
+// GroupDependents lists SSH, DB and HTTP profiles whose group_id equals it. It is the warning payload shown
 // before group deletion; deletion itself is never blocked.
 type GroupDependents struct {
-	SSH []DependentRef
-	DB  []DependentRef
+	SSH  []DependentRef
+	DB   []DependentRef
+	HTTP []DependentRef
 }
 
 // KeyPair is the domain value for a stored SSH key pair. Public key,

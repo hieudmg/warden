@@ -3,7 +3,8 @@ package model
 import "time"
 
 // Data bundle identity. An importer rejects any other format or version, so
-// the exported shape can evolve only by bumping DataBundleVersion.
+// new mandatory fields require bumping DataBundleVersion. Optional HTTP
+// connections extend v1; their absence in older bundles means no HTTP records.
 const (
 	DataBundleFormat  = "warden-data"
 	DataBundleVersion = 1
@@ -23,12 +24,13 @@ type DataBundle struct {
 	Version    int       `json:"version"`
 	ExportedAt time.Time `json:"exported_at"`
 
-	Groups         []TransferGroup         `json:"groups"`
-	KeyPairs       []TransferKeyPair       `json:"key_pairs"`
-	SSHConnections []TransferSSHConnection `json:"ssh_connections"`
-	DBConnections  []TransferDBConnection  `json:"db_connections"`
-	Projects       []TransferProject       `json:"projects"`
-	Reports        []TransferReport        `json:"reports"`
+	Groups          []TransferGroup          `json:"groups"`
+	KeyPairs        []TransferKeyPair        `json:"key_pairs"`
+	SSHConnections  []TransferSSHConnection  `json:"ssh_connections"`
+	DBConnections   []TransferDBConnection   `json:"db_connections"`
+	HTTPConnections []TransferHTTPConnection `json:"http_connections"`
+	Projects        []TransferProject        `json:"projects"`
+	Reports         []TransferReport         `json:"reports"`
 	// ConnectionNotes carries every persisted connection_notes row verbatim.
 	// It is the single source of truth for notes: attachment to a profile is
 	// implied by (connection_type, connection_id), and rows whose reference is

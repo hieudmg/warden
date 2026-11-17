@@ -39,7 +39,7 @@ func ServeUI(api http.Handler, assets fs.FS) http.Handler {
 
 		var name string
 		switch r.URL.Path {
-		case "/", "/index.html", "/ssh", "/databases", "/groups", "/key-pairs", "/projects":
+		case "/", "/index.html", "/ssh", "/databases", "/http", "/groups", "/key-pairs", "/projects":
 			// The management UI entrypoint must never be cached: a
 			// stale index could hide newer server capabilities or
 			// retain stale page state.

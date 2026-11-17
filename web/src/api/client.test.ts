@@ -14,6 +14,29 @@ function jsonResponse(body: unknown, status = 200) {
 }
 
 describe("api client", () => {
+  test("HTTP management uses metadata endpoints, omitted secret updates, archive and 204 delete", async () => {
+    const metadata = { id: 4, name: "service", origin: "https://api.example", auth_type: "basic", has_username: true, has_password: true }
+    const fetchMock = vi.fn().mockImplementation(() => Promise.resolve(jsonResponse(metadata)))
+    vi.stubGlobal("fetch", fetchMock)
+    const controller = new AbortController()
+    await api.listHTTP(controller.signal)
+    const payload = { name: "service", origin: "https://api.example", auth_type: "basic" as const, note: "Ops", group_id: 3 }
+    await expect(api.createHTTP({ ...payload, username: "user", password: "secret" })).resolves.toEqual(metadata)
+    await api.updateHTTP(4, payload)
+    await api.archiveHTTP(4, true)
+    fetchMock.mockResolvedValueOnce(new Response(null, { status: 204 }))
+    await expect(api.deleteHTTP(4)).resolves.toBeUndefined()
+    expect(fetchMock.mock.calls.map(([path, init]) => [path, init.method])).toEqual([
+      ["/api/v1/http-connections", "GET"], ["/api/v1/http-connections", "POST"],
+      ["/api/v1/http-connections/4", "PUT"], ["/api/v1/http-connections/4/archive", "PUT"],
+      ["/api/v1/http-connections/4", "DELETE"],
+    ])
+    expect(fetchMock.mock.calls[0][1].signal).toBe(controller.signal)
+    expect(JSON.parse(fetchMock.mock.calls[2][1].body)).toEqual(payload)
+    expect(JSON.parse(fetchMock.mock.calls[3][1].body)).toEqual({ archived: true })
+    fetchMock.mockResolvedValueOnce(jsonResponse({ code: "validation_error", message: "invalid origin" }, 400))
+    await expect(api.updateHTTP(4, payload)).rejects.toMatchObject({ code: "validation_error", status: 400, message: "invalid origin" })
+  })
   test.each([
     ["SSH", api.archiveSSH, "/api/v1/ssh-connections/12/archive"],
     ["DB", api.archiveDB, "/api/v1/db-connections/12/archive"],

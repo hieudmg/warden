@@ -193,7 +193,9 @@ func posixRel(basePath, targPath string) (string, error) {
 			buf[n] = '/'
 			copy(buf[n+1:], targ[t0:])
 		}
-		return path.Clean(string(buf)), nil
+		// Preserve filepath.Rel's spelling, including a trailing "/." when
+		// the target is the current directory. Cleaning would erase it.
+		return string(buf), nil
 	}
 	return targ[t0:], nil
 }

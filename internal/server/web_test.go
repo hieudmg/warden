@@ -78,7 +78,7 @@ func TestServeUIServesIndexAtExplicitPath(t *testing.T) {
 }
 
 func TestServeUIServesIndexAtTopLevelRoutes(t *testing.T) {
-	for _, path := range []string{"/ssh", "/databases", "/groups", "/key-pairs", "/projects"} {
+	for _, path := range []string{"/ssh", "/databases", "/http", "/groups", "/key-pairs", "/projects"} {
 		rec := httptest.NewRecorder()
 		req := httptest.NewRequest(http.MethodGet, path, nil)
 		serveUIHandler().ServeHTTP(rec, req)

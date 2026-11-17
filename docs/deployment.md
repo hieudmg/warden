@@ -103,7 +103,10 @@ credentials, SQL text, or command payloads.
 Keep the listener on loopback and publish it through a tailnet proxy, or bind
 directly to the machine's Tailscale address. Never bind a public interface.
 Tailnet membership is the full trust boundary because the API has no
-application authentication.
+application authentication. HTTP requests execute from the server to any
+configured origin, including private/loopback hosts. Review its network reach
+and restrict egress externally if needed. HTTP origins send credentials in
+plaintext; HTTPS verifies certificates. See [Security](security.md).
 
 ## Backup and restore
 
@@ -114,3 +117,13 @@ Back up both items separately:
 
 Restore with the service stopped and preserve key mode `0600`. Losing the key
 makes the database unreadable.
+
+For application-level migration, Warden Hub's **Export data** / **Import data**
+includes SSH, database and HTTP profiles (including archives), notes, shared
+groups, key pairs, projects and reports. Exports contain plaintext credentials,
+including HTTP tokens and Basic usernames/passwords; transfer them securely and
+delete them after use. Import is atomic and only succeeds on an empty managed
+dataset. The destination re-encrypts secrets with its own master key. Legacy
+version-1 bundles without `http_connections` remain importable by this version;
+new bundles may be rejected by older strict-decoding servers. Back up before
+upgrading; migration 008 adds HTTP storage without changing existing profiles.

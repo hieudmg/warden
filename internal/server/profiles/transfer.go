@@ -78,6 +78,7 @@ func bundleCounts(b model.DataBundle) map[string]any {
 		"key_pairs":        len(b.KeyPairs),
 		"ssh_connections":  len(b.SSHConnections),
 		"db_connections":   len(b.DBConnections),
+		"http_connections": len(b.HTTPConnections),
 		"projects":         len(b.Projects),
 		"reports":          len(b.Reports),
 		"connection_notes": len(b.ConnectionNotes),

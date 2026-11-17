@@ -52,6 +52,7 @@ func (h *Handler) record(r *http.Request, op, resourceType, resourceID, result s
 
 // Register mounts all profile routes on mux.
 func (h *Handler) Register(mux *http.ServeMux) {
+	h.registerHTTP(mux)
 	mux.HandleFunc("GET /api/v1/ssh-connections", h.listSSH)
 	mux.HandleFunc("POST /api/v1/ssh-connections", h.createSSH)
 	mux.HandleFunc("GET /api/v1/ssh-connections/{id}", h.getSSH)
@@ -117,6 +118,8 @@ func (h *Handler) setArchive(w http.ResponseWriter, r *http.Request, kind string
 	var err error
 	if kind == "ssh" {
 		err = h.store.SetSSHArchived(r.Context(), id, *req.Archived)
+	} else if kind == "http" {
+		err = h.store.SetHTTPArchived(r.Context(), id, *req.Archived)
 	} else {
 		err = h.store.SetDBArchived(r.Context(), id, *req.Archived)
 	}

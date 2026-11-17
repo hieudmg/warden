@@ -108,7 +108,8 @@ func (h *Handler) groupDependents(w http.ResponseWriter, r *http.Request) {
 	}
 	h.record(r, "group.dependents", "group", strconv.FormatInt(id, 10), "success", nil, nil)
 	server.WriteJSON(w, http.StatusOK, model.DependentsResponse{
-		SSH: nonNilRefs(deps.SSH),
-		DB:  nonNilRefs(deps.DB),
+		SSH:  nonNilRefs(deps.SSH),
+		DB:   nonNilRefs(deps.DB),
+		HTTP: nonNilRefs(deps.HTTP),
 	})
 }

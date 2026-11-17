@@ -23,6 +23,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { useListResource } from "@/hooks/use-list-resource"
 import { SSHTab } from "@/features/ssh/ssh-tab"
 import { DBTab } from "@/features/db/db-tab"
+import { HTTPTab } from "@/features/http/http-tab"
 import { GroupsTab } from "@/features/groups/groups-tab"
 import { KeyPairsTab } from "@/features/key-pairs/key-pairs-tab"
 import { ProjectsReportsTab } from "@/features/projects/projects-reports-tab"
@@ -35,11 +36,12 @@ export interface NotificationItem {
 
 export type Notify = (message: string, kind: "success" | "error") => void
 
-type Route = "ssh" | "db" | "groups" | "key-pairs" | "projects"
+type Route = "ssh" | "db" | "http" | "groups" | "key-pairs" | "projects"
 
 const routePaths: Record<Route, string> = {
   ssh: "/ssh",
   db: "/databases",
+  http: "/http",
   groups: "/groups",
   "key-pairs": "/key-pairs",
   projects: "/projects",
@@ -260,6 +262,7 @@ export function App() {
   })
   const ssh = useListResource(api.listSSH)
   const db = useListResource(api.listDB)
+  const http = useListResource(api.listHTTP)
   const groups = useListResource(api.listGroups)
   const projects = useListResource(api.listProjects)
   const keyPairs = useListResource(api.listKeyPairs)
@@ -300,11 +303,20 @@ export function App() {
     await Promise.all([
       ssh.reload(),
       db.reload(),
+      http.reload(),
       groups.reload(),
       projects.reload(),
       keyPairs.reload(),
     ])
-  }, [ssh.reload, db.reload, groups.reload, projects.reload, keyPairs.reload])
+  }, [ssh.reload, db.reload, http.reload, groups.reload, projects.reload, keyPairs.reload])
+
+  // HTTP writes affect group counts; group edits affect cached connection labels.
+  const reloadHTTPAndGroups = async () => {
+    await Promise.all([http.reload(), groups.reload()])
+  }
+  const reloadGroupsAndConnections = async () => {
+    await Promise.all([groups.reload(), ssh.reload(), db.reload(), http.reload()])
+  }
 
   return (
     <div className="flex min-h-screen flex-col bg-background text-foreground">
@@ -313,7 +325,7 @@ export function App() {
           <div>
             <h1 className="text-xl font-semibold">Warden Hub</h1>
             <p className="text-sm text-muted-foreground">
-              tailnet management plane — read-only view of secrets, execution happens on clients
+              tailnet management plane — manage connections; HTTP requests execute on the server
             </p>
           </div>
           <DataTransferActions onImported={reloadAll} notify={notify} />
@@ -324,6 +336,7 @@ export function App() {
         <TabsList className="mx-4 mt-4 shrink-0">
           <TabsTrigger value="ssh">SSH</TabsTrigger>
           <TabsTrigger value="db">Databases</TabsTrigger>
+          <TabsTrigger value="http">HTTP</TabsTrigger>
           <TabsTrigger value="groups">Groups</TabsTrigger>
           <TabsTrigger value="key-pairs">Key Pairs</TabsTrigger>
           <TabsTrigger value="projects">Projects &amp; Reports</TabsTrigger>
@@ -334,8 +347,11 @@ export function App() {
         <TabsContent value="db">
           <DBTab resource={db} sshProfiles={ssh.data} groups={groups.data} notify={notify} />
         </TabsContent>
+        <TabsContent value="http">
+          <HTTPTab resource={{ ...http, reload: reloadHTTPAndGroups }} groups={groups.data} notify={notify} />
+        </TabsContent>
         <TabsContent value="groups">
-          <GroupsTab resource={groups} notify={notify} />
+          <GroupsTab resource={{ ...groups, reload: reloadGroupsAndConnections }} notify={notify} />
         </TabsContent>
         <TabsContent value="key-pairs">
           <KeyPairsTab resource={keyPairs} notify={notify} />

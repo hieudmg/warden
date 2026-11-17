@@ -202,6 +202,9 @@ func (c *Client) requestJSON(ctx context.Context, method, path string, body any,
 		return fmt.Errorf("read %s response: body too large", path)
 	}
 
+	if dst == nil {
+		return nil
+	}
 	dec := json.NewDecoder(bytes.NewReader(bodyBytes))
 	dec.DisallowUnknownFields()
 	if err := dec.Decode(dst); err != nil {

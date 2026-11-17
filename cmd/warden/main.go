@@ -95,6 +95,8 @@ func run(args []string, stdout, stderr io.Writer, lookupEnv func(string) (string
 	switch rest[0] {
 	case "agent":
 		return runAgent(rest[1:], stderr)
+	case "http":
+		return runHTTP(rest[1:], *configPath, configPathSet, stdout, stderr, lookupEnv)
 	case "ssh":
 		return runSSH(rest[1:], *configPath, configPathSet, stdout, stderr, lookupEnv)
 	case "db":
@@ -478,7 +480,12 @@ func runConfig(args []string, configPath string, configPathSet bool, stdout, std
 		return 1
 	}
 
-	writeConfigSearchResultsForMode(stdout, args[1], sshConns, dbConns, mode)
+	httpConns, err := cl.ListHTTP(ctx)
+	if err != nil {
+		fmt.Fprintf(stderr, "config search: %v\n", err)
+		return 1
+	}
+	writeConfigSearchResultsForMode(stdout, args[1], sshConns, dbConns, mode, httpConns)
 	return 0
 }
 
@@ -490,12 +497,12 @@ type configSearchScore struct {
 	originalIndex  int
 }
 
-func writeConfigSearchResultsForMode(w io.Writer, query string, sshConns []model.SSHConnection, dbConns []model.DBConnection, mode outputMode) {
+func writeConfigSearchResultsForMode(w io.Writer, query string, sshConns []model.SSHConnection, dbConns []model.DBConnection, mode outputMode, httpConns []model.HTTPConnection) {
 	if mode == outputModeNonInteractive {
 		var decorated strings.Builder
-		writeConfigSearchResults(&decorated, query, sshConns, dbConns)
+		writeConfigSearchResults(&decorated, query, sshConns, dbConns, httpConns)
 		for _, line := range strings.Split(strings.TrimSuffix(decorated.String(), "\n"), "\n") {
-			if line == "" || line == "SSH" || line == "DB" {
+			if line == "" || line == "SSH" || line == "DB" || line == "HTTP" {
 				fmt.Fprintln(w, line)
 				continue
 			}
@@ -511,7 +518,7 @@ func writeConfigSearchResultsForMode(w io.Writer, query string, sshConns []model
 		}
 		return
 	}
-	writeConfigSearchResults(w, query, sshConns, dbConns)
+	writeConfigSearchResults(w, query, sshConns, dbConns, httpConns)
 }
 
 func activeSSHConnections(conns []model.SSHConnection) []model.SSHConnection {
@@ -524,7 +531,7 @@ func activeSSHConnections(conns []model.SSHConnection) []model.SSHConnection {
 	return active
 }
 
-func writeConfigSearchResults(w io.Writer, query string, sshConns []model.SSHConnection, dbConns []model.DBConnection) {
+func writeConfigSearchResults(w io.Writer, query string, sshConns []model.SSHConnection, dbConns []model.DBConnection, httpConns []model.HTTPConnection) {
 	sshNames := make(map[int64]string, len(sshConns))
 	type matchedSSH struct {
 		connection model.SSHConnection
@@ -568,7 +575,22 @@ func writeConfigSearchResults(w io.Writer, query string, sshConns []model.SSHCon
 		return lessConfigSearchScore(dbMatches[i].score, dbMatches[j].score)
 	})
 
-	if len(sshMatches) == 0 && len(dbMatches) == 0 {
+	type matchedHTTP struct {
+		connection model.HTTPConnection
+		score      configSearchScore
+	}
+	var httpMatches []matchedHTTP
+	for index, conn := range httpConns {
+		if conn.Archived {
+			continue
+		}
+		if score, ok := scoreConfigSearch(query, conn.Name, conn.Origin); ok {
+			score.originalIndex = index
+			httpMatches = append(httpMatches, matchedHTTP{connection: conn, score: score})
+		}
+	}
+	sort.SliceStable(httpMatches, func(i, j int) bool { return lessConfigSearchScore(httpMatches[i].score, httpMatches[j].score) })
+	if len(sshMatches) == 0 && len(dbMatches) == 0 && len(httpMatches) == 0 {
 		fmt.Fprintln(w, "No matching connections.")
 		return
 	}
@@ -605,6 +627,20 @@ func writeConfigSearchResults(w io.Writer, query string, sshConns []model.SSHCon
 				entry += " — Note: " + sanitizeConfigSearchField(conn.Note)
 			}
 			lines = append(lines, treeEntry(i, len(dbMatches), entry))
+		}
+	}
+	if len(httpMatches) > 0 {
+		if len(lines) > 0 {
+			lines = append(lines, "")
+		}
+		lines = append(lines, "HTTP")
+		for i, match := range httpMatches {
+			conn := match.connection
+			entry := sanitizeConfigSearchField(conn.Name) + " — " + sanitizeConfigSearchField(conn.Origin)
+			if conn.Note != "" {
+				entry += " — Note: " + sanitizeConfigSearchField(conn.Note)
+			}
+			lines = append(lines, treeEntry(i, len(httpMatches), entry))
 		}
 	}
 	fmt.Fprintln(w, strings.Join(lines, "\n"))
@@ -1124,7 +1160,9 @@ Usage:
   warden <command> --help
 
 Commands:
-  config search <query>       Discover SSH and database connection targets
+  config search <query>       Discover SSH, database and HTTP connection targets
+  http METHOD CONNECTION PATH [BODY]
+                             Send a request using server-held HTTP credentials
   ssh <connection> <command>  Run one remote command over SSH
   db <connection> <sql>       Execute one MySQL/MariaDB statement
   xssh [connection]           Open an interactive SSH shell (picker if omitted)
@@ -1144,7 +1182,7 @@ Global flags (before the command):
 Output mode defaults to automatic TTY detection. -n changes presentation, not
 permissions or SSH host-key verification; it does not make xssh headless.
 DB results use tab-separated text with a column header; config search uses
-SSH/DB headings and bullet lists. Neither format is JSON. SSH streams the remote
+SSH/DB/HTTP headings and bullet lists. Neither format is JSON. SSH streams the remote
 command's output unchanged. See command help for details and examples.
 
 For agents and scripts:
@@ -1281,19 +1319,20 @@ func printConfigUsage(w io.Writer) {
 }
 
 func printConfigSearchUsage(w io.Writer) {
-	fmt.Fprint(w, `Discover configured SSH and database targets without exposing credentials.
+	fmt.Fprint(w, `Discover configured SSH, database and HTTP targets without exposing credentials.
 
 Usage:
   warden config search <query>
 
-Fuzzy-search active connection names, hosts, and database names. Pass a non-empty
-query as one quoted argument. Results include names, hosts, and optional notes,
+Fuzzy-search active connection names, hosts, and database names, plus HTTP origins.
+Pass a non-empty query as one quoted argument. Results include names, hosts, and optional notes,
 not credentials. Archived profiles are excluded.
 
 SSH results show the connection name to use with ssh, xssh, cp, or port-watch.
 DB results show connection/database targets to use with db; the accompanying
 host/database is descriptive, not a CLI connection target.
--n prints SSH/DB headings and bullet lists, not JSON; -i uses a tree layout.
+HTTP results show connection names to use with http; origins and notes are display-only.
+-n prints SSH/DB/HTTP headings and bullet lists, not JSON; -i uses a tree layout.
 No matches prints "No matching connections." and still exits successfully.
 
 Examples:
