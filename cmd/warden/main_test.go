@@ -614,6 +614,75 @@ func emptyLookupEnv(string) (string, bool) {
 	return "", false
 }
 
+func TestConfigSearchMaskingPreservesControlEscaping(t *testing.T) {
+	for _, mode := range []outputMode{outputModeNonInteractive, outputModeInteractive} {
+		var out bytes.Buffer
+		writeConfigSearchResultsForMode(&out, "",
+			[]model.SSHConnection{{Name: "ssh\nname", Host: "edge.example.com", Note: "note\x1b[2J\u0085"}},
+			[]model.DBConnection{{Name: "db\tname", Host: "db.example.com", Databases: []model.DatabaseInfo{{Name: "app\rname", IsDefault: true}}}}, mode,
+			[]model.HTTPConnection{{Name: "http\nname", Origin: "http://localhost\x1b[2J", Note: "note\x1b[2J\u0085"}})
+		for _, want := range []string{"ssh\\nname — edge.*", "db\\tname/app\\rname — db.*/app\\rname", "http\\nname — http://localhost\\x1b[2J", "note\\x1b[2J\\u0085"} {
+			if !strings.Contains(out.String(), want) {
+				t.Errorf("mode %d missing escaped field %q: %q", mode, want, out.String())
+			}
+		}
+		if strings.ContainsAny(out.String(), "\x1b\r\t\u0085") {
+			t.Fatalf("raw controls in output: %q", out.String())
+		}
+	}
+}
+
+func TestConfigSearchMasksDisplayOnly(t *testing.T) {
+	for _, mode := range []outputMode{outputModeNonInteractive, outputModeInteractive} {
+		for _, tc := range []struct{ host, origin, maskedHost, maskedOrigin string }{
+			{"db.hidden.example", "https://api.hidden.example:8443", "db.*", "https://api.*:8443"},
+			{"123.456.7.89", "http://123.456.7.89:8080", "123.*", "http://123.*:8080"},
+			{"localhost", "http://localhost:8080", "localhost", "http://localhost:8080"},
+			{"db.example.com:3306", "https://api.example.com", "db.*:3306", "https://api.*"},
+			{"[2001:db8::1]:22", "http://[2001:db8::1]", "[2001:db8::1]:22", "http://[2001:db8::1]"},
+			{"2001:db8::1", "https://[2001:db8::1]:8443", "2001:db8::1", "https://[2001:db8::1]:8443"},
+			{"::ffff:192.0.2.1", "http://[::ffff:192.0.2.1]", "::ffff:192.0.2.1", "http://[::ffff:192.0.2.1]"},
+		} {
+			t.Run(fmt.Sprintf("%d/%s", mode, tc.host), func(t *testing.T) {
+				ssh := []model.SSHConnection{{Name: "ssh.name", Host: tc.host, Note: "unchanged.note\ntext"}}
+				db := []model.DBConnection{{Name: "db.name", Host: tc.host, Note: "unchanged.note\ntext", Databases: []model.DatabaseInfo{{Name: "app.name", IsDefault: true}}}}
+				httpConns := []model.HTTPConnection{{Name: "http.name", Origin: tc.origin, Note: "unchanged.note\ntext"}}
+				var out bytes.Buffer
+				writeConfigSearchResultsForMode(&out, "", ssh, db, mode, httpConns)
+				for _, want := range []string{"ssh.name — " + tc.maskedHost, "db.name/app.name — " + tc.maskedHost + "/app.name", "http.name — " + tc.maskedOrigin, "Note: unchanged.note\\ntext"} {
+					if !strings.Contains(out.String(), want) {
+						t.Errorf("missing %q in %s", want, out.String())
+					}
+				}
+				if strings.Contains(out.String(), "hidden.example") {
+					t.Error("hidden host suffix leaked")
+				}
+				for _, query := range []string{tc.host, tc.origin, "hidden"} {
+					if query == "hidden" && !strings.Contains(tc.host, "hidden") {
+						continue
+					}
+					out.Reset()
+					writeConfigSearchResultsForMode(&out, query, ssh, db, mode, httpConns)
+					names := []string{"ssh.name", "db.name/app.name", "http.name"}
+					if query == tc.host {
+						names = names[:2]
+					} else if query == tc.origin {
+						names = names[2:]
+					}
+					for _, name := range names {
+						if !strings.Contains(out.String(), name) {
+							t.Errorf("full host query %q did not match %s: %s", query, name, out.String())
+						}
+					}
+				}
+				if ssh[0].Host != tc.host || db[0].Host != tc.host || httpConns[0].Origin != tc.origin {
+					t.Fatal("display mutated underlying profiles")
+				}
+			})
+		}
+	}
+}
+
 func TestRunConfigSearch(t *testing.T) {
 	apiSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
@@ -654,7 +723,7 @@ func TestRunConfigSearch(t *testing.T) {
 	if exitCode != 0 {
 		t.Fatalf("run() exitCode = %d, want 0, stderr=%q", exitCode, stderr.String())
 	}
-	const want = "SSH\n- prod-web — edge.internal — Note: production web\n- bastion — prod-gateway.internal\n\nDB\n- reporting/analytics — prod-db.internal/analytics — SSH: prod-web — Note: read-only reporting\n- prod-name/app — mysql.internal/app\n"
+	const want = "SSH\n- prod-web — edge.* — Note: production web\n- bastion — prod-gateway.*\n\nDB\n- reporting/analytics — prod-db.*/analytics — SSH: prod-web — Note: read-only reporting\n- prod-name/app — mysql.*/app\n"
 	if stdout.String() != want {
 		t.Errorf("stdout = %q, want %q", stdout.String(), want)
 	}
@@ -687,7 +756,7 @@ func TestWriteConfigSearchResultsRanksWordMatchesAndTypoDistance(t *testing.T) {
 		{Name: "prod-api", Host: "api.internal"},
 	}, nil, nil)
 
-	const want = "SSH\n├── prod-web — edge.internal\n├── staging-web — stage.internal\n└── prod-api — api.internal\n"
+	const want = "SSH\n├── prod-web — edge.*\n├── staging-web — stage.*\n└── prod-api — api.*\n"
 	if stdout.String() != want {
 		t.Errorf("stdout = %q, want %q", stdout.String(), want)
 	}
@@ -706,7 +775,7 @@ func TestWriteConfigSearchResultsRanksDatabaseWordsWithinDBSection(t *testing.T)
 		},
 	}, nil)
 
-	const want = "DB\n├── warehouse/analytics — db.internal/analytics\n└── reporting/analysis — db.internal/analysis\n"
+	const want = "DB\n├── warehouse/analytics — db.*/analytics\n└── reporting/analysis — db.*/analysis\n"
 	if stdout.String() != want {
 		t.Errorf("stdout = %q, want %q", stdout.String(), want)
 	}
@@ -769,9 +838,9 @@ func TestWriteConfigSearchResultsMatchesConfiguredDatabaseNames(t *testing.T) {
 		query string
 		want  string
 	}{
-		{query: "orders", want: "DB\n└── warehouse/orders — db.internal/orders\n"},
-		{query: "AUDIT", want: "DB\n└── warehouse/audit — db.internal/audit\n"},
-		{query: "warehouse", want: "DB\n├── warehouse/orders — db.internal/orders\n└── warehouse/audit — db.internal/audit\n"},
+		{query: "orders", want: "DB\n└── warehouse/orders — db.*/orders\n"},
+		{query: "AUDIT", want: "DB\n└── warehouse/audit — db.*/audit\n"},
+		{query: "warehouse", want: "DB\n├── warehouse/orders — db.*/orders\n└── warehouse/audit — db.*/audit\n"},
 	}
 	for _, tc := range tests {
 		t.Run(tc.query, func(t *testing.T) {
