@@ -28,17 +28,14 @@ func terminalOutput(w io.Writer) bool {
 	return ok && os.Getenv("TERM") != "dumb" && term.IsTerminal(int(f.Fd()))
 }
 
-// runFullScreen owns all terminal writes. The watcher sends immutable snapshots;
-// cancellation joins it before restoring the terminal and closing SSH resources.
+// runFullScreen takes ownership of a raw session with ANSI enabled. The watcher
+// sends immutable snapshots and is joined before the terminal is restored.
 func runFullScreen(ctx context.Context, session terminal.Session, out io.Writer, name, ranges string, watch func(context.Context, func([]portRow)) error) (err error) {
 	defer func() {
 		if restoreErr := session.Restore(); err == nil {
 			err = restoreErr
 		}
 	}()
-	if err = session.EnterRaw(); err != nil {
-		return err
-	}
 	defer func() {
 		_, restoreErr := io.WriteString(out, "\x1b[0m\x1b[?25h\x1b[?1049l")
 		if err == nil {
