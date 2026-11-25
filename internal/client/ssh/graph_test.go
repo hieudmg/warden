@@ -3,6 +3,14 @@ package ssh
 import (
 	"bytes"
 	"context"
+	"crypto/ed25519"
+	"crypto/rand"
+	"errors"
+	"io"
+	"net"
+	"os"
+	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -57,6 +65,65 @@ func TestDialGraph(t *testing.T) {
 	}
 	for i, client := range clients {
 		waitForClientClosed(t, i, client)
+	}
+}
+
+func TestDialGraphCancelsStalledAgentAuthentication(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("requires a Unix-domain SSH agent socket")
+	}
+	dir, err := os.MkdirTemp("", "warden-agent-") // Keep the Unix socket path short.
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(dir)
+	path := filepath.Join(dir, "sock")
+	listener, err := net.ListenUnix("unix", &net.UnixAddr{Name: path, Net: "unix"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer listener.Close()
+	t.Setenv("SSH_AUTH_SOCK", path)
+	_, key, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	signer, err := golangssh.NewSignerFromKey(key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	target := newTestSSHServer(t, "", signer.PublicKey())
+	node := targetNode("target", target.addr)
+	node.Username = "user"
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	done := make(chan error, 1)
+	go func() {
+		graph, err := DialGraph(ctx, model.SSHBundle{Target: node}, testOptions())
+		if graph != nil {
+			_ = graph.Close()
+		}
+		done <- err
+	}()
+	_ = listener.SetDeadline(time.Now().Add(time.Second))
+	conn, err := listener.AcceptUnix()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+	_ = conn.SetReadDeadline(time.Now().Add(time.Second))
+	var request [5]byte // Length prefix and SSH_AGENTC_REQUEST_IDENTITIES.
+	if _, err := io.ReadFull(conn, request[:]); err != nil || request[4] != 11 {
+		t.Fatalf("expected agent identity request; got %v, %v", request, err)
+	}
+	cancel()
+	select {
+	case err := <-done:
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("DialGraph got %v, want cancellation", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("DialGraph did not return while the local agent was stalled")
 	}
 }
 

@@ -7,12 +7,17 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"net"
-	"sort"
+	"regexp"
+	"runtime"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
+	"unicode"
 
 	golangssh "golang.org/x/crypto/ssh"
 
@@ -22,8 +27,9 @@ import (
 )
 
 const (
-	remoteListenerCommand = "ss -H -ltn"
-	pollInterval          = 2 * time.Second
+	remoteListenerCommand        = "ss -H -ltn"
+	remoteListenerProcessCommand = "ss -H -ltnp"
+	pollInterval                 = 2 * time.Second
 )
 
 type portRange struct {
@@ -99,6 +105,14 @@ func (r PortRanges) Contains(port int) bool {
 // Watch connects to the saved SSH bundle and watches its TCP listeners until
 // ctx is canceled. Matching ports are forwarded to the same port on localhost.
 func Watch(ctx context.Context, bundle model.SSHBundle, rangeSpec string, stdout, stderr io.Writer) error {
+	var openTerminal func() (terminal.Session, error)
+	if terminalOutput(stdout) {
+		openTerminal = terminal.NewSession
+	}
+	return watchBundle(ctx, bundle, rangeSpec, stdout, stderr, openTerminal, pollInterval)
+}
+
+func watchBundle(ctx context.Context, bundle model.SSHBundle, rangeSpec string, stdout, stderr io.Writer, openTerminal func() (terminal.Session, error), interval time.Duration) error {
 	ranges, err := ParsePortRanges(rangeSpec)
 	if err != nil {
 		return err
@@ -114,34 +128,53 @@ func Watch(ctx context.Context, bundle model.SSHBundle, rangeSpec string, stdout
 		return err
 	}
 	defer graph.Close()
+	defer graph.Abort() // Close the outer transport before closing the jump chain.
 
-	scan := func(ctx context.Context) ([]int, error) {
-		return scanListeningPorts(ctx, graph.Target())
+	target := graph.Target()
+	scan := func(ctx context.Context) (map[int]string, error) {
+		return scanListeningPorts(ctx, func(ctx context.Context, command string) (string, error) {
+			return runListenerCommand(ctx, target, command)
+		})
 	}
-	if terminalOutput(stdout) {
-		session, err := terminal.NewSession()
+	if openTerminal != nil {
+		session, err := openTerminal()
 		if err == nil {
 			if session.SupportsANSI() {
 				return runFullScreen(ctx, session, stdout, bundle.Target.Name, rangeSpec, func(ctx context.Context, update func([]portRow)) error {
-					return watchPortsWithView(ctx, scan, ranges, graph.Target(), io.Discard, io.Discard, pollInterval, update)
+					// Watch owns this graph exclusively. On quit, close its outer
+					// socket to interrupt SSH startup and channel I/O, even across jumps.
+					stopAbort := context.AfterFunc(ctx, graph.Abort)
+					defer stopAbort()
+					return watchPortsWithView(ctx, scan, ranges, target, io.Discard, io.Discard, interval, update, &processProbe{bundle: bundle})
 				})
 			}
 			_ = session.Restore()
 		}
 	}
 	fmt.Fprintf(stdout, "port-watch: watching %s on %s; forwards listen on 127.0.0.1\n", rangeSpec, bundle.Target.Name)
-	return watchPorts(ctx, scan, ranges, graph.Target(), stdout, stderr, pollInterval)
+	return watchPorts(ctx, scan, ranges, target, stdout, stderr, interval)
 }
 
 // watchPorts owns the changing set of local listeners. The scan callback is
 // called immediately and then at interval until cancellation.
-func watchPorts(ctx context.Context, scan func(context.Context) ([]int, error), ranges PortRanges, target portDialer, stdout, stderr io.Writer, interval time.Duration) error {
-	return watchPortsWithView(ctx, scan, ranges, target, stdout, stderr, interval, nil)
+func watchPorts(ctx context.Context, scan func(context.Context) (map[int]string, error), ranges PortRanges, target portDialer, stdout, stderr io.Writer, interval time.Duration) error {
+	return watchPortsWithView(ctx, scan, ranges, target, stdout, stderr, interval, nil, nil)
 }
 
-func watchPortsWithView(ctx context.Context, scan func(context.Context) ([]int, error), ranges PortRanges, target portDialer, stdout, stderr io.Writer, interval time.Duration, update func([]portRow)) error {
+func watchPortsWithView(ctx context.Context, scan func(context.Context) (map[int]string, error), ranges PortRanges, target portDialer, stdout, stderr io.Writer, interval time.Duration, update func([]portRow), probe *processProbe) error {
 	active := make(map[int]*portForward)
-	lastFailure := make(map[int]string)
+	lastFailure := make(map[int]error)
+	var history map[int]portRow
+	if update != nil {
+		history = make(map[int]portRow)
+	}
+	publish := func() {
+		rows := make([]portRow, 0, len(history))
+		for _, port := range slices.Sorted(maps.Keys(history)) {
+			rows = append(rows, history[port])
+		}
+		update(rows)
+	}
 	defer func() {
 		for _, forward := range active {
 			_ = forward.Close()
@@ -149,45 +182,42 @@ func watchPortsWithView(ctx context.Context, scan func(context.Context) ([]int, 
 	}()
 
 	for {
-		ports, err := scan(ctx)
+		listening, err := scan(ctx)
 		if err != nil {
 			if ctx.Err() != nil {
 				return nil
 			}
 			return fmt.Errorf("inspect remote TCP listeners: %w", err)
 		}
-		listening := make(map[int]bool)
-		for _, port := range ports {
-			if ranges.Contains(port) {
-				listening[port] = true
+		for port := range listening {
+			if !ranges.Contains(port) {
+				delete(listening, port)
 			}
 		}
 
 		for port := range lastFailure {
-			if !listening[port] {
+			if _, ok := listening[port]; !ok {
 				delete(lastFailure, port)
 			}
 		}
 		for port, forward := range active {
-			if listening[port] {
+			if _, ok := listening[port]; ok {
 				continue
 			}
 			_ = forward.Close()
 			delete(active, port)
-			delete(lastFailure, port)
 			fmt.Fprintf(stdout, "closed http://127.0.0.1:%d/ (remote listener stopped)\n", port)
 		}
-		for _, port := range sortedPorts(listening) {
+		for _, port := range slices.Sorted(maps.Keys(listening)) {
 			if active[port] != nil {
 				continue
 			}
 			forward, err := newPortForward(target, port)
 			if err != nil {
-				message := err.Error()
-				if lastFailure[port] != message {
+				if prior := lastFailure[port]; prior == nil || prior.Error() != err.Error() {
 					fmt.Fprintf(stderr, "port-watch: cannot forward localhost:%d: %v\n", port, err)
-					lastFailure[port] = message
 				}
+				lastFailure[port] = err
 				continue
 			}
 			active[port] = forward
@@ -195,66 +225,116 @@ func watchPortsWithView(ctx context.Context, scan func(context.Context) ([]int, 
 			fmt.Fprintf(stdout, "forwarding http://127.0.0.1:%d/ -> 127.0.0.1:%d\n", port, port)
 		}
 
+		var processNames <-chan map[int]string
+		setProcessNames := func(names map[int]string) {
+			changed := false
+			for port := range listening {
+				row := history[port]
+				if row.process != names[port] {
+					row.process = names[port]
+					history[port] = row
+					changed = true
+				}
+			}
+			if changed {
+				publish()
+			}
+		}
 		if update != nil {
-			rows := make([]portRow, 0, len(listening))
-			for _, port := range sortedPorts(listening) {
-				rows = append(rows, portRow{port: port, failure: lastFailure[port]})
+			for port, row := range history {
+				if _, ok := listening[port]; !ok && !row.closed {
+					history[port] = portRow{port: port, process: row.process, closed: true}
+				}
 			}
-			update(rows)
+			for port, process := range listening {
+				prior := history[port]
+				if probe != nil && !prior.closed {
+					// Avoid blanking a live name while its refresh is pending.
+					process = prior.process
+				}
+				row := portRow{port: port, process: process}
+				if err := lastFailure[port]; err != nil {
+					row.failure = err.Error()
+					row.conflict = isAddressInUse(err)
+				}
+				history[port] = row
+			}
+			publish()
+
+			if probe != nil && len(listening) > 0 {
+				processNames = probe.start(ctx)
+				if processNames == nil {
+					setProcessNames(nil)
+				}
+			}
 		}
 
+		// Only the authoritative scan controls the cadence. Accept optional
+		// names during this interval, but never carry a result into a newer scan.
 		timer := time.NewTimer(interval)
-		select {
-		case <-ctx.Done():
-			if !timer.Stop() {
-				<-timer.C
+	waitForPoll:
+		for {
+			select {
+			case names := <-processNames:
+				probe.pending = nil
+				processNames = nil
+				setProcessNames(names)
+			case <-ctx.Done():
+				timer.Stop()
+				return nil
+			case <-timer.C:
+				break waitForPoll
 			}
-			return nil
-		case <-timer.C:
 		}
 	}
 }
 
-func sortedPorts(set map[int]bool) []int {
-	ports := make([]int, 0, len(set))
-	for port := range set {
-		ports = append(ports, port)
-	}
-	sort.Ints(ports)
-	return ports
+func isAddressInUse(err error) bool {
+	// Winsock returns WSAEADDRINUSE (10048), not the POSIX errno.
+	return errors.Is(err, syscall.EADDRINUSE) || (runtime.GOOS == "windows" && errors.Is(err, syscall.Errno(10048)))
 }
 
-func scanListeningPorts(ctx context.Context, client *golangssh.Client) ([]int, error) {
-	session, err := client.NewSession()
+func scanListeningPorts(ctx context.Context, run func(context.Context, string) (string, error)) (map[int]string, error) {
+	output, err := run(ctx, remoteListenerCommand)
 	if err != nil {
 		return nil, err
+	}
+	return parseListeningPorts(output, false)
+}
+
+func runListenerCommand(ctx context.Context, client *golangssh.Client, command string) (string, error) {
+	session, err := client.NewSession()
+	if err != nil {
+		return "", err
 	}
 	defer session.Close()
 	var stdout, stderr strings.Builder
 	session.Stdout = &stdout
 	session.Stderr = &stderr
-	if err := session.Start(remoteListenerCommand); err != nil {
-		return nil, err
+	if err := session.Start(command); err != nil {
+		return "", err
 	}
 	wait := make(chan error, 1)
 	go func() { wait <- session.Wait() }()
 	select {
 	case <-ctx.Done():
 		_ = session.Close()
-		return nil, ctx.Err()
+		return "", ctx.Err()
 	case err := <-wait:
 		if err != nil {
 			if stderr.Len() > 0 {
-				return nil, fmt.Errorf("%w: %s", err, strings.TrimSpace(stderr.String()))
+				return "", fmt.Errorf("%w: %s", err, strings.TrimSpace(stderr.String()))
 			}
-			return nil, err
+			return "", err
 		}
 	}
-	return parseListeningPorts(stdout.String())
+	return stdout.String(), nil
 }
 
-func parseListeningPorts(output string) ([]int, error) {
-	set := make(map[int]bool)
+var ssProcessTuple = regexp.MustCompile(`\("([^"]*)",pid=[0-9]+,fd=[0-9]+\)`)
+
+func parseListeningPorts(output string, processes bool) (map[int]string, error) {
+	listeners := make(map[int]string)
 	for lineNumber, line := range strings.Split(output, "\n") {
 		line = strings.TrimSpace(line)
 		if line == "" {
@@ -276,9 +356,24 @@ func parseListeningPorts(output string) ([]int, error) {
 		if err != nil || port < 1 || port > 65535 {
 			return nil, fmt.Errorf("invalid TCP port in ss row %d: %q", lineNumber+1, address)
 		}
-		set[port] = true
+		name := listeners[port]
+		if processes && len(fields) > 5 && strings.HasPrefix(fields[5], "users:((") {
+			for _, match := range ssProcessTuple.FindAllStringSubmatch(line, -1) {
+				candidate := strings.TrimSpace(strings.Map(func(r rune) rune {
+					if !unicode.IsPrint(r) {
+						return -1
+					}
+					return r
+				}, match[1]))
+				// Choose one stable name across processes and addresses for this port.
+				if candidate != "" && (name == "" || candidate < name) {
+					name = candidate
+				}
+			}
+		}
+		listeners[port] = name
 	}
-	return sortedPorts(set), nil
+	return listeners, nil
 }
 
 type portDialer interface {

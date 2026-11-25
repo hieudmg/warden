@@ -154,13 +154,22 @@ warden upgrade
 warden-server upgrade
 ```
 
-`port-watch` opens a full-screen view on an ANSI-capable terminal, showing the
-connection, watched ranges, and currently listening ports. Successful forwards
-have clickable local HTTP URLs; forwarding failures appear in red in the LOCAL
-URL column and are retried automatically. Use `j`/`k` to scroll, `g`/`G` for the
-top/end, and `q` or Ctrl-C to quit. URLs assume HTTP; use the forwarded port with
-the appropriate client for non-HTTP services. Redirected output keeps the
-plain-text forwarding/closure log without terminal escape sequences.
+`port-watch` opens a full-screen view on an ANSI-capable terminal, with **Host
+process name**, **Host port**, and **Client URL** columns sorted by port number.
+The process name is best effort: `—` means the remote `ss` did not provide a
+usable name without elevated privileges. If multiple names are visible for a
+port, the view shows the first in lexical order.
+
+Successful local binds show a clickable HTTP URL. Closed ports stay gray in
+the table until the session ends and reuse their row if they reopen. Local
+address conflicts are yellow; other bind errors are red. Bind failures are
+retried automatically and show no link. Both ends of the forward use IPv4
+loopback, so a service listening only on a remote non-loopback address may be
+listed but unreachable. Use the appropriate client for non-HTTP services.
+
+Use `j`/`k` to scroll, `g`/`G` for top/end, and `q` or Ctrl-C to quit.
+Redirected output keeps the plain-text forwarding/closure log without terminal
+escape sequences.
 
 ### Copy backends
 

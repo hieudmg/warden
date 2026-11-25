@@ -10,13 +10,17 @@ import (
 	"unicode"
 
 	"golang.org/x/term"
+	"golang.org/x/text/width"
 
 	"warden/internal/client/terminal"
 )
 
 type portRow struct {
-	port    int
-	failure string
+	port     int
+	process  string
+	failure  string
+	closed   bool
+	conflict bool
 }
 
 func terminalOutput(w io.Writer) bool {
@@ -155,24 +159,41 @@ func clampOffset(offset, count, height int) int {
 	return offset
 }
 
-func cleanText(s string) string {
-	return strings.Map(func(r rune) rune {
-		if unicode.IsControl(r) {
-			return -1
-		}
-		return r
-	}, s)
+func clipped(s string, limit int) string {
+	text, _ := clipCells(s, limit)
+	return text
 }
 
-func clipped(s string, width int) string {
-	if width <= 0 {
-		return ""
+// clipCells treats ambiguous characters as single-cell. Strip format and
+// presentation modifiers to avoid common terminal-dependent width changes.
+func clipCells(s string, limit int) (string, int) {
+	if limit <= 0 {
+		return "", 0
 	}
-	runes := []rune(cleanText(s))
-	if len(runes) > width {
-		return string(runes[:width])
+	var text strings.Builder
+	cells := 0
+	for _, r := range s {
+		if unicode.IsControl(r) || unicode.In(r, unicode.Cf, unicode.Variation_Selector) || r == '\u20e3' {
+			continue
+		}
+		if unicode.In(r, unicode.Mn, unicode.Me) {
+			if cells > 0 {
+				text.WriteRune(r)
+			}
+			continue
+		}
+		size := 1
+		switch width.LookupRune(r).Kind() {
+		case width.EastAsianFullwidth, width.EastAsianWide:
+			size = 2
+		}
+		if cells+size > limit {
+			break
+		}
+		text.WriteRune(r)
+		cells += size
 	}
-	return string(runes)
+	return text.String(), cells
 }
 
 func renderScreen(name, ranges string, rows []portRow, width, height, offset int) string {
@@ -185,10 +206,13 @@ func renderScreen(name, ranges string, rows []portRow, width, height, offset int
 	// Leave the last column unused to avoid automatic wrapping/scrolling.
 	width--
 	offset = clampOffset(offset, len(rows), height)
+	const processWidth = len("Host process name")
+	const portWidth = len("Host port")
+	const prefixWidth = processWidth + portWidth + 4
 	lines := []string{
-		"\x1b[1m" + clipped("Watching "+cleanText(name)+" · ports "+ranges, width) + "\x1b[0m",
+		"\x1b[1m" + clipped("Watching "+name+" · ports "+ranges, width) + "\x1b[0m",
 		"",
-		clipped("REMOTE PORT   LOCAL URL", width),
+		clipped("Host process name  Host port  Client URL", width),
 		"",
 	}
 	if len(rows) == 0 {
@@ -199,17 +223,25 @@ func renderScreen(name, ranges string, rows []portRow, width, height, offset int
 			end = len(rows)
 		}
 		for _, row := range rows[offset:end] {
-			prefix := fmt.Sprintf("%-14d", row.port)
-			if width <= len(prefix) {
-				lines = append(lines, clipped(prefix, width))
-				continue
+			process, cells := clipCells(row.process, processWidth)
+			if process == "" {
+				process, cells = "—", 1
 			}
-			if row.failure != "" {
-				lines = append(lines, prefix+"\x1b[31m"+clipped(row.failure, width-len(prefix))+"\x1b[0m")
-			} else {
+			prefix := fmt.Sprintf("%s%s  %-*d  ", process, strings.Repeat(" ", processWidth-cells), portWidth, row.port)
+			line := clipped(prefix, width)
+			remaining := width - prefixWidth
+			switch {
+			case row.closed:
+				line = "\x1b[90m" + line + clipped("closed", remaining) + "\x1b[0m"
+			case row.conflict:
+				line = "\x1b[33m" + line + clipped("address already in use", remaining) + "\x1b[0m"
+			case row.failure != "":
+				line = "\x1b[31m" + line + clipped(row.failure, remaining) + "\x1b[0m"
+			case remaining > 0:
 				url := fmt.Sprintf("http://127.0.0.1:%d/", row.port)
-				lines = append(lines, prefix+"\x1b]8;;"+url+"\x1b\\\x1b[36m"+clipped(url, width-len(prefix))+"\x1b[0m\x1b]8;;\x1b\\")
+				line += "\x1b]8;;" + url + "\x1b\\" + clipped(url, remaining) + "\x1b]8;;\x1b\\"
 			}
+			lines = append(lines, line)
 		}
 	}
 	lines = append(lines, clipped(fmt.Sprintf("%d ports · j/k scroll · g/G top/end · q/Ctrl-C quit", len(rows)), width))
