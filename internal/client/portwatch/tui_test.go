@@ -172,7 +172,8 @@ func TestRenderScreenClipsAndPadsWideTextByTerminalCell(t *testing.T) {
 func TestFullScreenRefreshRetainsDisappearedPortsAndUpdatesNames(t *testing.T) {
 	var output bytes.Buffer
 	cause := errors.New("scan stopped")
-	err := runFullScreen(context.Background(), &viewSession{}, &output, "dev", "3000-4000", func(ctx context.Context, update func([]portRow)) error {
+	session := &viewSession{raw: true}
+	err := runFullScreen(context.Background(), session, &output, "dev", "3000-4000", func(ctx context.Context, update func([]portRow)) error {
 		update([]portRow{{port: 3000, process: "node"}, {port: 4000}})
 		update([]portRow{{port: 3000, process: "node", closed: true}, {port: 4000}})
 		update([]portRow{{port: 3000, process: "python"}, {port: 4000}})
@@ -201,7 +202,7 @@ func TestFullScreenRefreshRetainsDisappearedPortsAndUpdatesNames(t *testing.T) {
 func TestFullScreenRestoresTerminalOnErrorAndQuit(t *testing.T) {
 	for _, quit := range []bool{false, true} {
 		t.Run(map[bool]string{false: "error", true: "quit"}[quit], func(t *testing.T) {
-			session := &viewSession{}
+			session := &viewSession{raw: true}
 			if quit {
 				session.input.WriteString("q")
 			}
@@ -222,7 +223,7 @@ func TestFullScreenRestoresTerminalOnErrorAndQuit(t *testing.T) {
 			if quit && err != nil {
 				t.Fatal(err)
 			}
-			if !session.restored || !session.raw {
+			if !session.restored {
 				t.Fatalf("terminal lifecycle: %#v", session)
 			}
 			for _, escape := range []string{"\x1b[?1049h", "\x1b[?1049l", "\x1b[?25h"} {

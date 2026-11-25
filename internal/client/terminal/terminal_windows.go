@@ -30,14 +30,13 @@ var kernel32 = syscall.NewLazyDLL("kernel32.dll")
 // session is never terminated out from under deferred restoration.
 var procSetConsoleCtrlHandler = kernel32.NewProc("SetConsoleCtrlHandler")
 
-// Console-mode and control-handler calls go through these package
-// variables so Windows-only tests can inject failures and record the
-// calls EnterRaw makes, verifying that every failure after a console mode
-// change rolls the console back.
+// Console calls go through these variables so Windows-only tests can
+// exercise mode changes and resize polling without a real console.
 var (
-	winGetConsoleMode = windows.GetConsoleMode
-	winSetConsoleMode = windows.SetConsoleMode
-	winSetCtrlHandler = func(cb uintptr, add bool) (ok bool, callErr error) {
+	winGetConsoleMode             = windows.GetConsoleMode
+	winSetConsoleMode             = windows.SetConsoleMode
+	winGetConsoleScreenBufferInfo = windows.GetConsoleScreenBufferInfo
+	winSetCtrlHandler             = func(cb uintptr, add bool) (ok bool, callErr error) {
 		var addArg uintptr
 		if add {
 			addArg = 1
@@ -71,7 +70,7 @@ type windowsSession struct {
 	ansi    bool
 
 	stopResize chan struct{}
-	stopOnce   sync.Once
+	resizeDone chan struct{}
 	events     chan struct{}
 }
 
@@ -90,9 +89,8 @@ func newSession() (Session, error) {
 }
 
 // EnterRaw switches the console into raw input mode, enables VT output
-// processing, and registers the console control handler. Every failure
-// after a console mode changed rolls the changed mode back so a failed
-// EnterRaw never leaves the console in raw or VT state.
+// processing, and registers the console control handler. If registration
+// fails, it attempts to restore both modes and reports any rollback errors.
 func (s *windowsSession) EnterRaw() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -115,28 +113,16 @@ func (s *windowsSession) EnterRaw() error {
 	// Output VT processing is best-effort: raw input still works if it
 	// cannot be enabled, and SupportsANSI reports false so the picker
 	// rejects the session later.
-	vtChanged := false
 	if err := winGetConsoleMode(outH, &s.origOut); err == nil {
-		if err := winSetConsoleMode(outH, s.origOut|winOutputVTExtra); err != nil {
-			s.origOut = 0 // no change was made; nothing to restore
-		} else {
-			s.ansi = true
-			vtChanged = true
-		}
+		s.ansi = winSetConsoleMode(outH, s.origOut|winOutputVTExtra) == nil
 	}
 
 	cb := syscall.NewCallback(consoleCtrlHandler)
 	if ok, callErr := winSetCtrlHandler(cb, true); !ok {
-		// Roll back the input mode and, when it was changed, the output
-		// VT mode and ANSI flag so the console and session state stay
-		// consistent after the failed EnterRaw.
-		_ = winSetConsoleMode(inH, s.origIn)
-		if vtChanged {
-			_ = winSetConsoleMode(outH, s.origOut)
-		}
+		restoreErr := s.restoreModes()
 		s.origOut = 0
 		s.ansi = false
-		return fmt.Errorf("register console ctrl handler: %v", callErr)
+		return errors.Join(fmt.Errorf("register console ctrl handler: %w", callErr), restoreErr)
 	}
 	s.handler = cb
 
@@ -145,37 +131,68 @@ func (s *windowsSession) EnterRaw() error {
 	return nil
 }
 
-// Restore unregisters the control handler and returns the console to its
-// original modes, then stops resize delivery and closes ResizeEvents.
+// restoreModes rolls back input and any successful output mode write.
+// The saved output mode can legitimately be zero.
+func (s *windowsSession) restoreModes() error {
+	var err error
+	if mErr := winSetConsoleMode(windows.Handle(s.in.Fd()), s.origIn); mErr != nil {
+		err = fmt.Errorf("restore console input mode: %w", mErr)
+	}
+	if s.ansi {
+		if mErr := winSetConsoleMode(windows.Handle(s.out.Fd()), s.origOut); mErr != nil {
+			err = errors.Join(err, fmt.Errorf("restore console output mode: %w", mErr))
+		}
+	}
+	return err
+}
+
+// Restore stops resize delivery, unregisters the control handler and
+// returns the console to its original modes.
 func (s *windowsSession) Restore() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if s.done {
+		return nil
+	}
+	if s.stopResize != nil {
+		close(s.stopResize)
+	}
+	if s.resizeDone != nil {
+		<-s.resizeDone // The poller, including Size, does not acquire s.mu.
+	}
 	var err error
 	if s.raw {
-		if ok, callErr := winSetCtrlHandler(s.handler, false); !ok && err == nil {
-			err = fmt.Errorf("unregister console ctrl handler: %v", callErr)
+		if ok, callErr := winSetCtrlHandler(s.handler, false); !ok {
+			err = fmt.Errorf("unregister console ctrl handler: %w", callErr)
 		}
 		s.handler = 0
-		if mErr := winSetConsoleMode(windows.Handle(s.in.Fd()), s.origIn); mErr != nil && err == nil {
-			err = fmt.Errorf("restore console input mode: %w", mErr)
-		}
-		if s.origOut != 0 {
-			_ = winSetConsoleMode(windows.Handle(s.out.Fd()), s.origOut)
-		}
+		err = errors.Join(err, s.restoreModes())
 		s.raw = false
 	}
-	s.stopOnce.Do(func() { close(s.stopResize) })
-	if !s.done {
-		s.done = true
+	if s.events != nil {
 		close(s.events)
 	}
+	s.done = true
 	return err
 }
 
 // startResize polls the visible console window size because Windows does
 // not deliver resize notifications on the byte stream.
 func (s *windowsSession) startResize() {
+	if s.stopResize == nil {
+		s.stopResize = make(chan struct{})
+	}
+	if s.events == nil {
+		s.events = make(chan struct{})
+	}
+	s.resizeDone = make(chan struct{})
 	go func() {
+		defer close(s.resizeDone)
+		select {
+		case <-s.stopResize:
+			return
+		default:
+		}
 		lastW, lastH := s.Size()
 		t := time.NewTicker(200 * time.Millisecond)
 		defer t.Stop()
@@ -186,6 +203,8 @@ func (s *windowsSession) startResize() {
 				if w != lastW || h != lastH {
 					lastW, lastH = w, h
 					select {
+					case <-s.stopResize:
+						return
 					case s.events <- struct{}{}:
 					default:
 					}
@@ -200,7 +219,7 @@ func (s *windowsSession) startResize() {
 // Size reports the visible console window dimensions in character cells.
 func (s *windowsSession) Size() (int, int) {
 	var info windows.ConsoleScreenBufferInfo
-	if err := windows.GetConsoleScreenBufferInfo(windows.Handle(s.out.Fd()), &info); err != nil {
+	if err := winGetConsoleScreenBufferInfo(windows.Handle(s.out.Fd()), &info); err != nil {
 		return 0, 0
 	}
 	cols := int(info.Window.Right - info.Window.Left + 1)

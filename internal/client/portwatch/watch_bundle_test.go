@@ -25,6 +25,120 @@ import (
 	"warden/internal/model"
 )
 
+func TestWatchBundleNegotiatesANSIAfterEnteringRaw(t *testing.T) {
+	rawErr := errors.New("raw setup failed")
+	restoreErr := errors.New("restore failed")
+	for _, tc := range []struct {
+		name       string
+		vt         bool
+		rawErr     error
+		restoreErr error
+	}{
+		{name: "VT enabled", vt: true},
+		{name: "VT unavailable"},
+		{name: "VT unavailable and restore failed", restoreErr: restoreErr},
+		{name: "raw setup failed", rawErr: rawErr},
+		{name: "raw setup and restore failed", rawErr: rawErr, restoreErr: restoreErr},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			terminalFailed := tc.rawErr != nil || tc.restoreErr != nil
+			var polls atomic.Int32
+			peer := newWatchBundlePeer(t, watchKnownHosts(t), func(_ int, ch golangssh.NewChannel, _ chan struct{}) {
+				polls.Add(1)
+				if terminalFailed {
+					_ = ch.Reject(golangssh.Prohibited, "polled despite terminal failure")
+					return
+				}
+				// The full-screen worker can poll before the first render cancels.
+				channel, reqs, err := ch.Accept()
+				if err == nil {
+					defer channel.Close()
+					if req := <-reqs; req != nil {
+						replyWatchListener(req, channel, 1) // outside the watched range
+					}
+				}
+			}, false)
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			session := &negotiatingWatchSession{vt: tc.vt, rawErr: tc.rawErr, restoreErr: tc.restoreErr}
+			var output bytes.Buffer
+			out := watchOutputFunc(func(p []byte) (int, error) {
+				if bytes.ContainsRune(p, '\x1b') {
+					if !session.SupportsANSI() {
+						t.Errorf("escape sequence written without active VT: %q", p)
+					}
+				} else if !session.restored {
+					t.Errorf("plain output written before terminal restore: %q", p)
+				}
+				if !terminalFailed && (bytes.Contains(p, []byte("Host process name")) || bytes.Contains(p, []byte("port-watch: watching"))) {
+					cancel()
+				}
+				return output.Write(p)
+			})
+			err := watchBundle(ctx, model.SSHBundle{Target: peer.node}, "3000", out, io.Discard, func() (terminal.Session, error) {
+				return session, nil
+			}, time.Second)
+			if !terminalFailed && err != nil {
+				t.Errorf("watchBundle error = %v, want nil", err)
+			}
+			for _, want := range []error{tc.rawErr, tc.restoreErr} {
+				if want != nil && !errors.Is(err, want) {
+					t.Errorf("watchBundle error = %v, want it to include %v", err, want)
+				}
+			}
+			got := output.String()
+			switch {
+			case tc.vt:
+				for _, want := range []string{"\x1b[?1049h", "Host process name", "\x1b[?1049l"} {
+					if !strings.Contains(got, want) {
+						t.Errorf("missing %q in %q", want, got)
+					}
+				}
+			case terminalFailed:
+				if got != "" || polls.Load() != 0 {
+					t.Errorf("terminal failure started plain watch: output = %q, polls = %d", got, polls.Load())
+				}
+			default:
+				if strings.ContainsRune(got, '\x1b') || !strings.Contains(got, "port-watch: watching") {
+					t.Errorf("expected plain fallback without escapes, got %q", got)
+				}
+			}
+			if session.rawCalls != 1 || session.restoreCalls != 1 {
+				t.Errorf("EnterRaw called %d times, Restore called %d times; want one each", session.rawCalls, session.restoreCalls)
+			}
+		})
+	}
+}
+
+type negotiatingWatchSession struct {
+	viewSession
+	vt                     bool
+	rawErr, restoreErr     error
+	rawCalls, restoreCalls int
+}
+
+func (s *negotiatingWatchSession) EnterRaw() error {
+	s.rawCalls++
+	if s.rawErr != nil {
+		return s.rawErr
+	}
+	return s.viewSession.EnterRaw()
+}
+
+func (s *negotiatingWatchSession) SupportsANSI() bool { return s.vt && s.raw && !s.restored }
+
+func (s *negotiatingWatchSession) Restore() error {
+	s.restoreCalls++
+	if s.restoreErr != nil {
+		return s.restoreErr
+	}
+	return s.viewSession.Restore()
+}
+
+type watchOutputFunc func([]byte) (int, error)
+
+func (f watchOutputFunc) Write(p []byte) (int, error) { return f(p) }
+
 func TestWatchBundleIsolatesProcessLookupFromSingleSessionPolling(t *testing.T) {
 	for _, mode := range []string{"stalled-exec", "rejected-exec", "rejected-auth", "unknown-host", "reuse", "plain"} {
 		t.Run(mode, func(t *testing.T) {

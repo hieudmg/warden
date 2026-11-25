@@ -139,6 +139,13 @@ func watchBundle(ctx context.Context, bundle model.SSHBundle, rangeSpec string, 
 	if openTerminal != nil {
 		session, err := openTerminal()
 		if err == nil {
+			// On Windows, entering raw mode also attempts to enable VT output.
+			if err := session.EnterRaw(); err != nil {
+				if restoreErr := session.Restore(); restoreErr != nil {
+					return errors.Join(err, fmt.Errorf("restore terminal after raw mode setup: %w", restoreErr))
+				}
+				return err
+			}
 			if session.SupportsANSI() {
 				return runFullScreen(ctx, session, stdout, bundle.Target.Name, rangeSpec, func(ctx context.Context, update func([]portRow)) error {
 					// Watch owns this graph exclusively. On quit, close its outer
@@ -148,7 +155,9 @@ func watchBundle(ctx context.Context, bundle model.SSHBundle, rangeSpec string, 
 					return watchPortsWithView(ctx, scan, ranges, target, io.Discard, io.Discard, interval, update, &processProbe{bundle: bundle})
 				})
 			}
-			_ = session.Restore()
+			if err := session.Restore(); err != nil {
+				return fmt.Errorf("restore terminal before plain port-watch: %w", err)
+			}
 		}
 	}
 	fmt.Fprintf(stdout, "port-watch: watching %s on %s; forwards listen on 127.0.0.1\n", rangeSpec, bundle.Target.Name)
