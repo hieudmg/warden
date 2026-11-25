@@ -347,7 +347,9 @@ func TestProxyConnectStuckProxyBoundedByDeadline(t *testing.T) {
 	node := model.SSHNode{Name: "stuck", ProxyHost: host, ProxyPort: mustAtoi(portStr)}
 
 	start := time.Now()
-	conn, err := proxyConnect(context.Background(), nil, node, "10.255.255.1:22", 300*time.Millisecond)
+	conn, err := proxyConnect(func(addr string) (net.Conn, error) {
+		return (&net.Dialer{}).DialContext(t.Context(), "tcp", addr)
+	}, node, "10.255.255.1:22", 300*time.Millisecond)
 	elapsed := time.Since(start)
 	if err == nil {
 		if conn != nil {

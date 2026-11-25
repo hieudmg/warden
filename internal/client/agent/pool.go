@@ -60,11 +60,13 @@ type Pool struct {
 	now  func() time.Time
 	ttl  time.Duration
 
-	entries       map[[sha256.Size]byte]*entry
-	emptyCh       chan struct{}
-	retiredActive int
-	used          bool
-	closed        bool
+	entries            map[[sha256.Size]byte]*entry
+	emptyCh            chan struct{}
+	retiredActive      int
+	exclusiveActive    int
+	exclusiveIdleUntil time.Time
+	used               bool
+	closed             bool
 }
 
 // NewPool creates a graph pool. The clock and TTL are injectable so expiry can
@@ -210,6 +212,63 @@ func (p *Pool) Acquire(ctx context.Context, bundle model.SSHBundle) (*Lease, err
 			p.signalEmptyLocked()
 		}
 	}
+}
+
+// dialExclusive tracks an operation in the agent's idle lifecycle without
+// inserting its graph into the reusable cache. The caller may abort its
+// graph, and must release it after closing all operation-specific resources.
+func (p *Pool) dialExclusive(ctx context.Context, bundle model.SSHBundle) (*clientssh.Graph, func(), error) {
+	if err := ctx.Err(); err != nil {
+		return nil, nil, err
+	}
+	if p == nil {
+		return nil, nil, ErrPoolClosed
+	}
+	p.mu.Lock()
+	p.ensureLocked()
+	if p.closed {
+		p.mu.Unlock()
+		return nil, nil, ErrPoolClosed
+	}
+	dial := p.dial
+	if dial == nil {
+		p.mu.Unlock()
+		return nil, nil, errors.New("agent graph dialer is nil")
+	}
+	p.exclusiveActive++
+	p.mu.Unlock()
+
+	graph, err := dial(ctx, bundle)
+	if err == nil && graph == nil {
+		err = errors.New("agent graph dialer returned nil graph")
+	}
+	if err == nil {
+		err = ctx.Err()
+	}
+	p.mu.Lock()
+	if err == nil && p.closed {
+		err = ErrPoolClosed
+	}
+	if err != nil {
+		p.exclusiveActive--
+		p.signalEmptyLocked()
+		p.mu.Unlock()
+		closeGraph(graph)
+		return nil, nil, err
+	}
+	p.used = true
+	p.mu.Unlock()
+
+	return graph, sync.OnceFunc(func() {
+		closeGraph(graph)
+		p.mu.Lock()
+		defer p.mu.Unlock()
+		p.exclusiveActive--
+		if !p.closed {
+			p.exclusiveIdleUntil = p.now().Add(p.ttl)
+		}
+		p.signalEmptyLocked()
+	}), nil
 }
 
 // Lease owns one active reference to a pooled graph. Release is idempotent;
@@ -383,6 +442,9 @@ func (p *Pool) Expire() {
 	p.mu.Lock()
 	p.ensureLocked()
 	now := p.now()
+	if !now.Before(p.exclusiveIdleUntil) {
+		p.exclusiveIdleUntil = time.Time{}
+	}
 	for key, e := range p.entries {
 		if e.dialing || e.retired || e.active != 0 || now.Sub(e.lastUsed) < p.ttl {
 			continue
@@ -465,6 +527,7 @@ func (p *Pool) Close() error {
 		return nil
 	}
 	p.closed = true
+	p.exclusiveIdleUntil = time.Time{}
 	for key, e := range p.entries {
 		delete(p.entries, key)
 		if !e.retired {
@@ -512,7 +575,7 @@ func (p *Pool) signalEmptyLocked() {
 }
 
 func (p *Pool) isEmptyLocked() bool {
-	return len(p.entries) == 0 && p.retiredActive == 0
+	return len(p.entries) == 0 && p.retiredActive == 0 && p.exclusiveActive == 0 && p.exclusiveIdleUntil.IsZero()
 }
 
 func bundleFingerprint(bundle model.SSHBundle) ([sha256.Size]byte, error) {

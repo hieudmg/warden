@@ -1326,7 +1326,9 @@ func TestRunXSSHWithoutNameRequiresInteractiveTerminal(t *testing.T) {
 // runtime directory is isolated per test to avoid cross-test clients.
 func startCLITestAgent(t *testing.T) func() {
 	t.Helper()
-	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+	cache := t.TempDir()
+	t.Setenv("XDG_CACHE_HOME", cache)
+	t.Setenv("LOCALAPPDATA", cache)
 
 	runtime, err := clientagent.NewRuntime()
 	if err != nil {
@@ -1384,9 +1386,14 @@ type cliTestSSHServer struct {
 	root    string
 	hostKey ssh.PublicKey
 	conns   atomic.Int64
+	execs   atomic.Int64
+	// cp fixture controls; set before any connection is opened.
+	execEnv      []string
+	execThrottle time.Duration
+	stallSession func(connDone <-chan struct{}) bool
 }
 
-func newCLITestSSHServer(t *testing.T, password string) *cliTestSSHServer {
+func newCLITestSSHServer(t *testing.T, password string, configure ...func(*cliTestSSHServer)) *cliTestSSHServer {
 	t.Helper()
 
 	cfg := &ssh.ServerConfig{
@@ -1412,6 +1419,9 @@ func newCLITestSSHServer(t *testing.T, password string) *cliTestSSHServer {
 		t.Fatal(err)
 	}
 	s := &cliTestSSHServer{addr: ln.Addr().String(), root: t.TempDir(), hostKey: signer.PublicKey()}
+	for _, option := range configure {
+		option(s)
+	}
 
 	go func() {
 		for {
@@ -1440,11 +1450,16 @@ func (s *cliTestSSHServer) handleConn(conn net.Conn, cfg *ssh.ServerConfig) {
 		return
 	}
 	defer sconn.Close()
+	done := make(chan struct{})
+	defer close(done)
 	go ssh.DiscardRequests(reqs)
 	for newCh := range chans {
 		if newCh.ChannelType() != "session" {
 			newCh.Reject(ssh.UnknownChannelType, "unsupported")
 			continue
+		}
+		if s.stallSession != nil && s.stallSession(done) {
+			continue // deliberately never reply to this channel-open request
 		}
 		ch, reqs, err := newCh.Accept()
 		if err != nil {
@@ -1472,22 +1487,43 @@ func (s *cliTestSSHServer) handleSession(ch ssh.Channel, reqs <-chan *ssh.Reques
 			}
 			req.Reply(true, nil)
 
+			s.execs.Add(1)
 			cmd := exec.Command("sh", "-c", payload.Command)
+			cmd.Dir = s.root
+			cmd.Env = append(os.Environ(), s.execEnv...)
 			cmd.Stdout = ch
 			cmd.Stderr = ch.Stderr()
-			cmd.Stdin = ch
-			status := uint32(0)
-			if err := cmd.Run(); err != nil {
-				if ee, ok := err.(*exec.ExitError); ok {
-					status = uint32(ee.ExitCode())
-				} else {
-					status = 1
+			var input io.Reader = ch
+			if s.execThrottle > 0 && strings.Contains(payload.Command, "exec rsync") {
+				input = cliTestSlowReader{ch, s.execThrottle}
+				cmd.Stdout = cliTestSlowWriter{ch, s.execThrottle}
+			}
+			// A command can exit without reading stdin. Publish that exit and
+			// close the SSH channel before joining its input pump.
+			status := uint32(1)
+			var inputDone chan struct{}
+			if childIn, err := cmd.StdinPipe(); err == nil {
+				if err := cmd.Start(); err == nil {
+					inputDone = make(chan struct{})
+					go func() {
+						defer close(inputDone)
+						defer childIn.Close()
+						_, _ = io.Copy(childIn, input)
+					}()
+					if err := cmd.Wait(); err == nil {
+						status = 0
+					} else if ee, ok := err.(*exec.ExitError); ok {
+						status = uint32(ee.ExitCode())
+					}
 				}
 			}
 			ch.SendRequest("exit-status", false, ssh.Marshal(struct {
 				Status uint32
 			}{Status: status}))
 			ch.Close()
+			if inputDone != nil {
+				<-inputDone
+			}
 			return
 		case "subsystem":
 			var payload struct{ Name string }
@@ -1510,6 +1546,26 @@ func (s *cliTestSSHServer) handleSession(ch ssh.Channel, reqs <-chan *ssh.Reques
 			req.Reply(false, nil)
 		}
 	}
+}
+
+type cliTestSlowReader struct {
+	io.Reader
+	delay time.Duration
+}
+
+func (s cliTestSlowReader) Read(p []byte) (int, error) {
+	time.Sleep(s.delay)
+	return s.Reader.Read(p[:min(len(p), 4096)])
+}
+
+type cliTestSlowWriter struct {
+	io.Writer
+	delay time.Duration
+}
+
+func (s cliTestSlowWriter) Write(p []byte) (int, error) {
+	time.Sleep(s.delay)
+	return s.Writer.Write(p)
 }
 
 func TestRunReportCreateRequiresAllFlags(t *testing.T) {
@@ -1774,7 +1830,7 @@ func TestRunCPHelp(t *testing.T) {
 	if exitCode != 0 {
 		t.Fatalf("run() exitCode = %d, want 0, stderr=%q", exitCode, stderr.String())
 	}
-	if !strings.Contains(stdout.String(), "warden cp <source> <destination>") {
+	if !strings.Contains(stdout.String(), "warden cp [--backend=rsync|sftp] <source> <destination>") {
 		t.Fatalf("stdout = %q, want cp usage", stdout.String())
 	}
 	if stderr.Len() != 0 {
@@ -1952,17 +2008,11 @@ func TestRunCPRejectsUnknownConnection(t *testing.T) {
 	}
 }
 
-// TestRunCPEndToEnd exercises the full warden cp path against a real
-// in-process SSH/SFTP server: profile resolution via the API, transport
-// bundle retrieval, local->remote, remote->local, and remote->remote
-// transfers, recursive placement, destination overwrite, mode bits, silent
-// stdout, and connection closure.
-func TestRunCPEndToEnd(t *testing.T) {
-	srcSrv := newCLITestSSHServer(t, "s3cret")
-	dstSrv := newCLITestSSHServer(t, "s3cret")
-
+func startCPEndToEndFixture(t *testing.T, srcSrv, dstSrv *cliTestSSHServer) (func(...string) (string, string, int), func()) {
+	t.Helper()
 	home := t.TempDir()
 	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
 	knownHosts := filepath.Join(home, ".ssh", "known_hosts")
 	if err := os.MkdirAll(filepath.Dir(knownHosts), 0o700); err != nil {
 		t.Fatal(err)
@@ -1999,7 +2049,9 @@ func TestRunCPEndToEnd(t *testing.T) {
 			http.NotFound(w, r)
 		}
 	}))
-	defer apiSrv.Close()
+	t.Cleanup(apiSrv.Close)
+	t.Setenv("WARDEN_CLIENT_API_BASE_URL", apiSrv.URL)
+	t.Setenv("WARDEN_CLIENT_TIMEOUT", "10s")
 
 	lookupEnv := func(key string) (string, bool) {
 		switch key {
@@ -2011,12 +2063,19 @@ func TestRunCPEndToEnd(t *testing.T) {
 		return "", false
 	}
 
-	runCP := func(args ...string) (stdout, stderr string, exitCode int) {
+	return func(args ...string) (stdout, stderr string, exitCode int) {
 		t.Helper()
 		var out, errOut bytes.Buffer
 		exitCode = run(args, &out, &errOut, lookupEnv)
 		return out.String(), errOut.String(), exitCode
-	}
+	}, stopAgent
+}
+
+// TestRunCPEndToEnd covers the unchanged default SFTP behavior in all directions.
+func TestRunCPEndToEnd(t *testing.T) {
+	srcSrv := newCLITestSSHServer(t, "s3cret")
+	dstSrv := newCLITestSSHServer(t, "s3cret")
+	runCP, stopAgent := startCPEndToEndFixture(t, srcSrv, dstSrv)
 
 	// Local -> remote: a missing destination becomes the copied root, and
 	// the copy recurses into subdirectories preserving mode bits.
@@ -2073,7 +2132,7 @@ func TestRunCPEndToEnd(t *testing.T) {
 	if err := os.MkdirAll(fileDestDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	stdout, stderr, exitCode = runCP("cp", fileSrc, "source:file-dest")
+	stdout, stderr, exitCode = runCP("cp", "--backend=sftp", fileSrc, "source:file-dest")
 	if exitCode != 0 {
 		t.Fatalf("file into existing dir exitCode = %d, stderr = %q", exitCode, stderr)
 	}
@@ -2123,6 +2182,9 @@ func TestRunCPEndToEnd(t *testing.T) {
 	assertCLIRemoteFile(t, dstSrv.root, "import/hello.txt", "new", 0o640)
 	assertCLIRemoteFile(t, dstSrv.root, "import/sub/deep.txt", "deep", 0o644)
 
+	if srcSrv.execs.Load() != 0 || dstSrv.execs.Load() != 0 {
+		t.Fatal("default and explicit SFTP must not start remote shell commands")
+	}
 	// Stop the intentionally injected agent before checking that its pooled
 	// SSH graphs have closed.
 	stopAgent()

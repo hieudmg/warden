@@ -76,12 +76,43 @@ func RunCopy(ctx context.Context, requestOrSource interface{}, destination ...Co
 
 // RunCopyRequest is the request-struct form of RunCopy.
 func RunCopyRequest(ctx context.Context, copyRequest CopyRequest) error {
+	operation := operationCopy
+	switch copyRequest.Backend {
+	case "", CopySFTP:
+	case CopyRsync:
+		// An older running agent must reject the operation, not silently use SFTP.
+		operation = operationCopyRsync
+	default:
+		return errors.New("invalid copy backend")
+	}
 	copyRequest = normalizeCopyRequest(copyRequest)
-	payload, err := json.Marshal(copyRequest)
+	if operation == operationCopyRsync {
+		for _, ep := range []*CopyEndpoint{&copyRequest.Source, &copyRequest.Destination} {
+			if ep.Path == "" {
+				return errors.New("rsync paths must be nonempty")
+			}
+			if ep.Bundle == nil {
+				absolute, err := absoluteLocalRsyncPath(ep.Path)
+				if err != nil {
+					return err
+				}
+				ep.Path = absolute
+			}
+		}
+	}
+	var payload []byte
+	var err error
+	if operation == operationCopyRsync {
+		source, destination := []byte(copyRequest.Source.Path), []byte(copyRequest.Destination.Path)
+		copyRequest.Source.Path, copyRequest.Destination.Path = "", ""
+		payload, err = json.Marshal(rsyncCopyRequest{CopyRequest: copyRequest, SourcePath: source, DestinationPath: destination})
+	} else {
+		payload, err = json.Marshal(copyRequest)
+	}
 	if err != nil {
 		return err
 	}
-	return runRequest(ctx, Request{Operation: operationCopy, Payload: payload}, clientssh.Streams{}, false)
+	return runRequest(ctx, Request{Operation: operation, Payload: payload}, clientssh.Streams{}, false)
 }
 
 // RunTunneledDB executes one SQL statement through a pooled SSH graph and
@@ -129,8 +160,12 @@ func normalizeCopyRequest(copyRequest CopyRequest) CopyRequest {
 	if copyRequest.Destination.Bundle == nil {
 		copyRequest.Destination.Bundle = copyRequest.DestinationBundle
 	}
-	// The detached agent may have a different working directory from the
-	// caller. Make local paths stable before sending them over IPC.
+	// Rsync preflight must examine the original components, including before
+	// a .. component. Do not clean its paths here.
+	if copyRequest.Backend == CopyRsync {
+		return copyRequest
+	}
+	// The detached agent may have a different working directory from the caller.
 	if copyRequest.Source.Bundle == nil && copyRequest.Source.Path != "" {
 		if absolute, err := filepath.Abs(copyRequest.Source.Path); err == nil {
 			copyRequest.Source.Path = absolute

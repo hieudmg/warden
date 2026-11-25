@@ -86,6 +86,54 @@ func TestPoolReusesBundleAndExpiresAfterFinalRelease(t *testing.T) {
 	}
 }
 
+func TestPoolExclusiveDialKeepsIdleLifecycleWithoutSharing(t *testing.T) {
+	clock := &poolClock{now: time.Unix(150, 0)}
+	var calls int
+	pool := NewPool(func(context.Context, model.SSHBundle) (*clientssh.Graph, error) {
+		calls++
+		return &clientssh.Graph{}, nil
+	}, clock.Now, time.Minute)
+	ctx := context.Background()
+	bundle := testBundle("secret")
+	shared, err := pool.Acquire(ctx, bundle)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer shared.Release()
+	owned, release, err := pool.dialExclusive(ctx, bundle)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if owned == shared.Graph() {
+		t.Fatal("exclusive operation shares the pooled graph")
+	}
+	again, err := pool.Acquire(ctx, bundle)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if again.Graph() != shared.Graph() || calls != 2 {
+		t.Fatal("exclusive dial displaced the reusable graph")
+	}
+	shared.Release()
+	again.Release()
+	clock.Advance(time.Minute)
+	pool.Expire()
+	if pool.Empty() {
+		t.Fatal("agent would stop during an exclusive operation")
+	}
+	release()
+	clock.Advance(time.Minute - time.Nanosecond)
+	pool.Expire()
+	if pool.Empty() {
+		t.Fatal("exclusive operation did not leave the agent's idle grace period")
+	}
+	clock.Advance(time.Nanosecond)
+	pool.Expire()
+	if !pool.Empty() {
+		t.Fatal("exclusive activity kept the agent alive past its idle grace period")
+	}
+}
+
 func TestPoolFingerprintIncludesChangedPassword(t *testing.T) {
 	clock := &poolClock{now: time.Unix(200, 0)}
 	var calls atomic.Int64

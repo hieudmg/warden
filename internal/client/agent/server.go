@@ -12,6 +12,8 @@ import (
 	"sync"
 	"time"
 
+	"golang.org/x/crypto/ssh"
+
 	clientdb "warden/internal/client/db"
 	clientsftp "warden/internal/client/sftp"
 	clientssh "warden/internal/client/ssh"
@@ -19,10 +21,11 @@ import (
 )
 
 const (
-	operationSSH  = "ssh"
-	operationCopy = "copy"
-	operationCP   = "cp"
-	operationDB   = "db"
+	operationSSH       = "ssh"
+	operationCopy      = "copy"
+	operationCP        = "cp"
+	operationCopyRsync = "copy-rsync"
+	operationDB        = "db"
 )
 
 var (
@@ -35,23 +38,38 @@ var (
 )
 
 // CopyEndpoint is the serializable form of one cp operand. A nil Bundle marks
-// a local filesystem path; a non-nil Bundle marks a remote SFTP path.
+// a local filesystem path; a non-nil Bundle marks a remote path.
 type CopyEndpoint struct {
 	Path      string           `json:"path"`
 	Bundle    *model.SSHBundle `json:"bundle,omitempty"`
 	SSHBundle *model.SSHBundle `json:"ssh_bundle,omitempty"`
 }
 
+type CopyBackend string
+
+const (
+	CopySFTP  CopyBackend = "sftp"
+	CopyRsync CopyBackend = "rsync"
+)
+
 // CopyRequest describes one remote/local copy operation. SourceBundle and
 // DestinationBundle are compatibility fields for callers that prefer a flat
 // request; endpoint Bundle fields take precedence when both are supplied.
 type CopyRequest struct {
+	Backend           CopyBackend      `json:"-"` // encoded as the wire operation
 	Source            CopyEndpoint     `json:"source"`
 	Destination       CopyEndpoint     `json:"destination"`
 	SourcePath        string           `json:"source_path,omitempty"`
 	DestinationPath   string           `json:"destination_path,omitempty"`
 	SourceBundle      *model.SSHBundle `json:"source_bundle,omitempty"`
 	DestinationBundle *model.SSHBundle `json:"destination_bundle,omitempty"`
+}
+
+// Rsync paths are bytes on the wire so JSON can't rewrite a POSIX filename.
+type rsyncCopyRequest struct {
+	CopyRequest
+	SourcePath      []byte `json:"source_raw"`
+	DestinationPath []byte `json:"destination_raw"`
 }
 
 // Server owns one authenticated agent listener and dispatches operations to
@@ -302,7 +320,7 @@ func (s *Server) handleConn(ctx context.Context, conn net.Conn, token []byte) {
 	switch request.Operation {
 	case operationSSH:
 		s.handleSSH(requestCtx, conn, request)
-	case operationCopy, operationCP:
+	case operationCopy, operationCP, operationCopyRsync:
 		disconnectCtx, stop := watchDisconnect(requestCtx, conn)
 		defer stop()
 		s.handleCopy(disconnectCtx, conn, request)
@@ -412,6 +430,12 @@ func (s *Server) handleCopy(ctx context.Context, conn net.Conn, request Request)
 		_ = writeFinal(conn, Response{Error: "invalid copy request"})
 		return
 	}
+	if request.Operation == operationCopyRsync {
+		err := copyRsyncRequest(ctx, s.serverPool(), copyRequest)
+		secrets := append(endpointSecrets(copyRequest.Source), endpointSecrets(copyRequest.Destination)...)
+		_ = writeFinal(conn, operationResponse(err, secrets...))
+		return
+	}
 	pool := s.serverPool()
 
 	leases := make(map[[32]byte]*Lease)
@@ -451,7 +475,7 @@ func (s *Server) handleCopy(ctx context.Context, conn net.Conn, request Request)
 		return
 	}
 
-	source, sourceRemote, err := openCopyEndpoint(copyRequest.Source, sourceLease)
+	source, sourceRemote, err := openCopyEndpoint(copyRequest.Source, sourceLease.Target())
 	if err != nil {
 		if sourceLease != nil {
 			sourceLease.Retire()
@@ -462,7 +486,7 @@ func (s *Server) handleCopy(ctx context.Context, conn net.Conn, request Request)
 	if sourceRemote != nil {
 		defer sourceRemote.Close()
 	}
-	destination, destinationRemote, err := openCopyEndpoint(copyRequest.Destination, destinationLease)
+	destination, destinationRemote, err := openCopyEndpoint(copyRequest.Destination, destinationLease.Target())
 	if err != nil {
 		if destinationLease != nil {
 			destinationLease.Retire()
@@ -627,7 +651,17 @@ func requestCopy(request Request) (CopyRequest, error) {
 	if len(request.Payload) == 0 {
 		return copyRequest, errors.New("copy payload is missing")
 	}
-	if err := json.Unmarshal(request.Payload, &copyRequest); err != nil {
+	if request.Operation == operationCopyRsync {
+		var raw rsyncCopyRequest
+		if err := json.Unmarshal(request.Payload, &raw); err != nil {
+			return copyRequest, err
+		}
+		if len(raw.SourcePath) == 0 || len(raw.DestinationPath) == 0 {
+			return copyRequest, errors.New("rsync copy path is missing")
+		}
+		copyRequest = raw.CopyRequest
+		copyRequest.Source.Path, copyRequest.Destination.Path = string(raw.SourcePath), string(raw.DestinationPath)
+	} else if err := json.Unmarshal(request.Payload, &copyRequest); err != nil {
 		// Accept the flat wire form as well: it is useful to callers that
 		// already keep paths and bundles in separate fields.
 		var flat struct {
@@ -703,15 +737,15 @@ func bundleSecrets(bundle model.SSHBundle) [][]byte {
 	return secrets
 }
 
-func openCopyEndpoint(endpoint CopyEndpoint, lease *Lease) (client clientsftp.Endpoint, remote *clientsftp.Remote, err error) {
+func openCopyEndpoint(endpoint CopyEndpoint, target *ssh.Client) (client clientsftp.Endpoint, remote *clientsftp.Remote, err error) {
 	bundle := endpointBundle(endpoint)
 	if bundle == nil {
 		return clientsftp.Endpoint{FS: clientsftp.NewLocalFilesystem(), Path: endpoint.Path, Identity: "local"}, nil, nil
 	}
-	if lease == nil || lease.Target() == nil {
+	if target == nil {
 		return clientsftp.Endpoint{}, nil, errors.New("copy graph is unavailable")
 	}
-	remote, err = openSFTP(lease.Target(), *bundle)
+	remote, err = openSFTP(target, *bundle)
 	if err != nil {
 		return clientsftp.Endpoint{}, nil, fmt.Errorf("open SFTP session: %w", err)
 	}

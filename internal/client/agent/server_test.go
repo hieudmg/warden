@@ -272,13 +272,14 @@ func TestServerStopsWhenPoolBecomesEmpty(t *testing.T) {
 }
 
 type agentSSHTestServer struct {
-	listener net.Listener
-	addr     string
-	key      golangssh.PublicKey
-	accepted atomic.Int64
+	listener        net.Listener
+	addr            string
+	key             golangssh.PublicKey
+	accepted        atomic.Int64
+	stallForwarding func(golangssh.NewChannel, net.Conn, <-chan struct{})
 }
 
-func newAgentSSHTestServer(t *testing.T, password string) *agentSSHTestServer {
+func newAgentSSHTestServer(t *testing.T, password string, configure ...func(*agentSSHTestServer)) *agentSSHTestServer {
 	t.Helper()
 	_, private, err := ed25519.GenerateKey(rand.Reader)
 	if err != nil {
@@ -300,6 +301,9 @@ func newAgentSSHTestServer(t *testing.T, password string) *agentSSHTestServer {
 		t.Fatal(err)
 	}
 	server := &agentSSHTestServer{listener: listener, addr: listener.Addr().String(), key: signer.PublicKey()}
+	for _, option := range configure {
+		option(server)
+	}
 	go func() {
 		for {
 			conn, err := listener.Accept()
@@ -321,8 +325,14 @@ func (s *agentSSHTestServer) handle(conn net.Conn, config *golangssh.ServerConfi
 		return
 	}
 	defer session.Close()
+	disconnected := make(chan struct{})
+	defer close(disconnected)
 	go golangssh.DiscardRequests(requests)
 	for newChannel := range channels {
+		if newChannel.ChannelType() == "direct-tcpip" && s.stallForwarding != nil {
+			s.stallForwarding(newChannel, conn, disconnected)
+			continue
+		}
 		if newChannel.ChannelType() != "session" {
 			newChannel.Reject(golangssh.UnknownChannelType, "unsupported")
 			continue

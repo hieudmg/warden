@@ -22,9 +22,9 @@ import (
 	"warden/internal/model"
 )
 
-// handshakeTimeout bounds each SSH handshake (TCP dial + protocol
-// exchange). Inner hop dials cannot use the caller's context directly, so
-// a deadline keeps stalled jumps from hanging forever.
+// handshakeTimeout bounds protocol exchanges on deadline-capable sockets.
+// Forwarded SSH channels do not support deadlines; DialChain closes its
+// outer socket on request cancellation to interrupt those exchanges.
 const handshakeTimeout = 15 * time.Second
 
 // clientAgents tracks the local ssh-agent keyring attached to each
@@ -56,6 +56,15 @@ func DialGraph(ctx context.Context, bundle model.SSHBundle, opts DialOptions) (*
 // the returned client; callers must not close it independently.
 func (g *Graph) Target() *ssh.Client {
 	return g.target
+}
+
+// Abort interrupts in-flight I/O by closing the outermost SSH connection
+// first, even if an inner hop cannot complete its channel close. Only the
+// exclusive owner of a graph may use it; Close still releases all clients.
+func (g *Graph) Abort() {
+	if len(g.chain) != 0 {
+		_ = g.chain[0].Close()
+	}
 }
 
 // Close disconnects the target and then each jump in reverse order. It is
@@ -110,24 +119,63 @@ func DialChain(ctx context.Context, bundle model.SSHBundle, opts DialOptions) (*
 	}
 
 	var via *ssh.Client
+	stopWatch := func() {}
+	defer func() { stopWatch() }()
+	dialTCP := func(addr string) (net.Conn, error) {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		if via != nil {
+			return via.Dial("tcp", addr)
+		}
+		socket, err := (&net.Dialer{}).DialContext(ctx, "tcp", addr)
+		if err != nil {
+			return nil, err
+		}
+		// This raw socket is still private to construction. Closing it
+		// interrupts even an unanswered inner channel-open request or a
+		// proxy negotiation before the target client exists.
+		done := make(chan struct{})
+		stop := context.AfterFunc(ctx, func() {
+			defer close(done)
+			_ = socket.Close()
+		})
+		stopWatch = sync.OnceFunc(func() {
+			if !stop() {
+				<-done
+			}
+		})
+		return socket, nil
+	}
+	fail := func(kind string, node model.SSHNode, err error) (*ssh.Client, []*ssh.Client, error) {
+		if canceled := ctx.Err(); canceled != nil {
+			err = canceled
+		}
+		closeAll()
+		return nil, nil, fmt.Errorf("connect %s %q: %w", kind, node.Name, err)
+	}
 	for _, hop := range bundle.Jumps {
 		reportProgress(opts.Progress, "Connecting to "+hop.Name+"...")
-		nc, err := dialNode(ctx, hop, via, cb)
+		nc, err := dialNode(hop, dialTCP, cb)
 		if err != nil {
-			closeAll()
-			return nil, nil, fmt.Errorf("connect jump %q: %w", hop.Name, err)
+			return fail("jump", hop, err)
 		}
 		clients = append(clients, nc.client)
 		via = nc.client
 	}
 
 	reportProgress(opts.Progress, "Connecting to "+bundle.Target.Name+"...")
-	nc, err := dialNode(ctx, bundle.Target, via, cb)
+	nc, err := dialNode(bundle.Target, dialTCP, cb)
 	if err != nil {
-		closeAll()
-		return nil, nil, fmt.Errorf("connect target %q: %w", bundle.Target.Name, err)
+		return fail("target", bundle.Target, err)
 	}
 	clients = append(clients, nc.client)
+	// Hand off a live graph only after disarming the construction watcher;
+	// cancellation of a completed request must not close a reusable graph.
+	stopWatch()
+	if err := ctx.Err(); err != nil {
+		return fail("target", bundle.Target, err)
+	}
 	return nc.client, clients, nil
 }
 
@@ -160,18 +208,15 @@ type nodeClient struct {
 // node's HTTP CONNECT proxy. When the node has no explicit credential, the
 // local ssh-agent is tried and, on success, kept available for agent
 // forwarding.
-func dialNode(ctx context.Context, node model.SSHNode, via *ssh.Client, cb ssh.HostKeyCallback) (*nodeClient, error) {
+func dialNode(node model.SSHNode, dialTCP func(string) (net.Conn, error), cb ssh.HostKeyCallback) (*nodeClient, error) {
 	addr := net.JoinHostPort(node.Host, strconv.Itoa(node.Port))
 
 	var raw net.Conn
 	var err error
-	switch {
-	case node.ProxyHost != "":
-		raw, err = dialProxy(ctx, via, node, addr)
-	case via != nil:
-		raw, err = via.Dial("tcp", addr)
-	default:
-		raw, err = (&net.Dialer{}).DialContext(ctx, "tcp", addr)
+	if node.ProxyHost != "" {
+		raw, err = proxyConnect(dialTCP, node, addr, handshakeTimeout)
+	} else {
+		raw, err = dialTCP(addr)
 	}
 	if err != nil {
 		return nil, err
@@ -193,7 +238,7 @@ func dialNode(ctx context.Context, node model.SSHNode, via *ssh.Client, cb ssh.H
 		HostKeyCallback: cb,
 	}
 
-	// Bound the handshake even for chained dials that bypass ctx.
+	// Bound the handshake on transports with deadline support.
 	if c, ok := raw.(interface{ SetDeadline(time.Time) error }); ok {
 		c.SetDeadline(time.Now().Add(handshakeTimeout))
 	}
@@ -259,38 +304,18 @@ type bufferedConn struct {
 
 func (c *bufferedConn) Read(p []byte) (int, error) { return c.r.Read(p) }
 
-// dialProxy negotiates an HTTP CONNECT tunnel to targetAddr through the
-// node's proxy, bounded by the handshake deadline.
-func dialProxy(ctx context.Context, via *ssh.Client, node model.SSHNode, targetAddr string) (net.Conn, error) {
-	return proxyConnect(ctx, via, node, targetAddr, handshakeTimeout)
-}
-
-// proxyConnect establishes a TCP connection to the node's HTTP CONNECT
-// proxy and negotiates a tunnel to targetAddr. When via is non-nil the
-// proxy is reached through the previous hop. The whole negotiation is
-// bounded by timeout so a proxy that accepts but never answers cannot hang
-// the client forever. The returned connection preserves any bytes the
-// proxy forwarded immediately after its 200 response, so the upstream
-// protocol (SSH banner) is never truncated.
-func proxyConnect(ctx context.Context, via *ssh.Client, node model.SSHNode, targetAddr string, timeout time.Duration) (net.Conn, error) {
+// proxyConnect reaches the HTTP proxy using the same dial path as a direct
+// node. Preserve bytes the proxy forwards immediately after its 200 response
+// so the upstream SSH banner is not truncated.
+func proxyConnect(dialTCP func(string) (net.Conn, error), node model.SSHNode, targetAddr string, timeout time.Duration) (net.Conn, error) {
 	proxyAddr := net.JoinHostPort(node.ProxyHost, strconv.Itoa(node.ProxyPort))
-
-	var conn net.Conn
-	var err error
-	if via != nil {
-		conn, err = via.Dial("tcp", proxyAddr)
-	} else {
-		conn, err = (&net.Dialer{}).DialContext(ctx, "tcp", proxyAddr)
-	}
+	conn, err := dialTCP(proxyAddr)
 	if err != nil {
 		return nil, fmt.Errorf("connect proxy %s: %w", proxyAddr, err)
 	}
 
-	// Bound the CONNECT exchange before writing the request so a proxy
-	// that accepts but never answers fails instead of hanging. The
-	// interface assertion fails silently for transports without
-	// deadlines (e.g. an SSH channel); those are bounded by the hop's
-	// own handshake rules.
+	// Apply the timeout where the transport supports deadlines; forwarded
+	// channels rely on the dial owner's cancellation of the outer socket.
 	setDeadline, ok := conn.(interface{ SetDeadline(time.Time) error })
 	if ok {
 		setDeadline.SetDeadline(time.Now().Add(timeout))
