@@ -170,10 +170,6 @@ func TestPosixRelMatchesFilepathRel(t *testing.T) {
 		{"a/b", "a"},
 		{"a", "b"},
 		{".", "a"},
-		{"a", "."},
-		{"a/b", "."},
-		{"a", "./"},
-		{"a/b", "a/../."},
 		{"/a/b", "c"},
 		{"a/b", "/c"},
 		{"/a/b/c", "/a/b/c/d/e"},
@@ -182,9 +178,25 @@ func TestPosixRelMatchesFilepathRel(t *testing.T) {
 	}
 	for _, c := range cases {
 		want, wantErr := filepath.Rel(c[0], c[1])
+		want = filepath.ToSlash(want)
 		got, gotErr := posixRel(c[0], c[1])
 		if (wantErr == nil) != (gotErr == nil) || got != want {
 			t.Fatalf("posixRel(%q, %q) = %q, %v; want %q, %v", c[0], c[1], got, gotErr, want, wantErr)
+		}
+	}
+}
+
+func TestPosixRelPreservesDotSpelling(t *testing.T) {
+	// Go 1.26 changed filepath.Rel("a", ".") to return "..". Keep
+	// Warden's POSIX adapter spelling independent of the host toolchain.
+	for _, tc := range []struct{ base, target, want string }{
+		{"a", ".", "../."},
+		{"a/b", ".", "../../."},
+		{"a", "./", "../."},
+		{"a/b", "a/../.", "../../."},
+	} {
+		if got, err := posixRel(tc.base, tc.target); err != nil || got != tc.want {
+			t.Errorf("posixRel(%q, %q) = %q, %v; want %q", tc.base, tc.target, got, err, tc.want)
 		}
 	}
 }

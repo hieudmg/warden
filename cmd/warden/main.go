@@ -54,6 +54,9 @@ var (
 )
 
 func main() {
+	if len(os.Args) == 4 && os.Args[1] == agent.RsyncHelperCommand {
+		os.Exit(agent.RunRsyncHelper(os.Args[2], os.Args[3]))
+	}
 	os.Exit(run(os.Args[1:], os.Stdout, os.Stderr, os.LookupEnv))
 }
 
@@ -912,8 +915,20 @@ func runCP(args []string, configPath string, configPathSet bool, stdout, stderr 
 		printCPUsage(stdout)
 		return 0
 	}
+	backend := agent.CopySFTP
+	if len(args) > 0 && strings.HasPrefix(args[0], "--backend=") {
+		backend = agent.CopyBackend(strings.TrimPrefix(args[0], "--backend="))
+		if backend != agent.CopySFTP && backend != agent.CopyRsync {
+			fmt.Fprintln(stderr, "cp: --backend must be rsync or sftp")
+			return 2
+		}
+		args = args[1:]
+	}
+	if len(args) == 3 && args[0] == "--" {
+		args = args[1:]
+	}
 	if len(args) != 2 {
-		fmt.Fprintln(stderr, "usage: warden cp <source> <destination>")
+		fmt.Fprintln(stderr, "usage: warden cp [--backend=rsync|sftp] <source> <destination>")
 		return 2
 	}
 	if !isCPRemoteSyntax(args[0]) && !isCPRemoteSyntax(args[1]) {
@@ -955,18 +970,28 @@ func runCP(args []string, configPath string, configPathSet bool, stdout, stderr 
 		return 2
 	}
 
-	src, err := resolveAgentCPEndpoint(source, cl, ctx)
+	if backend == agent.CopyRsync && source.connection != nil && destination.connection != nil {
+		fmt.Fprintln(stderr, "cp: rsync does not support remote-to-remote copies; use --backend=sftp")
+		return 2
+	}
+
+	if backend == agent.CopyRsync {
+		var stop context.CancelFunc
+		ctx, stop = signal.NotifyContext(ctx, os.Interrupt)
+		defer stop()
+	}
+	src, err := resolveAgentCPEndpoint(source, cl, ctx, backend)
 	if err != nil {
 		fmt.Fprintf(stderr, "cp: %v\n", err)
 		return 1
 	}
-	dst, err := resolveAgentCPEndpoint(destination, cl, ctx)
+	dst, err := resolveAgentCPEndpoint(destination, cl, ctx, backend)
 	if err != nil {
 		fmt.Fprintf(stderr, "cp: %v\n", err)
 		return 1
 	}
 
-	if err := runAgentCopy(ctx, agent.CopyRequest{Source: src, Destination: dst}); err != nil {
+	if err := runAgentCopy(ctx, agent.CopyRequest{Source: src, Destination: dst, Backend: backend}); err != nil {
 		fmt.Fprintf(stderr, "cp: %v\n", err)
 		return 1
 	}
@@ -990,8 +1015,11 @@ func reportCPParseError(stderr io.Writer, err error) int {
 // request form consumed by the local agent. Remote endpoints fetch their
 // complete transport bundle; local paths are made absolute because the
 // detached agent may have a different working directory.
-func resolveAgentCPEndpoint(ep cpEndpoint, cl *api.Client, ctx context.Context) (agent.CopyEndpoint, error) {
+func resolveAgentCPEndpoint(ep cpEndpoint, cl *api.Client, ctx context.Context, backend agent.CopyBackend) (agent.CopyEndpoint, error) {
 	if ep.connection == nil {
+		if backend == agent.CopyRsync {
+			return agent.CopyEndpoint{Path: ep.path}, nil // agent client makes this absolute without cleaning
+		}
 		absolute, err := filepath.Abs(ep.path)
 		if err != nil {
 			return agent.CopyEndpoint{}, err
@@ -1134,17 +1162,25 @@ Try: warden cp ./release.tar prod:/srv/releases/
 `, `Discover an exact SSH name before forming a connection:path operand.
 Copies may overwrite files; confirm both endpoints before running.
 `)
-	fmt.Fprint(w, `Copy files or directories over SFTP, recursively for directories.
+	fmt.Fprint(w, `Copy files or directories, recursively for directories.
 
 Usage:
-  warden cp <source> <destination>
+  warden cp [--backend=rsync|sftp] <source> <destination>
 
 Operands are local paths or <connection>:<path>, using an exact configured SSH
 connection name. Supports upload, download, and remote-to-remote copies.
 Does not support local-to-local copies or remote endpoints on the same host
 and SSH port. Existing destination files may be overwritten.
 
+SFTP is the default. --backend=rsync opts in to directory uploads or downloads
+using the built-in Go client and stock rsync on the remote host. Regular source
+files still use SFTP; rsync failures never retry via SFTP. A directory merge
+can replace a destination file with a source subdirectory. An upload can report
+success despite an uncopied file if opening the source fails. A download can
+replace a file with verified bytes before reporting a permission-setting error.
+
 Examples:
+  warden cp --backend=rsync ./assets prod:/srv/assets
   warden cp ./release.tar prod:/srv/releases/
   warden cp prod:/var/log/app.log ./app.log
   warden cp staging:/srv/assets prod:/srv/assets
@@ -1234,7 +1270,7 @@ Commands:
   ssh <connection> <command>  Run one remote command over SSH
   db <connection> <sql>       Execute one MySQL/MariaDB statement
   xssh [connection]           Open an interactive SSH shell (picker if omitted)
-  cp <source> <destination>   Copy files/directories over SFTP
+  cp <source> <destination>   Copy files/directories (SFTP by default)
   report create <project> --title <title> --summary <summary> --agent-model <name>
                              Create a project report
   port-watch <ssh-connection> <port-range-list>

@@ -162,6 +162,39 @@ top/end, and `q` or Ctrl-C to quit. URLs assume HTTP; use the forwarded port wit
 the appropriate client for non-HTTP services. Redirected output keeps the
 plain-text forwarding/closure log without terminal escape sequences.
 
+### Copy backends
+
+`warden cp` defaults to SFTP. Use `--backend=sftp` to select it explicitly.
+`warden cp --backend=rsync ./assets prod:/srv/assets` opts into rsync for a
+**directory** upload or download. If the source is a regular file, Warden uses
+SFTP directly, including for an explicit destination filename. Rsync is not
+available for remote-to-remote copies, and a failed rsync attempt is never
+retried with SFTP.
+
+Warden embeds the Go rsync client; no local `rsync` executable, WSL, or Cygwin
+is required. The SSH host must provide stock `rsync` on `PATH`, a POSIX shell,
+and SFTP metadata access to the same filesystem as the shell. Warden uses its
+normal SSH host-key verification and gives each rsync-selected copy its own
+SSH transport, so cancellation does not disconnect other operations.
+Directory preflight rejects symlinks, special-file sources, and unsafe
+paths. Uploads reject nested directory names that are not valid UTF-8, and
+Windows downloads reject case-colliding sibling names and unsafe aliases.
+Preflight does not protect against concurrent changes to either tree.
+
+Opt-in rsync does not delete unrelated entries or write file data in place,
+but it is not a directory-wide transaction. In particular:
+
+- During a directory merge, a source subdirectory can replace an existing
+  destination file, even without `--delete`. A directory source cannot use an
+  existing file as its destination operand.
+- An upload can report success even if rsync could not open and copy one of the
+  source files. Verify the result when completeness matters.
+- A download can fail while setting permissions **after** replacing an existing
+  file. The old file is already gone; the replacement has complete, verified
+  data but may have the wrong permissions.
+
+Use SFTP when these differences are unacceptable.
+
 ### HTTP connections
 
 Use the **HTTP** tab in Warden Hub (`/http`) to create, edit, group, annotate,

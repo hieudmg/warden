@@ -79,6 +79,9 @@ func (r *Remote) Endpoint(name string) Endpoint {
 	}
 }
 
+// WorkingDirectory resolves the root of relative names for this SFTP session.
+func (r *Remote) WorkingDirectory() (string, error) { return r.client.RealPath(".") }
+
 // Close tears down the SFTP session and, when this Remote was created by
 // Dial, then closes its owned SSH graph. A borrowed Remote created by Open
 // leaves the target untouched. It retains the first error and is idempotent:
