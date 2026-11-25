@@ -135,16 +135,7 @@ func DialChain(ctx context.Context, bundle model.SSHBundle, opts DialOptions) (*
 		// This raw socket is still private to construction. Closing it
 		// interrupts even an unanswered inner channel-open request or a
 		// proxy negotiation before the target client exists.
-		done := make(chan struct{})
-		stop := context.AfterFunc(ctx, func() {
-			defer close(done)
-			_ = socket.Close()
-		})
-		stopWatch = sync.OnceFunc(func() {
-			if !stop() {
-				<-done
-			}
-		})
+		stopWatch = closeOnCancel(ctx, socket)
 		return socket, nil
 	}
 	fail := func(kind string, node model.SSHNode, err error) (*ssh.Client, []*ssh.Client, error) {
@@ -156,7 +147,7 @@ func DialChain(ctx context.Context, bundle model.SSHBundle, opts DialOptions) (*
 	}
 	for _, hop := range bundle.Jumps {
 		reportProgress(opts.Progress, "Connecting to "+hop.Name+"...")
-		nc, err := dialNode(hop, dialTCP, cb)
+		nc, err := dialNode(ctx, hop, dialTCP, cb)
 		if err != nil {
 			return fail("jump", hop, err)
 		}
@@ -165,7 +156,7 @@ func DialChain(ctx context.Context, bundle model.SSHBundle, opts DialOptions) (*
 	}
 
 	reportProgress(opts.Progress, "Connecting to "+bundle.Target.Name+"...")
-	nc, err := dialNode(bundle.Target, dialTCP, cb)
+	nc, err := dialNode(ctx, bundle.Target, dialTCP, cb)
 	if err != nil {
 		return fail("target", bundle.Target, err)
 	}
@@ -177,6 +168,21 @@ func DialChain(ctx context.Context, bundle model.SSHBundle, opts DialOptions) (*
 		return fail("target", bundle.Target, err)
 	}
 	return nc.client, clients, nil
+}
+
+// closeOnCancel returns a stop function that joins any running close before
+// the socket is handed off to the established client.
+func closeOnCancel(ctx context.Context, conn net.Conn) func() {
+	done := make(chan struct{})
+	stop := context.AfterFunc(ctx, func() {
+		defer close(done)
+		_ = conn.Close()
+	})
+	return sync.OnceFunc(func() {
+		if !stop() {
+			<-done
+		}
+	})
 }
 
 // hostKeyCallback resolves the verification callback from DialOptions,
@@ -208,7 +214,7 @@ type nodeClient struct {
 // node's HTTP CONNECT proxy. When the node has no explicit credential, the
 // local ssh-agent is tried and, on success, kept available for agent
 // forwarding.
-func dialNode(node model.SSHNode, dialTCP func(string) (net.Conn, error), cb ssh.HostKeyCallback) (*nodeClient, error) {
+func dialNode(ctx context.Context, node model.SSHNode, dialTCP func(string) (net.Conn, error), cb ssh.HostKeyCallback) (*nodeClient, error) {
 	addr := net.JoinHostPort(node.Host, strconv.Itoa(node.Port))
 
 	var raw net.Conn
@@ -223,11 +229,15 @@ func dialNode(node model.SSHNode, dialTCP func(string) (net.Conn, error), cb ssh
 	}
 
 	nc := &nodeClient{}
+	stopAgentWatch := func() {}
 	if len(node.Password) == 0 && len(node.PrivateKey) == 0 {
 		if sock := os.Getenv("SSH_AUTH_SOCK"); sock != "" {
-			if agConn, derr := net.Dial("unix", sock); derr == nil {
+			if agConn, derr := (&net.Dialer{}).DialContext(ctx, "unix", sock); derr == nil {
 				nc.agentConn = agConn
 				nc.keyring = agent.NewClient(agConn)
+				// Closing the remote socket alone cannot interrupt an agent
+				// request made by NewClientConn during authentication.
+				stopAgentWatch = closeOnCancel(ctx, agConn)
 			}
 		}
 	}
@@ -243,6 +253,7 @@ func dialNode(node model.SSHNode, dialTCP func(string) (net.Conn, error), cb ssh
 		c.SetDeadline(time.Now().Add(handshakeTimeout))
 	}
 	conn, chans, reqs, err := ssh.NewClientConn(raw, addr, config)
+	stopAgentWatch()
 	if c, ok := raw.(interface{ SetDeadline(time.Time) error }); ok {
 		c.SetDeadline(time.Time{})
 	}

@@ -44,17 +44,43 @@ func TestParseListeningPorts(t *testing.T) {
 		"LISTEN 0 128 [::]:5000 [::]:*\n" +
 		"LISTEN 0 128 0.0.0.0:8080 0.0.0.0:*\n" +
 		"ESTAB 0 0 127.0.0.1:6000 127.0.0.1:80\n"
-	got, err := parseListeningPorts(output)
+	got, err := parseListeningPorts(output, false)
 	if err != nil {
 		t.Fatalf("parseListeningPorts: %v", err)
 	}
-	if want := []int{3000, 5000, 8080}; !reflect.DeepEqual(got, want) {
+	if want := (map[int]string{3000: "", 5000: "", 8080: ""}); !reflect.DeepEqual(got, want) {
 		t.Fatalf("parseListeningPorts = %v, want %v", got, want)
 	}
 }
 
+func TestParseListeningPortsProcessMetadata(t *testing.T) {
+	fixture := "LISTEN 0 511 127.0.0.1:3000 0.0.0.0:* users:((\"node worker\",pid=8421,fd=22),(\"node worker\",pid=8419,fd=22))\n" +
+		"LISTEN 0 511 [::]:3000 [::]:* users:((\"api\x1b\u009b\u202e\",pid=8490,fd=9))\n" +
+		"LISTEN 0 128 192.0.2.12:443 0.0.0.0:*\n" +
+		"LISTEN 0 128 *:8080 *:* users:((\"zeta\",pid=325,fd=3),(\"alpha\",pid=324,fd=4))\n" +
+		"LISTEN 0 128 127.0.0.1:9000 0.0.0.0:* users:((unreadable))\n" +
+		"LISTEN 0 128 127.0.0.1:9500 0.0.0.0:* users:((\"extra\",pid=77,fd=3))\n" +
+		"ESTAB 0 0 127.0.0.1:6000 127.0.0.1:80 users:((\"curl\",pid=435,fd=4))\n"
+	want := map[int]string{443: "", 3000: "api", 8080: "alpha", 9000: "", 9500: "extra"}
+	if got, err := parseListeningPorts(fixture, true); err != nil || !reflect.DeepEqual(got, want) {
+		t.Fatalf("process scan = %v, %v; want %v", got, err, want)
+	}
+}
+
+func TestScanListeningPortsUsesOnlyPlainCommand(t *testing.T) {
+	var commands []string
+	got, err := scanListeningPorts(context.Background(), func(_ context.Context, command string) (string, error) {
+		commands = append(commands, command)
+		return "LISTEN 0 128 127.0.0.1:3000 0.0.0.0:*\n", nil
+	})
+	want := map[int]string{3000: ""}
+	if err != nil || !reflect.DeepEqual(got, want) || !reflect.DeepEqual(commands, []string{"ss -H -ltn"}) {
+		t.Fatalf("scan = %v, %v with commands %v; want %v with only plain command", got, err, commands, want)
+	}
+}
+
 func TestParseListeningPortsRejectsMalformedListenRow(t *testing.T) {
-	if _, err := parseListeningPorts("LISTEN 0 128 missing-port 0.0.0.0:*\n"); err == nil {
+	if _, err := parseListeningPorts("LISTEN 0 128 missing-port 0.0.0.0:*\n", false); err == nil {
 		t.Fatal("parseListeningPorts succeeded on malformed LISTEN row, want error")
 	}
 }
@@ -107,11 +133,11 @@ func TestWatchPortsClosesForwardWhenRemotePortDisappears(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	scans := 0
-	scan := func(context.Context) ([]int, error) {
+	scan := func(context.Context) (map[int]string, error) {
 		scans++
 		switch scans {
 		case 1:
-			return []int{port}, nil
+			return map[int]string{port: "node"}, nil
 		case 2:
 			return nil, nil
 		default:
@@ -146,10 +172,10 @@ func TestWatchPortsStopsAndClosesForwardsWhenListenerScanFails(t *testing.T) {
 	}
 	cause := errors.New("remote command exited with status 127: ss: not found")
 	scans := 0
-	scan := func(context.Context) ([]int, error) {
+	scan := func(context.Context) (map[int]string, error) {
 		scans++
 		if scans == 1 {
-			return []int{port}, nil
+			return map[int]string{port: ""}, nil
 		}
 		return nil, cause
 	}
@@ -215,12 +241,12 @@ func TestWatchPortsReportsLocalBindConflictAndKeepsWatching(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	scans := 0
-	scan := func(context.Context) ([]int, error) {
+	scan := func(context.Context) (map[int]string, error) {
 		scans++
 		if scans > 1 {
 			cancel()
 		}
-		return []int{port}, nil
+		return map[int]string{port: ""}, nil
 	}
 	var stdout, stderr strings.Builder
 	if err := watchPorts(ctx, scan, ranges, echoPortDialer{}, &stdout, &stderr, time.Millisecond); err != nil {
