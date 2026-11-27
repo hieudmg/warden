@@ -9,9 +9,12 @@ import (
 	"runtime"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 	"unicode/utf8"
+
+	"github.com/charmbracelet/x/ansi"
 
 	"warden/internal/model"
 )
@@ -83,11 +86,8 @@ func TestRenderGroupsRowsAndSkipsGroupHighlight(t *testing.T) {
 	})
 	state = state.Apply(DecodedKey{Kind: KeyDown})
 
-	var out bytes.Buffer
-	if err := Render(&out, state, 100, 12); err != nil {
-		t.Fatalf("Render() error = %v", err)
-	}
-	s := out.String()
+	out := pickerContent(state, 100, 12)
+	s := out
 	for _, want := range []string{"Group A", "Group B", "(Ungrouped)", ">   bravo"} {
 		if !strings.Contains(s, want) {
 			t.Fatalf("render missing %q: %q", want, s)
@@ -97,7 +97,7 @@ func TestRenderGroupsRowsAndSkipsGroupHighlight(t *testing.T) {
 		strings.Index(s, "Group B") > strings.Index(s, "(Ungrouped)") {
 		t.Fatalf("group headers are not ordered: %q", s)
 	}
-	for _, line := range strings.Split(s, "\r\n") {
+	for _, line := range strings.Split(s, "\n") {
 		if strings.HasPrefix(line, "  Group A") || strings.HasPrefix(line, "  Group B") || strings.HasPrefix(line, "  (Ungrouped)") {
 			if strings.Contains(line, ">") {
 				t.Fatalf("group header highlighted: %q", line)
@@ -161,12 +161,9 @@ func TestStreamDecoderBuffersPartialArrow(t *testing.T) {
 type outBuffer interface {
 	Write(p []byte) (int, error)
 	String() string
-	Count(sub string) int
 }
 
-// lockedBuffer is a mutex-protected output buffer so the resize goroutine
-// and the Select caller can write concurrently without racing the test's
-// assertions.
+// lockedBuffer records Tea's writes without racing the test's assertions.
 type lockedBuffer struct {
 	mu sync.Mutex
 	b  bytes.Buffer
@@ -184,27 +181,17 @@ func (l *lockedBuffer) String() string {
 	return l.b.String()
 }
 
-func (l *lockedBuffer) Count(sub string) int {
-	l.mu.Lock()
-	defer l.mu.Unlock()
-	return strings.Count(l.b.String(), sub)
-}
-
-// failingBuffer fails the failAfter-th write (and every write after it)
-// with err, letting tests prove Select propagates terminal failures
-// instead of reporting a successful selection.
+// failingBuffer fails on the specified visible output or terminal control,
+// independent of how many writes the renderer groups together.
 type failingBuffer struct {
 	*lockedBuffer
-	failAfter int
-	err       error
+	match string
+	err   error
 }
 
 func (f *failingBuffer) Write(p []byte) (int, error) {
-	if f.failAfter > 0 {
-		f.failAfter--
-		if f.failAfter == 0 {
-			return 0, f.err
-		}
+	if bytes.Contains(p, []byte(f.match)) {
+		return 0, f.err
 	}
 	return f.lockedBuffer.Write(p)
 }
@@ -216,6 +203,7 @@ type fakeSession struct {
 	input         io.Reader
 	output        outBuffer
 	width, height int
+	size          func() (int, int)
 	resize        chan struct{}
 	ansi          bool
 	rawCalls      int
@@ -239,9 +227,14 @@ func newFakeSession(input string, width, height int, ansi bool) *fakeSession {
 	}
 }
 
-func (f *fakeSession) EnterRaw() error               { f.rawCalls++; return nil }
-func (f *fakeSession) Restore() error                { f.restoreCalls++; return f.restoreErr }
-func (f *fakeSession) Size() (int, int)              { return f.width, f.height }
+func (f *fakeSession) EnterRaw() error { f.rawCalls++; return nil }
+func (f *fakeSession) Restore() error  { f.restoreCalls++; return f.restoreErr }
+func (f *fakeSession) Size() (int, int) {
+	if f.size != nil {
+		return f.size()
+	}
+	return f.width, f.height
+}
 func (f *fakeSession) ResizeEvents() <-chan struct{} { return f.resize }
 func (f *fakeSession) Stdin() io.Reader              { return f.input }
 func (f *fakeSession) Stdout() io.Writer             { return f.output }
@@ -322,36 +315,33 @@ func TestFormatConnectionGroupDisplay(t *testing.T) {
 
 func TestRenderUsesWideAndStackedLayouts(t *testing.T) {
 	state := NewState([]model.SSHConnection{{ID: 1, Name: "prod", Host: "host"}})
-	var wide, narrow bytes.Buffer
-	Render(&wide, state, 100, 20)
-	Render(&narrow, state, 79, 20)
-	if !strings.Contains(wide.String(), "│") {
-		t.Fatalf("wide render lacks column separator: %q", wide.String())
+	wide := pickerContent(state, 100, 20)
+	narrow := pickerContent(state, 79, 20)
+	if !strings.Contains(wide, "│") {
+		t.Fatalf("wide render lacks column separator: %q", wide)
 	}
-	if strings.Contains(narrow.String(), "│") {
-		t.Fatalf("narrow render has column separator: %q", narrow.String())
+	if strings.Contains(narrow, "│") {
+		t.Fatalf("narrow render has column separator: %q", narrow)
 	}
-	if !strings.Contains(wide.String(), "\x1b[") {
-		t.Fatalf("wide render lacks ANSI color: %q", wide.String())
+	if !strings.Contains(wide, "\x1b[") {
+		t.Fatalf("wide render lacks ANSI color: %q", wide)
 	}
 }
 
 func TestRenderNarrowLayoutStaysWithinViewport(t *testing.T) {
 	state := NewState([]model.SSHConnection{{ID: 1, Name: "prod"}, {ID: 2, Name: "staging"}})
 	for _, height := range []int{3, 4, 6, 8} {
-		var out bytes.Buffer
-		Render(&out, state, 79, height)
-		if rows := strings.Count(out.String(), "\r\n"); rows > height {
-			t.Fatalf("height %d: render emitted %d rows, exceeds viewport: %q", height, rows, out.String())
+		out := pickerContent(state, 79, height)
+		if rows := strings.Count(out, "\n"); rows > height {
+			t.Fatalf("height %d: render emitted %d rows, exceeds viewport: %q", height, rows, out)
 		}
 	}
 }
 
 func TestRenderNarrowLayoutKeepsListAndPreviewVisible(t *testing.T) {
 	state := NewState([]model.SSHConnection{{ID: 1, Name: "prod"}, {ID: 2, Name: "staging"}})
-	var out bytes.Buffer
-	Render(&out, state, 79, 8)
-	s := out.String()
+	out := pickerContent(state, 79, 8)
+	s := out
 	for _, want := range []string{"Search: ", "prod", "staging", "ID", ": 1"} {
 		if !strings.Contains(s, want) {
 			t.Fatalf("narrow render missing %q: %q", want, s)
@@ -365,18 +355,30 @@ func TestRenderClampsTitleAndQueryToWidth(t *testing.T) {
 		state = state.Apply(DecodedKey{Kind: KeyRune, Rune: r})
 	}
 	for _, width := range []int{20, 100} {
-		var out bytes.Buffer
-		Render(&out, state, width, 20)
-		for i, line := range strings.Split(strings.TrimSuffix(out.String(), "\r\n"), "\r\n") {
-			if n := visibleWidth(line); n > width {
-				t.Fatalf("width %d: line %d has %d visible runes, would wrap: %q", width, i, n, line)
+		out := pickerContent(state, width, 20)
+		for i, line := range strings.Split(strings.TrimSuffix(out, "\n"), "\n") {
+			if n := ansi.StringWidthWc(line); n >= width {
+				t.Fatalf("width %d: line %d has %d visible cells, would wrap: %q", width, i, n, line)
 			}
 		}
-		if !strings.Contains(out.String(), "Search: ") || !strings.Contains(out.String(), "qqq") {
-			t.Fatalf("width %d: clamped render lost the query prompt: %q", width, out.String())
+		if !strings.Contains(out, "Search: ") || !strings.Contains(out, "qqq") {
+			t.Fatalf("width %d: clamped render lost the query prompt: %q", width, out)
 		}
-		if width == 20 && strings.Contains(out.String(), "pick a connection") {
-			t.Fatalf("width 20: full title not clamped: %q", out.String())
+		if width == 20 && strings.Contains(out, "pick a connection") {
+			t.Fatalf("width 20: full title not clamped: %q", out)
+		}
+	}
+}
+
+func TestRenderClipsWideUnicodeByTerminalCell(t *testing.T) {
+	state := NewState([]model.SSHConnection{{ID: 1, Name: strings.Repeat("界", 25), Host: strings.Repeat("界", 60)}})
+	for _, r := range strings.Repeat("界", 25) {
+		state = state.Apply(DecodedKey{Kind: KeyRune, Rune: r})
+	}
+	out := pickerContent(state, 45, 16)
+	for i, line := range strings.Split(out, "\n") {
+		if n := ansi.StringWidthWc(line); n >= 45 {
+			t.Errorf("line %d occupies %d cells in a 45-column terminal: %q", i, n, line)
 		}
 	}
 }
@@ -394,14 +396,13 @@ func TestRenderFinalRowHasNoTrailingNewline(t *testing.T) {
 		{100, 2},  // wide layout, headers only
 		{79, 4},   // narrow layout, minimal body
 	} {
-		var out bytes.Buffer
-		Render(&out, state, tc.width, tc.height)
-		s := out.String()
-		if rows := strings.Count(s, "\r\n"); rows != tc.height-1 {
-			t.Fatalf("width %d height %d: emitted %d CRLF-separated rows, want exactly %d rows filling the viewport: %q", tc.width, tc.height, rows+1, tc.height, s)
+		out := pickerContent(state, tc.width, tc.height)
+		s := out
+		if rows := strings.Count(s, "\n"); rows != tc.height-1 {
+			t.Fatalf("width %d height %d: emitted %d LF-separated rows, want exactly %d rows filling the viewport: %q", tc.width, tc.height, rows+1, tc.height, s)
 		}
-		if strings.HasSuffix(s, "\r\n") {
-			t.Fatalf("width %d height %d: render ends with CRLF after the final viewport row; that trailing newline would scroll the alternate screen: %q", tc.width, tc.height, s)
+		if strings.HasSuffix(s, "\n") {
+			t.Fatalf("width %d height %d: render ends with CRLF after the final viewport row; that final newline adds an extra row: %q", tc.width, tc.height, s)
 		}
 	}
 }
@@ -488,6 +489,45 @@ func TestSelectLeavesTypedAheadInputForSSH(t *testing.T) {
 	}
 }
 
+type pickerInputRecord struct {
+	code   rune
+	repeat int
+}
+
+type recordPickerSession struct {
+	*fakeSession
+	records []pickerInputRecord
+}
+
+func (s *recordPickerSession) PollPickerKey() (rune, int, error) {
+	if len(s.records) == 0 {
+		return 0, 0, io.EOF
+	}
+	r := s.records[0]
+	s.records = s.records[1:]
+	return r.code, r.repeat, nil
+}
+
+func TestSelectUsesConsoleRecordsWithoutReadingAhead(t *testing.T) {
+	session := &recordPickerSession{
+		fakeSession: newFakeSession("", 100, 24, true), // Windows byte reads must not be used.
+		records: []pickerInputRecord{
+			{}, {'界', 2}, {'\x1b', 1}, {'[', 1}, {'B', 1}, {'\r', 1}, {'x', 1},
+		},
+	}
+	got, err := Select(session, []model.SSHConnection{
+		{ID: 1, Name: "alone 界"},
+		{ID: 2, Name: "first 界界"},
+		{ID: 3, Name: "second 界界"},
+	})
+	if err != nil || got.ID != 3 || session.restoreCalls != 1 {
+		t.Fatalf("Select() = ID %d, %v, %d restores; want 3, nil, 1", got.ID, err, session.restoreCalls)
+	}
+	if len(session.records) != 1 || session.records[0].code != 'x' {
+		t.Fatalf("remaining console records = %+v, want only x", session.records)
+	}
+}
+
 func TestSelectRestoresTerminalAndReturnsHighlightedConnection(t *testing.T) {
 	session := newFakeSession("\x1b[B\r", 100, 24, true)
 	got, err := Select(session, []model.SSHConnection{{ID: 1, Name: "one"}, {ID: 2, Name: "two"}})
@@ -535,6 +575,54 @@ func TestSelectBareESCCancels(t *testing.T) {
 	}
 }
 
+func TestSelectRejectsIncompatibleFullScreenOutput(t *testing.T) {
+	modeErr := errors.New("full-screen mode rejected")
+	restoreErr := errors.New("console restore failed")
+	for _, tc := range []struct {
+		name       string
+		restoreErr error
+	}{
+		{name: "restores raw console"},
+		{name: "reports restoration failure too", restoreErr: restoreErr},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			session := &rejectingFullScreenSession{fakeSession: newFakeSession("\r", 100, 20, true), modeErr: modeErr}
+			session.restoreErr = tc.restoreErr
+			session.stdinReady = func(time.Duration) (bool, error) {
+				t.Error("read input despite rejected full-screen output")
+				return true, nil
+			}
+			got, err := Select(session, []model.SSHConnection{{ID: 1, Name: "one"}})
+			if !errors.Is(err, modeErr) || !strings.Contains(err.Error(), "incompatible with the full-screen picker") {
+				t.Errorf("Select() err = %v, want full-screen compatibility error wrapping %v", err, modeErr)
+			}
+			if tc.restoreErr != nil && !errors.Is(err, tc.restoreErr) {
+				t.Errorf("Select() err = %v, want it to include %v", err, tc.restoreErr)
+			}
+			if got.ID != 0 || session.rawCalls != 1 || session.modeCalls != 1 || session.restoreCalls != 1 {
+				t.Errorf("Select() = ID %d with raw/mode/restore calls %d/%d/%d, want no selection and one call each", got.ID, session.rawCalls, session.modeCalls, session.restoreCalls)
+			}
+			if out := session.output.String(); out != "" {
+				t.Errorf("unexpected output despite rejected full-screen mode: %q", out)
+			}
+		})
+	}
+}
+
+type rejectingFullScreenSession struct {
+	*fakeSession
+	modeErr   error
+	modeCalls int
+}
+
+func (s *rejectingFullScreenSession) EnableFullScreenOutput() error {
+	s.modeCalls++
+	if s.rawCalls != 1 || s.restoreCalls != 0 {
+		return errors.New("attempted full-screen mode outside the raw session")
+	}
+	return s.modeErr
+}
+
 func TestSelectRejectsANSIIncapableTerminal(t *testing.T) {
 	session := newFakeSession("", 100, 24, false)
 	_, err := Select(session, []model.SSHConnection{{ID: 1, Name: "one"}})
@@ -554,15 +642,19 @@ func TestSanitizeEscapesControlCharacters(t *testing.T) {
 	}
 }
 
-func TestSelectRedrawsOnResize(t *testing.T) {
-	pr, pw := io.Pipe()
-	session := &fakeSession{
-		input:  pr,
-		output: &lockedBuffer{},
-		width:  100,
-		height: 24,
-		resize: make(chan struct{}),
-		ansi:   true,
+func TestSelectRedrawsOnResizeWithoutInput(t *testing.T) {
+	session := newFakeSession("\r", 20, 24, true)
+	var width atomic.Int32
+	width.Store(20)
+	session.size = func() (int, int) { return int(width.Load()), 24 }
+	allowEnter := make(chan struct{})
+	session.stdinReady = func(time.Duration) (bool, error) {
+		select {
+		case <-allowEnter:
+			return true, nil
+		default:
+			return false, nil
+		}
 	}
 	done := make(chan struct{})
 	var got model.SSHConnection
@@ -571,13 +663,10 @@ func TestSelectRedrawsOnResize(t *testing.T) {
 		got, err = Select(session, []model.SSHConnection{{ID: 1, Name: "one"}, {ID: 2, Name: "two"}})
 		close(done)
 	}()
-	waitFor(t, func() bool { return session.output.Count("\x1b[2J") >= 1 })
-	before := session.output.Count("\x1b[2J")
-	session.resize <- struct{}{}
-	waitFor(t, func() bool { return session.output.Count("\x1b[2J") > before })
-	if _, err := pw.Write([]byte("\r")); err != nil {
-		t.Fatalf("write enter: %v", err)
-	}
+	waitFor(t, func() bool { return strings.Contains(session.output.String(), "warden xssh") })
+	width.Store(100)
+	waitFor(t, func() bool { return strings.Contains(session.output.String(), "pick a connection") })
+	close(allowEnter)
 	select {
 	case <-done:
 	case <-time.After(5 * time.Second):
@@ -588,6 +677,43 @@ func TestSelectRedrawsOnResize(t *testing.T) {
 	}
 	if session.rawCalls != 1 || session.restoreCalls != 1 {
 		t.Fatalf("raw/restore = %d/%d, want 1/1", session.rawCalls, session.restoreCalls)
+	}
+}
+
+func TestSelectKeepsReadingAfterUnsupportedResize(t *testing.T) {
+	session := newFakeSession("\r", 100, 24, true)
+	var widen atomic.Bool
+	observed := make(chan struct{})
+	var once sync.Once
+	session.size = func() (int, int) {
+		if widen.Load() {
+			once.Do(func() { close(observed) })
+			return 5000, 24 // Bubble Tea's renderer rejects dimensions over 4096.
+		}
+		return 100, 24
+	}
+	session.stdinReady = func(time.Duration) (bool, error) {
+		select {
+		case <-observed:
+			return true, nil
+		default:
+			return false, nil
+		}
+	}
+	done := make(chan error, 1)
+	go func() {
+		_, err := Select(session, []model.SSHConnection{{ID: 1, Name: "one"}})
+		done <- err
+	}()
+	waitFor(t, func() bool { return strings.Contains(session.output.String(), "warden xssh") })
+	widen.Store(true)
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("resize rejected by renderer stranded input polling")
 	}
 }
 
@@ -661,6 +787,25 @@ func TestSelectBareESCBeforeEnterCancels(t *testing.T) {
 	}
 }
 
+func TestPickerInputExpiredEscapeLeavesNextByteUnread(t *testing.T) {
+	session := newFakeSession("", 100, 24, true)
+	var in bytes.Buffer
+	in.WriteByte('\x1b')
+	session.input = &in
+	session.stdinReady = func(time.Duration) (bool, error) { return in.Len() > 0, nil }
+	input := pickerInput{session: session}
+	start := time.Unix(0, 0)
+	if keys, _, progressed, err := input.poll(start); len(keys) != 0 || !progressed || err != nil {
+		t.Fatalf("poll with lone ESC = %v, progressed = %v, error = %v; want pending ESC", keys, progressed, err)
+	}
+	afterExpiry := start.Add(escGrace + time.Millisecond)
+	in.WriteByte('x')
+	keys, repeat, _, err := input.poll(afterExpiry)
+	if err != nil || repeat != 1 || !reflect.DeepEqual(keys, []DecodedKey{{Kind: KeyCancel}}) || in.String() != "x" {
+		t.Fatalf("poll after expiry = %v (repeat %d), error = %v, unread = %q; want only cancel and x left unread", keys, repeat, err, in.String())
+	}
+}
+
 // TestSelectBareESCTimeoutLeavesNoReaderGoroutine proves the bounded
 // escape wait cannot strand a stdin reader: when the grace elapses with
 // no continuation byte, the bare ESC cancels and no goroutine remains
@@ -670,16 +815,17 @@ func TestSelectBareESCBeforeEnterCancels(t *testing.T) {
 // keep the goroutine count elevated.
 func TestSelectBareESCTimeoutLeavesNoReaderGoroutine(t *testing.T) {
 	pr, pw := io.Pipe()
-	session := &fakeSession{
-		input:  pr,
-		output: &lockedBuffer{},
-		width:  100,
-		height: 24,
-		resize: make(chan struct{}),
-		ansi:   true,
-		stdinReady: func(time.Duration) (bool, error) {
-			return false, nil // the grace elapses with no continuation
-		},
+	t.Cleanup(func() { _ = pr.Close(); _ = pw.Close() })
+	escReady := make(chan struct{}, 1)
+	session := newFakeSession("", 100, 24, true)
+	session.input = pr
+	session.stdinReady = func(time.Duration) (bool, error) {
+		select {
+		case <-escReady:
+			return true, nil
+		default:
+			return false, nil // no continuation comes
+		}
 	}
 
 	before := runtime.NumGoroutine()
@@ -689,7 +835,8 @@ func TestSelectBareESCTimeoutLeavesNoReaderGoroutine(t *testing.T) {
 		_, err = Select(session, []model.SSHConnection{{ID: 1, Name: "one"}})
 		close(done)
 	}()
-	waitFor(t, func() bool { return session.output.Count("\x1b[2J") >= 1 })
+	waitFor(t, func() bool { return strings.Contains(session.output.String(), "warden xssh") })
+	escReady <- struct{}{}
 	if _, err := pw.Write([]byte{0x1b}); err != nil {
 		t.Fatalf("write esc: %v", err)
 	}
@@ -752,10 +899,9 @@ func TestRenderWideSeparatorPosition(t *testing.T) {
 	state := NewState([]model.SSHConnection{
 		{ID: 1, Name: "prod"}, {ID: 2, Name: "a very long connection profile name here"},
 	})
-	var out bytes.Buffer
-	Render(&out, state, 100, 20)
+	out := pickerContent(state, 100, 20)
 	leftWidth := 100 * 45 / 100
-	lines := strings.Split(strings.TrimSuffix(out.String(), "\r\n"), "\r\n")
+	lines := strings.Split(strings.TrimSuffix(out, "\n"), "\n")
 	if len(lines) != 20 {
 		t.Fatalf("render emitted %d rows, want 20", len(lines))
 	}
@@ -777,22 +923,20 @@ func TestRenderShowsFocusedPaneHint(t *testing.T) {
 		{100, 10}, // wide layout
 		{79, 10},  // narrow layout
 	} {
-		var listFocused bytes.Buffer
-		Render(&listFocused, state, tc.width, tc.height)
-		if !strings.Contains(listFocused.String(), "list focused") {
-			t.Fatalf("width %d: list-focus render lacks the focus hint: %q", tc.width, listFocused.String())
+		listFocused := pickerContent(state, tc.width, tc.height)
+		if !strings.Contains(listFocused, "list focused") {
+			t.Fatalf("width %d: list-focus render lacks the focus hint: %q", tc.width, listFocused)
 		}
-		if strings.Contains(listFocused.String(), "detail focused") {
-			t.Fatalf("width %d: list-focus render claims detail focus: %q", tc.width, listFocused.String())
+		if strings.Contains(listFocused, "detail focused") {
+			t.Fatalf("width %d: list-focus render claims detail focus: %q", tc.width, listFocused)
 		}
 		state = state.Apply(DecodedKey{Kind: KeyTab})
-		var detailFocused bytes.Buffer
-		Render(&detailFocused, state, tc.width, tc.height)
-		if !strings.Contains(detailFocused.String(), "detail focused") {
-			t.Fatalf("width %d: detail-focus render lacks the focus hint: %q", tc.width, detailFocused.String())
+		detailFocused := pickerContent(state, tc.width, tc.height)
+		if !strings.Contains(detailFocused, "detail focused") {
+			t.Fatalf("width %d: detail-focus render lacks the focus hint: %q", tc.width, detailFocused)
 		}
-		if strings.Contains(detailFocused.String(), "list focused") {
-			t.Fatalf("width %d: detail-focus render claims list focus: %q", tc.width, detailFocused.String())
+		if strings.Contains(detailFocused, "list focused") {
+			t.Fatalf("width %d: detail-focus render claims list focus: %q", tc.width, detailFocused)
 		}
 		state = state.Apply(DecodedKey{Kind: KeyTab}) // back to list for the next case
 	}
@@ -809,9 +953,8 @@ func TestRenderNarrowListScrollsToSelected(t *testing.T) {
 	for i := 0; i < 19; i++ {
 		state = state.Apply(DecodedKey{Kind: KeyDown})
 	}
-	var out bytes.Buffer
-	Render(&out, state, 79, 8)
-	s := out.String()
+	out := pickerContent(state, 79, 8)
+	s := out
 	if !strings.Contains(s, ">   conn-20") {
 		t.Fatalf("selected row off screen: %q", s)
 	}
@@ -824,22 +967,20 @@ func TestRenderNarrowListScrollsToSelected(t *testing.T) {
 // pages through every field of the selected connection.
 func TestRenderDetailPagingReachesAllFields(t *testing.T) {
 	state := NewState([]model.SSHConnection{{ID: 1, Name: "prod", Host: "db.example.test"}})
-	var first bytes.Buffer
-	Render(&first, state, 100, 8)
-	if !strings.Contains(first.String(), "ID") {
-		t.Fatalf("wide render missing first field: %q", first.String())
+	first := pickerContent(state, 100, 8)
+	if !strings.Contains(first, "ID") {
+		t.Fatalf("wide render missing first field: %q", first)
 	}
 	state = state.Apply(DecodedKey{Kind: KeyTab})
 	for i := 0; i < 20; i++ {
 		state = state.Apply(DecodedKey{Kind: KeyDown})
 	}
-	var out bytes.Buffer
-	Render(&out, state, 100, 8)
-	if !strings.Contains(out.String(), "Updated at") {
-		t.Fatalf("wide render cannot reach the last field: %q", out.String())
+	out := pickerContent(state, 100, 8)
+	if !strings.Contains(out, "Updated at") {
+		t.Fatalf("wide render cannot reach the last field: %q", out)
 	}
-	if !strings.Contains(out.String(), "(not set)") {
-		t.Fatalf("wide render lost the timestamp marker: %q", out.String())
+	if !strings.Contains(out, "(not set)") {
+		t.Fatalf("wide render lost the timestamp marker: %q", out)
 	}
 }
 
@@ -851,10 +992,9 @@ func TestRenderNarrowDetailPagingReachesAllFields(t *testing.T) {
 	for i := 0; i < 20; i++ {
 		state = state.Apply(DecodedKey{Kind: KeyDown})
 	}
-	var out bytes.Buffer
-	Render(&out, state, 79, 8)
-	if !strings.Contains(out.String(), "Updated at") {
-		t.Fatalf("narrow render detail not paged to the last field: %q", out.String())
+	out := pickerContent(state, 79, 8)
+	if !strings.Contains(out, "Updated at") {
+		t.Fatalf("narrow render detail not paged to the last field: %q", out)
 	}
 }
 
@@ -864,7 +1004,7 @@ func TestRenderNarrowDetailPagingReachesAllFields(t *testing.T) {
 func TestSelectReturnsRenderErrorOnFailingWriter(t *testing.T) {
 	session := &fakeSession{
 		input:  bytes.NewReader([]byte("\r")),
-		output: &failingBuffer{lockedBuffer: &lockedBuffer{}, failAfter: 2, err: errors.New("disk full")},
+		output: &failingBuffer{lockedBuffer: &lockedBuffer{}, match: "pick a connection", err: errors.New("disk full")},
 		width:  100,
 		height: 24,
 		resize: make(chan struct{}),
@@ -885,15 +1025,12 @@ func TestSelectReturnsRenderErrorOnFailingWriter(t *testing.T) {
 // TestSelectReturnsRenderErrorOnKeyHandling proves a render failure while
 // applying a key is also propagated instead of a successful selection.
 func TestSelectReturnsRenderErrorOnKeyRender(t *testing.T) {
-	session := &fakeSession{
-		input:  bytes.NewReader([]byte("\x1b[B\r")),
-		output: &failingBuffer{lockedBuffer: &lockedBuffer{}, failAfter: 3, err: errors.New("tty gone")},
-		width:  100,
-		height: 24,
-		resize: make(chan struct{}),
-		ansi:   true,
-	}
-	_, err := Select(session, []model.SSHConnection{{ID: 1, Name: "one"}, {ID: 2, Name: "two"}})
+	input := bytes.NewReader([]byte("\x1b[B"))
+	session := newFakeSession("", 100, 24, true)
+	session.input = input
+	session.stdinReady = func(time.Duration) (bool, error) { return input.Len() > 0, nil }
+	session.output = &failingBuffer{lockedBuffer: &lockedBuffer{}, match: "second-host-only", err: errors.New("tty gone")}
+	_, err := Select(session, []model.SSHConnection{{ID: 1, Name: "one"}, {ID: 2, Name: "two", Host: "second-host-only"}})
 	if err == nil || !strings.Contains(err.Error(), "render picker") {
 		t.Fatalf("Select() err = %v, want render failure during key handling", err)
 	}
@@ -904,7 +1041,7 @@ func TestSelectReturnsRenderErrorOnKeyRender(t *testing.T) {
 func TestSelectReturnsLeaveAlternateScreenError(t *testing.T) {
 	session := &fakeSession{
 		input:  bytes.NewReader([]byte("\r")),
-		output: &failingBuffer{lockedBuffer: &lockedBuffer{}, failAfter: 3, err: errors.New("broken pipe")},
+		output: &failingBuffer{lockedBuffer: &lockedBuffer{}, match: ansi.ResetModeAltScreenSaveCursor, err: errors.New("broken pipe")},
 		width:  100,
 		height: 24,
 		resize: make(chan struct{}),

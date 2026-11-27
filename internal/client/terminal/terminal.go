@@ -41,16 +41,38 @@ type Session interface {
 	// SupportsANSI reports whether the terminal can render ANSI/VT escape
 	// sequences. The picker requires them; interactive SSH does not.
 	SupportsANSI() bool
-	// StdinReadyWithin waits up to d for input to be available on stdin
-	// and reports whether at least one byte can be read without blocking.
-	// It uses fd-level readiness polling, so it never leaves a reader
-	// blocked on stdin after returning: callers can bound an
-	// escape-sequence continuation wait without risking a background
-	// goroutine consuming input meant for a later session.
+	// StdinReadyWithin waits up to d for stdin handle readiness. On Windows
+	// the handle signals queued console records, which may not yield bytes.
+	// The wait itself never reads stdin or leaves a reader blocked after
+	// returning.
 	StdinReadyWithin(d time.Duration) (bool, error)
 }
+
+// Console keys without a standalone Unicode representation.
+const (
+	KeyUp rune = -1 - iota
+	KeyDown
+	PickerKeyEscape
+	KeyLeft
+	KeyRight
+)
+
+const (
+	PickerKeyUp   = KeyUp
+	PickerKeyDown = KeyDown
+)
 
 // NewSession returns a Session bound to the process standard streams. It
 // fails when stdin is not a terminal: interactive mode must never silently
 // fall back to line-buffered input.
 func NewSession() (Session, error) { return newSession() }
+
+// EnableFullScreenOutput configures output for the full-screen renderer after
+// EnterRaw and a successful SupportsANSI check, but before writing any escapes.
+// The caller still owns Restore, even when this fails.
+func EnableFullScreenOutput(session Session) error {
+	if s, ok := session.(interface{ EnableFullScreenOutput() error }); ok {
+		return s.EnableFullScreenOutput()
+	}
+	return nil
+}

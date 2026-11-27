@@ -1204,8 +1204,9 @@ ports to the same port on 127.0.0.1 until interrupted. The target is assumed
 to be Linux and must provide the remote ss utility. Runs until Ctrl-C.
 
 An ANSI terminal shows a table with host process names when available, host
-ports, and client URLs. Closed ports stay visible for the session. Redirected
-output uses the plain-text forwarding log.
+ports, and client URLs. Closed ports stay visible for the session. Use Up/Down
+to scroll one row, Left/Right to jump to the top/end, and q or Ctrl-C to quit.
+Redirected output uses the plain-text forwarding log.
 
 The port list is comma-separated ports and inclusive ranges (1-65535).
 This is a long-running forwarding workflow, not a one-shot command.

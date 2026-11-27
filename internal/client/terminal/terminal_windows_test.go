@@ -64,6 +64,115 @@ func TestWindowsStdinReadyWithin(t *testing.T) {
 	}
 }
 
+func TestWindowsPollKeySkipsNonCharacterRecordsAndKeepsQueuedKeys(t *testing.T) {
+	origRead := winReadConsoleInputNowait
+	t.Cleanup(func() { winReadConsoleInputNowait = origRead })
+	records := []consoleInputRecord{
+		{eventType: 0x0010},              // Focus
+		{eventType: 0x0004},              // Resize
+		{eventType: 1, unicodeChar: 'q'}, // Ordinary key release
+		{eventType: 1, keyDown: 1},       // Modifier without a character
+	}
+	winReadConsoleInputNowait = func(_ windows.Handle, record *consoleInputRecord) (bool, error) {
+		if len(records) == 0 {
+			return false, nil
+		}
+		*record, records = records[0], records[1:]
+		return true, nil
+	}
+	s := &windowsSession{in: os.Stdin}
+	if key, repeat, err := s.PollKey(); key != 0 || repeat != 0 || err != nil || len(records) != 0 {
+		t.Fatalf("non-character records: key = %q, repeat = %d, err = %v, records left = %d", key, repeat, err, len(records))
+	}
+	records = []consoleInputRecord{
+		{eventType: 1, keyDown: 1, unicodeChar: '\u0171'}, // Not an ASCII 'q'.
+		{eventType: 1, keyDown: 1, unicodeChar: 'j', repeatCount: 3},
+		{eventType: 1, virtualKey: 0x12, unicodeChar: 'g', repeatCount: 1}, // Alt+numpad composition on release.
+		{eventType: 1, keyDown: 1, unicodeChar: 3, repeatCount: 1},
+		{eventType: 1, keyDown: 1, unicodeChar: 'q', repeatCount: 1},
+		{eventType: 1, keyDown: 1, unicodeChar: 'k', repeatCount: 1},
+	}
+	for _, want := range []struct {
+		key    rune
+		repeat int
+	}{{'j', 3}, {'g', 1}, {3, 1}, {'q', 1}} {
+		if key, repeat, err := s.PollKey(); key != want.key || repeat != want.repeat || err != nil {
+			t.Fatalf("PollKey() = (%q, %d, %v), want (%q, %d, nil)", key, repeat, err, want.key, want.repeat)
+		}
+	}
+	if len(records) != 1 || records[0].unicodeChar != 'k' {
+		t.Fatalf("poll read ahead past quit: records left = %+v", records)
+	}
+}
+
+func TestWindowsPollKeyDecodesNativeArrowsAndRepeats(t *testing.T) {
+	origRead := winReadConsoleInputNowait
+	t.Cleanup(func() { winReadConsoleInputNowait = origRead })
+	records := []consoleInputRecord{
+		{eventType: 1, virtualKey: 0x26}, // Up key release.
+		{eventType: 1, keyDown: 1, virtualKey: 0x28, repeatCount: 3},
+		{eventType: 1, keyDown: 1, virtualKey: 0x26, repeatCount: 2},
+		{eventType: 1, keyDown: 1, virtualKey: 0x27},
+		{eventType: 1, keyDown: 1, virtualKey: 0x25, repeatCount: 1},
+		{eventType: 1, keyDown: 1, unicodeChar: 'q'},
+		{eventType: 1, keyDown: 1, unicodeChar: 'X'},
+	}
+	winReadConsoleInputNowait = func(_ windows.Handle, record *consoleInputRecord) (bool, error) {
+		if len(records) == 0 {
+			return false, nil
+		}
+		*record, records = records[0], records[1:]
+		return true, nil
+	}
+	s := &windowsSession{in: os.Stdin}
+	for _, want := range []struct {
+		key    rune
+		repeat int
+	}{{KeyDown, 3}, {KeyUp, 2}, {KeyRight, 1}, {KeyLeft, 1}, {'q', 1}} {
+		if key, repeat, err := s.PollKey(); key != want.key || repeat != want.repeat || err != nil {
+			t.Fatalf("PollKey() = (%U, %d, %v), want (%U, %d, nil)", key, repeat, err, want.key, want.repeat)
+		}
+	}
+	if len(records) != 1 || records[0].unicodeChar != 'X' {
+		t.Fatalf("poll read ahead past quit: records left = %+v", records)
+	}
+}
+
+func TestWindowsPollPickerKeyDecodesUnicodeAndKeepsRecordBoundary(t *testing.T) {
+	origRead := winReadConsoleInputNowait
+	t.Cleanup(func() { winReadConsoleInputNowait = origRead })
+	records := []consoleInputRecord{
+		{eventType: 0x0004},              // Resize, not a key.
+		{eventType: 1, unicodeChar: 'x'}, // Ordinary key release.
+		{eventType: 1, keyDown: 1, unicodeChar: '界', repeatCount: 2},
+		{eventType: 1, keyDown: 1, unicodeChar: 0xd83d, repeatCount: 2},
+		{eventType: 1, keyDown: 1, unicodeChar: 0xde80, repeatCount: 2},
+		{eventType: 1, virtualKey: 0x12, unicodeChar: 'é'}, // Alt+numpad composition.
+		{eventType: 1, keyDown: 1, virtualKey: 0x28, repeatCount: 3},
+		{eventType: 1, keyDown: 1, virtualKey: 0x1b, unicodeChar: 0x1b},
+		{eventType: 1, keyDown: 1, unicodeChar: 'z'},
+	}
+	winReadConsoleInputNowait = func(_ windows.Handle, record *consoleInputRecord) (bool, error) {
+		if len(records) == 0 {
+			return false, nil
+		}
+		*record, records = records[0], records[1:]
+		return true, nil
+	}
+	s := &windowsSession{in: os.Stdin}
+	for _, want := range []struct {
+		key    rune
+		repeat int
+	}{{'界', 2}, {'🚀', 2}, {'é', 1}, {PickerKeyDown, 3}, {PickerKeyEscape, 1}} {
+		if key, repeat, err := s.PollPickerKey(); key != want.key || repeat != want.repeat || err != nil {
+			t.Fatalf("PollPickerKey() = (%U, %d, %v), want (%U, %d, nil)", key, repeat, err, want.key, want.repeat)
+		}
+	}
+	if len(records) != 1 || records[0].unicodeChar != 'z' {
+		t.Fatalf("consumed input beyond Escape: records left = %+v", records)
+	}
+}
+
 // TestWindowsEnterRawRollsBackModesOnHandlerFailure verifies that when
 // console-handler registration fails, EnterRaw attempts both mode
 // restorations, reports their errors, and clears its ANSI flag.
@@ -232,15 +341,23 @@ func TestWindowsRestoreConsoleModes(t *testing.T) {
 	handlerErr := errors.New("handler removal denied")
 	inputErr := errors.New("input restore denied")
 	outputErr := errors.New("output restore denied")
+	modeErr := errors.New("DISABLE_NEWLINE_AUTO_RETURN denied")
+	const noAutoReturn = windows.DISABLE_NEWLINE_AUTO_RETURN
 	for _, tc := range []struct {
 		name       string
 		origOutput uint32
 		vtDenied   bool
+		fullScreen bool
+		modeDenied bool
 		fail       bool
 	}{
 		{name: "restore zero output mode"},
 		{name: "do not restore unchanged output mode", origOutput: 2, vtDenied: true},
 		{name: "cleanup errors do not stop restoration", origOutput: 2, fail: true},
+		{name: "full screen restores zero output mode", fullScreen: true},
+		{name: "full screen preserves existing bits", origOutput: 2 | noAutoReturn, fullScreen: true},
+		{name: "full-screen rejection restores both modes", origOutput: 2, fullScreen: true, modeDenied: true},
+		{name: "full-screen rejection still attempts both restores on errors", origOutput: 2, fullScreen: true, modeDenied: true, fail: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			pr, pw, err := os.Pipe()
@@ -275,6 +392,9 @@ func TestWindowsRestoreConsoleModes(t *testing.T) {
 					if mode != tc.origOutput && tc.vtDenied {
 						return errors.New("VT unavailable")
 					}
+					if mode&noAutoReturn != 0 && tc.modeDenied {
+						return modeErr
+					}
 					if mode == tc.origOutput && tc.fail {
 						return outputErr
 					}
@@ -294,6 +414,12 @@ func TestWindowsRestoreConsoleModes(t *testing.T) {
 			}
 			if s.SupportsANSI() == tc.vtDenied {
 				t.Errorf("SupportsANSI() = %v, want %v", s.SupportsANSI(), !tc.vtDenied)
+			}
+			if tc.fullScreen {
+				err := EnableFullScreenOutput(s)
+				if tc.modeDenied && !errors.Is(err, modeErr) || !tc.modeDenied && err != nil {
+					t.Errorf("EnableFullScreenOutput() = %v, want rejection = %v", err, tc.modeDenied)
+				}
 			}
 			err = s.Restore()
 			if tc.fail {
@@ -316,6 +442,9 @@ func TestWindowsRestoreConsoleModes(t *testing.T) {
 				t.Errorf("input modes = %v, want %v", inModes, want)
 			}
 			wantOut := []uint32{tc.origOutput | winOutputVTExtra}
+			if tc.fullScreen {
+				wantOut = append(wantOut, tc.origOutput|winOutputVTExtra|noAutoReturn)
+			}
 			if !tc.vtDenied {
 				wantOut = append(wantOut, tc.origOutput)
 			}

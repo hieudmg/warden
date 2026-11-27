@@ -59,7 +59,7 @@ func TestHelpAudiencesUseOutputConsole(t *testing.T) {
 		"cp":            {"SFTP", "local-to-local", "same host", "may be overwritten"},
 		"report":        {"project before the flags", "not the report body", "--agent-model"},
 		"report create": {"project before the flags", "not the report body", "--agent-model"},
-		"port-watch":    {"Linux", "ss utility", "Ctrl-C", "not a one-shot command"},
+		"port-watch":    {"Linux", "ss utility", "Up/Down", "Left/Right", "Ctrl-C", "not a one-shot command"},
 		"upgrade":       {"verifies it", "replaces this executable", "left untouched"},
 	}
 	topics := [][]string{nil, {"ssh"}, {"db"}, {"xssh"}, {"http"}, {"config"}, {"config", "search"}, {"cp"}, {"report"}, {"report", "create"}, {"port-watch"}, {"upgrade"}}
