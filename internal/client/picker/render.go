@@ -1,11 +1,12 @@
 package picker
 
 import (
-	"io"
 	"strconv"
 	"strings"
 	"time"
-	"unicode/utf8"
+
+	"charm.land/bubbles/v2/viewport"
+	"github.com/charmbracelet/x/ansi"
 
 	"warden/internal/model"
 )
@@ -51,125 +52,99 @@ func FormatConnection(c model.SSHConnection) []Field {
 	}
 }
 
-// Render draws the picker to w: a title, the search prompt, the filtered
-// connection list, and the selected connection's redacted fields. At
-// width >= 80 the list and fields sit side by side separated by a │
-// column (always at the leftWidth column); below that the fields stack
-// beneath the list. Every line is clamped to its pane width and model
-// values pass through sanitize so a profile cannot inject terminal
-// control sequences. The list viewport follows the selection so the
-// selected row is always visible, and the detail viewport shows a window
-// of the selected connection's fields starting at state.detailOffset so
-// every field stays reachable by paging. A failed write is returned so
-// Select never reports a successful selection on a broken terminal.
-func Render(w io.Writer, state State, width, height int) error {
+// pickerContent keeps the grouped list and selected connection preview in
+// independent Bubbles viewports. Group headings aren't selectable. On a
+// narrow terminal the preview stacks below the list.
+func pickerContent(state State, width, height int) string {
 	if width < 1 || height < 1 {
-		return nil
+		return ""
 	}
 
-	// Build every row as a separate line, then join them with CRLF so the
-	// final viewport row never carries a trailing newline: when exactly
-	// height rows are rendered a trailing CRLF would move the cursor past
-	// the last row and scroll the alternate screen.
-	var lines []string
-
-	// Three fixed rows (title, search prompt, focus hint); the remaining
-	// rows (bodyRows) are shared between the list and the preview so the
-	// render never emits more rows than height and the query, list, and
-	// preview all stay visible when the viewport has room. The focus hint
-	// exposes the Tab control and names the pane that owns Up/Down; it is
-	// omitted on a two-row terminal where the title and prompt already
-	// fill the viewport.
-	bodyRows := height - 3
-	if height < 3 {
-		bodyRows = 0
-	}
-
-	lines = append(lines, cyan+clamp("warden xssh — pick a connection", width)+reset)
-
+	columns := width - 1 // Leave the wrapping column unused.
+	lines := []string{cyan + clamp("warden xssh — pick a connection", columns) + reset}
 	if height >= 2 {
-		lines = append(lines, yellow+clamp("Search: "+sanitize(state.query), width)+reset)
+		lines = append(lines, yellow+clamp("Search: "+sanitize(state.query), columns)+reset)
 	}
-
-	filtered := state.Filtered()
-	selectedConn, hasSelected := state.Selected()
-
-	if width >= 80 {
-		leftWidth := width * 45 / 100
-		rightWidth := width - leftWidth - 1
-		if rightWidth < 1 {
-			rightWidth = 1
-		}
+	if height < 3 {
+		return strings.Join(lines, "\n")
+	}
+	body := height - 3
+	if body > 0 {
+		filtered := state.Filtered()
 		rows := buildListRows(filtered)
-		listStart := listRowsWindowStart(rows, state.selected, bodyRows)
-		fields := []Field{}
-		if hasSelected {
-			fields = FormatConnection(selectedConn)
-		}
-		for i := 0; i < bodyRows; i++ {
-			row := listRowLine(filtered, rows, state.selected, listStart+i, leftWidth)
-			// Pad the visible row to leftWidth so the │ separator always
-			// sits at the same column no matter how short the name is.
-			line := padVisible(row, leftWidth) + cyan + "│" + reset
-			if idx := state.detailOffset + i; idx < len(fields) {
-				line += fieldLine(fields[idx], rightWidth)
+		if width >= 80 {
+			leftWidth := width * 45 / 100
+			rightWidth := columns - leftWidth - 1
+			list := pickerList(filtered, rows, state.selected, leftWidth, body)
+			detail := pickerDetail(state, rightWidth, body)
+			for i, row := range list {
+				lines = append(lines, padVisible(row, leftWidth)+cyan+"│"+reset+detail[i])
 			}
-			lines = append(lines, line)
-		}
-	} else {
-		// Narrow layout: split the body rows between the list and the
-		// preview so the preview cannot push the render past the
-		// viewport. A single body row goes to the list.
-		listRows := bodyRows / 2
-		previewRows := bodyRows - listRows
-		if bodyRows == 1 {
-			listRows, previewRows = 1, 0
-		}
-		rows := buildListRows(filtered)
-		if len(rows) > len(filtered) && listRows < bodyRows {
-			listRows++
-			previewRows--
-		}
-		listStart := listRowsWindowStart(rows, state.selected, listRows)
-		for i := 0; i < listRows; i++ {
-			lines = append(lines, listRowLine(filtered, rows, state.selected, listStart+i, width))
-		}
-		if hasSelected {
-			fields := FormatConnection(selectedConn)
-			for i := 0; i < previewRows; i++ {
-				if idx := state.detailOffset + i; idx < len(fields) {
-					lines = append(lines, fieldLine(fields[idx], width))
-				}
+		} else {
+			listHeight := body / 2
+			if body == 1 {
+				listHeight = 1
 			}
+			if len(rows) > len(filtered) && listHeight < body {
+				listHeight++
+			}
+			lines = append(lines, pickerList(filtered, rows, state.selected, columns, listHeight)...)
+			lines = append(lines, pickerDetail(state, columns, body-listHeight)...)
 		}
 	}
-
-	if height >= 3 {
-		lines = append(lines, yellow+clamp(focusHint(state.focus), width)+reset)
-	}
-
-	var b strings.Builder
-	b.WriteString("\x1b[2J\x1b[H")
-	b.WriteString(strings.Join(lines, "\r\n"))
-	_, err := w.Write([]byte(b.String()))
-	return err
+	lines = append(lines, yellow+clamp(focusHint(state.focus), columns)+reset)
+	return strings.Join(lines, "\n")
 }
 
-// listWindowStart returns the first visible list row so the selected row
-// stays on screen: the window scrolls down once the selection moves past
-// the last visible row, and clamps at the end of the filtered list.
-func listWindowStart(sel, rows, total int) int {
-	if total <= rows {
-		return 0
+func pickerList(filtered []model.SSHConnection, rows []listRow, selected, width, height int) []string {
+	if height == 0 {
+		return nil
 	}
-	start := sel - rows + 1
-	if start < 0 {
-		start = 0
+	lines := make([]string, len(rows))
+	selectedRow := 0
+	for i, row := range rows {
+		if row.header {
+			lines[i] = clamp("  "+sanitize(row.group), width)
+		} else {
+			lines[i] = listLine(filtered, selected, row.connection, width)
+			if row.connection == selected {
+				selectedRow = i
+			}
+		}
 	}
-	if start+rows > total {
-		start = total - rows
+	return pickerPane(lines, width, height, max(0, selectedRow-height+1))
+}
+
+func pickerDetail(state State, width, height int) []string {
+	if height == 0 {
+		return nil
 	}
-	return start
+	var lines []string
+	if c, ok := state.Selected(); ok {
+		fields := FormatConnection(c)
+		// Allow even the final field to be the first row in the pane.
+		lines = make([]string, len(fields)+height-1)
+		for i, f := range fields {
+			lines[i] = fieldLine(f, width)
+		}
+	}
+	return pickerPane(lines, width, height, state.detailOffset)
+}
+
+func pickerPane(lines []string, width, height, offset int) []string {
+	if width == 0 {
+		return make([]string, height)
+	}
+	pane := viewport.New(viewport.WithWidth(width), viewport.WithHeight(height))
+	pane.SetContentLines(lines)
+	pane.SetYOffset(offset)
+	rows := strings.Split(pane.View(), "\n")
+	for i, row := range rows {
+		// Bubbles pads by grapheme width; Tea uses wcwidth without input
+		// negotiation. Frame by the renderer's cell widths instead.
+		rows[i] = strings.TrimRight(row, " ")
+	}
+	return rows
 }
 
 type listRow struct {
@@ -196,20 +171,6 @@ func buildListRows(filtered []model.SSHConnection) []listRow {
 	return rows
 }
 
-func listRowsWindowStart(rows []listRow, selected, visible int) int {
-	if len(rows) == 0 || visible <= 0 {
-		return 0
-	}
-	selectedRow := 0
-	for i, row := range rows {
-		if !row.header && row.connection == selected {
-			selectedRow = i
-			break
-		}
-	}
-	return listWindowStart(selectedRow, visible, len(rows))
-}
-
 // focusHint names the pane that currently owns Up/Down navigation and the
 // key that toggles it, so the Tab control is visible in the picker UI
 // itself rather than only in the README.
@@ -220,80 +181,22 @@ func focusHint(f Focus) string {
 	return "list focused — Tab switches to detail"
 }
 
-// padVisible appends spaces so the line occupies exactly width visible
-// columns, counting only non-ANSI runes. It keeps the wide layout's │
-// separator anchored at the reserved column no matter how short a list
-// row is.
 func padVisible(line string, width int) string {
-	if fill := width - visibleWidth(line); fill > 0 {
-		return line + strings.Repeat(" ", fill)
-	}
-	return line
+	return line + strings.Repeat(" ", max(0, width-ansi.StringWidthWc(line)))
 }
 
-// visibleWidth counts the visible runes in a line, ignoring ANSI escape
-// sequences.
-func visibleWidth(line string) int {
-	n := 0
-	for i := 0; i < len(line); {
-		if line[i] == 0x1b {
-			i++
-			for i < len(line) && line[i] != 'm' {
-				i++
-			}
-			i++
-			continue
-		}
-		_, size := utf8.DecodeRuneInString(line[i:])
-		n++
-		i += size
+func listLine(filtered []model.SSHConnection, selectedIndex, rowIndex, width int) string {
+	name := sanitize(filtered[rowIndex].Name)
+	if rowIndex == selectedIndex {
+		return selected + clamp(">   "+name, width) + reset
 	}
-	return n
+	return clamp("    "+name, width)
 }
 
-func listRowLine(filtered []model.SSHConnection, rows []listRow, selected, rowIdx, width int) string {
-	if rowIdx < 0 || rowIdx >= len(rows) {
-		return ""
-	}
-	row := rows[rowIdx]
-	if row.header {
-		return "  " + clamp(sanitize(row.group), width-2)
-	}
-	return listLine(filtered, selected, row.connection, width)
-}
-
-// listLine renders one indented connection row, highlighting the selected
-// row. rowIdx is the index into filtered; the row is only rendered when it
-// falls inside the visible window.
-func listLine(filtered []model.SSHConnection, selIdx, rowIdx, width int) string {
-	if rowIdx < 0 || rowIdx >= len(filtered) {
-		return ""
-	}
-	name := sanitize(filtered[rowIdx].Name)
-	if rowIdx == selIdx {
-		return selected + ">   " + clamp(name, width-4) + reset
-	}
-	return "    " + clamp(name, width-4)
-}
-
-// fieldLine renders "Label: Value" with the label in blue, clamped to max
-// runes so the value always has room.
-func fieldLine(f Field, max int) string {
-	if max < 1 {
-		return ""
-	}
-	label := sanitize(f.Label)
-	value := sanitize(f.Value)
-	labelMax := max / 2
-	if labelMax < 1 {
-		labelMax = 1
-	}
-	label = clamp(label, labelMax)
-	valueMax := max - utf8.RuneCountInString(label) - 2
-	if valueMax < 1 {
-		valueMax = 1
-	}
-	return blue + label + reset + ": " + clamp(value, valueMax)
+// fieldLine reserves room for the value when the label is wide.
+func fieldLine(f Field, width int) string {
+	label := clamp(sanitize(f.Label), max(1, width/2))
+	return clamp(blue+label+reset+": "+sanitize(f.Value), width)
 }
 
 // sanitize converts terminal control characters into visible escaped text
@@ -318,15 +221,11 @@ func sanitize(s string) string {
 	return b.String()
 }
 
-// clamp truncates s to at most max runes.
-func clamp(s string, max int) string {
-	if max < 1 {
+func clamp(s string, width int) string {
+	if width < 1 {
 		return ""
 	}
-	if utf8.RuneCountInString(s) <= max {
-		return s
-	}
-	return string([]rune(s)[:max])
+	return ansi.TruncateWc(s, width, "")
 }
 
 // keyPairValue renders the connection's stored key-pair reference without

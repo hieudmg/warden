@@ -1,8 +1,13 @@
 package picker
 
 import (
+	"errors"
+	"io"
+	"time"
 	"unicode"
 	"unicode/utf8"
+
+	"warden/internal/client/terminal"
 )
 
 // Key classifies a decoded input event.
@@ -96,6 +101,70 @@ func (d *StreamDecoder) Flush() []DecodedKey {
 	}
 	d.pending = nil
 	return out
+}
+
+const escGrace = 50 * time.Millisecond
+
+type pickerInput struct {
+	session   terminal.Session
+	decoder   StreamDecoder
+	escapeDue time.Time
+}
+
+// poll consumes at most one input byte or one decoded console key. A lone
+// ESC needs a bounded lookahead to distinguish it from a split arrow. No
+// intermediate reader can hold bytes past the key that completes selection.
+func (p *pickerInput) poll(now time.Time) (keys []DecodedKey, repeat int, progressed bool, err error) {
+	if !p.escapeDue.IsZero() && !now.Before(p.escapeDue) {
+		p.escapeDue = time.Time{}
+		// An expired lone ESC completes cancellation. Leave any newly
+		// queued bytes for the next terminal owner.
+		if keys := p.decoder.Flush(); len(keys) != 0 {
+			return keys, 1, false, nil
+		}
+	}
+	var data []byte
+	if console, ok := p.session.(interface{ PollPickerKey() (rune, int, error) }); ok {
+		var code rune
+		code, repeat, err = console.PollPickerKey()
+		if err == nil && repeat > 0 {
+			switch code {
+			case terminal.PickerKeyUp:
+				return []DecodedKey{{Kind: KeyUp}}, repeat, true, nil
+			case terminal.PickerKeyDown:
+				return []DecodedKey{{Kind: KeyDown}}, repeat, true, nil
+			case terminal.PickerKeyEscape:
+				return []DecodedKey{{Kind: KeyCancel}}, repeat, true, nil
+			default:
+				data = utf8.AppendRune(nil, code)
+			}
+		}
+	} else {
+		var ready bool
+		ready, err = p.session.StdinReadyWithin(0)
+		if err == nil && ready {
+			var b [1]byte
+			_, err = io.ReadFull(p.session.Stdin(), b[:])
+			data, repeat = b[:], 1
+		}
+	}
+	if err != nil {
+		if errors.Is(err, io.EOF) {
+			if keys := p.decoder.Flush(); len(keys) != 0 {
+				return keys, 1, true, nil
+			}
+		}
+		return nil, 0, false, err
+	}
+	if len(data) == 0 {
+		return nil, 0, false, nil
+	}
+	keys = p.decoder.Feed(data)
+	p.escapeDue = time.Time{}
+	if pending := p.decoder.Pending(); len(pending) > 0 && pending[0] == '\x1b' {
+		p.escapeDue = now.Add(escGrace)
+	}
+	return keys, repeat, true, nil
 }
 
 // DecodeBytes decodes a complete input buffer, treating a trailing lone ESC

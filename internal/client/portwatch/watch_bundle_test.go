@@ -25,16 +25,20 @@ import (
 	"warden/internal/model"
 )
 
-func TestWatchBundleNegotiatesANSIAfterEnteringRaw(t *testing.T) {
+func TestWatchBundleNegotiatesFullScreenAfterEnteringRaw(t *testing.T) {
 	rawErr := errors.New("raw setup failed")
+	modeErr := errors.New("full-screen mode rejected")
 	restoreErr := errors.New("restore failed")
 	for _, tc := range []struct {
 		name       string
 		vt         bool
 		rawErr     error
+		modeErr    error
 		restoreErr error
 	}{
-		{name: "VT enabled", vt: true},
+		{name: "full-screen mode enabled", vt: true},
+		{name: "full-screen mode rejected", vt: true, modeErr: modeErr},
+		{name: "full-screen mode rejected and restore failed", vt: true, modeErr: modeErr, restoreErr: restoreErr},
 		{name: "VT unavailable"},
 		{name: "VT unavailable and restore failed", restoreErr: restoreErr},
 		{name: "raw setup failed", rawErr: rawErr},
@@ -60,12 +64,12 @@ func TestWatchBundleNegotiatesANSIAfterEnteringRaw(t *testing.T) {
 			}, false)
 			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 			defer cancel()
-			session := &negotiatingWatchSession{vt: tc.vt, rawErr: tc.rawErr, restoreErr: tc.restoreErr}
+			session := &negotiatingWatchSession{vt: tc.vt, rawErr: tc.rawErr, modeErr: tc.modeErr, restoreErr: tc.restoreErr}
 			var output bytes.Buffer
 			out := watchOutputFunc(func(p []byte) (int, error) {
 				if bytes.ContainsRune(p, '\x1b') {
-					if !session.SupportsANSI() {
-						t.Errorf("escape sequence written without active VT: %q", p)
+					if !session.SupportsANSI() || !session.fullScreen {
+						t.Errorf("escape sequence written before full-screen mode was enabled: %q", p)
 					}
 				} else if !session.restored {
 					t.Errorf("plain output written before terminal restore: %q", p)
@@ -81,14 +85,18 @@ func TestWatchBundleNegotiatesANSIAfterEnteringRaw(t *testing.T) {
 			if !terminalFailed && err != nil {
 				t.Errorf("watchBundle error = %v, want nil", err)
 			}
-			for _, want := range []error{tc.rawErr, tc.restoreErr} {
+			var rejectedModeErr error
+			if tc.restoreErr != nil {
+				rejectedModeErr = tc.modeErr
+			}
+			for _, want := range []error{tc.rawErr, rejectedModeErr, tc.restoreErr} {
 				if want != nil && !errors.Is(err, want) {
 					t.Errorf("watchBundle error = %v, want it to include %v", err, want)
 				}
 			}
 			got := output.String()
 			switch {
-			case tc.vt:
+			case tc.vt && tc.modeErr == nil:
 				for _, want := range []string{"\x1b[?1049h", "Host process name", "\x1b[?1049l"} {
 					if !strings.Contains(got, want) {
 						t.Errorf("missing %q in %q", want, got)
@@ -103,6 +111,9 @@ func TestWatchBundleNegotiatesANSIAfterEnteringRaw(t *testing.T) {
 					t.Errorf("expected plain fallback without escapes, got %q", got)
 				}
 			}
+			if want := tc.vt && tc.rawErr == nil; (session.modeCalls == 1) != want || session.modeCalls > 1 {
+				t.Errorf("EnableFullScreenOutput called %d times; want one call = %v", session.modeCalls, want)
+			}
 			if session.rawCalls != 1 || session.restoreCalls != 1 {
 				t.Errorf("EnterRaw called %d times, Restore called %d times; want one each", session.rawCalls, session.restoreCalls)
 			}
@@ -112,9 +123,9 @@ func TestWatchBundleNegotiatesANSIAfterEnteringRaw(t *testing.T) {
 
 type negotiatingWatchSession struct {
 	viewSession
-	vt                     bool
-	rawErr, restoreErr     error
-	rawCalls, restoreCalls int
+	vt, fullScreen                    bool
+	rawErr, modeErr, restoreErr       error
+	rawCalls, modeCalls, restoreCalls int
 }
 
 func (s *negotiatingWatchSession) EnterRaw() error {
@@ -126,6 +137,15 @@ func (s *negotiatingWatchSession) EnterRaw() error {
 }
 
 func (s *negotiatingWatchSession) SupportsANSI() bool { return s.vt && s.raw && !s.restored }
+
+func (s *negotiatingWatchSession) EnableFullScreenOutput() error {
+	s.modeCalls++
+	if !s.SupportsANSI() {
+		return errors.New("attempted full-screen mode before VT was enabled")
+	}
+	s.fullScreen = s.modeErr == nil
+	return s.modeErr
+}
 
 func (s *negotiatingWatchSession) Restore() error {
 	s.restoreCalls++
@@ -254,6 +274,11 @@ func TestWatchBundleIsolatesProcessLookupFromSingleSessionPolling(t *testing.T) 
 			if mode == "reuse" {
 				waitForWatch(t, watch, "retry after nonzero exit on optional connection", func() bool { return probes.Load() >= 4 })
 				assertNoWatchForward(t, second) // Metadata also reported this port.
+				waitForWatch(t, watch, "initial name, unavailable, then recovered name in the rendered deltas", func() bool {
+					_, afterNode, foundNode := strings.Cut(watch.out.String(), "node")
+					_, afterUnavailable, foundUnavailable := strings.Cut(afterNode, "—")
+					return foundNode && foundUnavailable && strings.Contains(afterUnavailable, "python")
+				})
 			}
 			listening.Store(int32(second))
 			waitForWatch(t, watch, "replacement forward", func() bool { return watchEcho(second) })
@@ -275,14 +300,6 @@ func TestWatchBundleIsolatesProcessLookupFromSingleSessionPolling(t *testing.T) 
 				out := watch.out.String()
 				if !watch.view.restored || !strings.Contains(out, "—") || !strings.Contains(out, "closed") {
 					t.Fatalf("missing unavailable name, closed row or restoration: %q", out)
-				}
-				if mode == "reuse" {
-					row := func(name string) string { return fmt.Sprintf("\r\n%-17s  %d", name, first) }
-					_, afterNode, foundNode := strings.Cut(out, row("node"))
-					_, afterUnavailable, foundUnavailable := strings.Cut(afterNode, row("—"))
-					if !foundNode || !foundUnavailable || !strings.Contains(afterUnavailable, row("python")) {
-						t.Fatalf("missing initial name, fallback after nonzero exit, or recovered name: %q", out)
-					}
 				}
 			}
 		})
@@ -491,7 +508,7 @@ type bundleWatchRun struct {
 	cancel context.CancelFunc
 	quit   chan struct{}
 	done   chan struct{}
-	out    bytes.Buffer
+	out    watchFrameBuffer
 	err    error
 }
 

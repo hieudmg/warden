@@ -167,7 +167,7 @@ retried automatically and show no link. Both ends of the forward use IPv4
 loopback, so a service listening only on a remote non-loopback address may be
 listed but unreachable. Use the appropriate client for non-HTTP services.
 
-Use `j`/`k` to scroll, `g`/`G` for top/end, and `q` or Ctrl-C to quit.
+Use Up/Down to scroll one row, Left/Right to jump to the top/end, and `q` or Ctrl-C to quit.
 Redirected output keeps the plain-text forwarding/closure log without terminal
 escape sequences.
 

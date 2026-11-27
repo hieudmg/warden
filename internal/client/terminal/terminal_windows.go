@@ -10,6 +10,7 @@ import (
 	"sync"
 	"syscall"
 	"time"
+	"unsafe"
 
 	"golang.org/x/sys/windows"
 )
@@ -30,12 +31,15 @@ var kernel32 = syscall.NewLazyDLL("kernel32.dll")
 // session is never terminated out from under deferred restoration.
 var procSetConsoleCtrlHandler = kernel32.NewProc("SetConsoleCtrlHandler")
 
+var procReadConsoleInputEx = windows.NewLazySystemDLL("kernel32.dll").NewProc("ReadConsoleInputExW")
+
 // Console calls go through these variables so Windows-only tests can
 // exercise mode changes and resize polling without a real console.
 var (
 	winGetConsoleMode             = windows.GetConsoleMode
 	winSetConsoleMode             = windows.SetConsoleMode
 	winGetConsoleScreenBufferInfo = windows.GetConsoleScreenBufferInfo
+	winReadConsoleInputNowait     = readConsoleInputNowait
 	winSetCtrlHandler             = func(cb uintptr, add bool) (ok bool, callErr error) {
 		var addArg uintptr
 		if add {
@@ -68,6 +72,8 @@ type windowsSession struct {
 	origOut uint32
 	handler uintptr
 	ansi    bool
+
+	pickerHighSurrogate rune
 
 	stopResize chan struct{}
 	resizeDone chan struct{}
@@ -128,6 +134,21 @@ func (s *windowsSession) EnterRaw() error {
 
 	s.raw = true
 	s.startResize()
+	return nil
+}
+
+func (s *windowsSession) EnableFullScreenOutput() error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if !s.raw || !s.ansi {
+		return errors.New("full-screen output requires a raw console with VT enabled")
+	}
+	// Bubble Tea emits bare LF for relative cursor moves on Windows. Keep
+	// the column on LF without changing the raw mode used by remote SSH.
+	mode := s.origOut | winOutputVTExtra | windows.DISABLE_NEWLINE_AUTO_RETURN
+	if err := winSetConsoleMode(windows.Handle(s.out.Fd()), mode); err != nil {
+		return fmt.Errorf("enable DISABLE_NEWLINE_AUTO_RETURN: %w", err)
+	}
 	return nil
 }
 
@@ -238,6 +259,82 @@ func (s *windowsSession) Stderr() io.Writer             { return os.Stderr }
 // SupportsANSI reports whether VT output processing was successfully
 // enabled on the console during EnterRaw.
 func (s *windowsSession) SupportsANSI() bool { return s.ansi }
+
+// consoleInputRecord is Win32 INPUT_RECORD with its union represented as
+// KEY_EVENT_RECORD. The union starts at offset 4 and occupies 16 bytes.
+type consoleInputRecord struct {
+	eventType   uint16
+	_           uint16
+	keyDown     uint32
+	repeatCount uint16
+	virtualKey  uint16
+	_           uint16 // Virtual scan code.
+	unicodeChar uint16
+	_           uint32 // Control key state.
+}
+
+func readConsoleInputNowait(in windows.Handle, record *consoleInputRecord) (bool, error) {
+	const consoleReadNowait = 0x0002
+	if err := procReadConsoleInputEx.Find(); err != nil {
+		return false, err
+	}
+	var count uint32
+	r, _, err := procReadConsoleInputEx.Call(uintptr(in), uintptr(unsafe.Pointer(record)), 1, uintptr(unsafe.Pointer(&count)), consoleReadNowait)
+	if r == 0 {
+		return false, err
+	}
+	return count != 0, nil
+}
+
+// PollKey reads an ASCII key or native arrow and its repeat count without waiting.
+// A zero count means no key was available. Use in place of, not alongside,
+// reads from Stdin while port-watch owns the raw console.
+func (s *windowsSession) PollKey() (key rune, repeat int, err error) {
+	const (
+		keyEvent = 0x0001
+		vkMenu   = 0x12
+		vkLeft   = 0x25
+		vkUp     = 0x26
+		vkRight  = 0x27
+		vkDown   = 0x28
+	)
+	in := windows.Handle(s.in.Fd())
+	// Read one record at a time to leave keys after quit in the console queue.
+	// Bound ignored records per poll so a busy console can't starve redraws.
+	for range 32 {
+		var record consoleInputRecord
+		ok, err := winReadConsoleInputNowait(in, &record)
+		if !ok || err != nil {
+			return 0, 0, err
+		}
+		// Alt+numpad composition can deliver a character on Alt release.
+		if record.eventType != keyEvent || (record.keyDown == 0 && record.virtualKey != vkMenu) {
+			continue
+		}
+		code := rune(record.unicodeChar)
+		switch {
+		case code == 0:
+			switch record.virtualKey {
+			case vkUp:
+				code = KeyUp
+			case vkDown:
+				code = KeyDown
+			case vkLeft:
+				code = KeyLeft
+			case vkRight:
+				code = KeyRight
+			default:
+				continue
+			}
+		case code > 0x7f:
+			continue
+		case code == 0x1a: // Match os.File's console EOF (Ctrl-Z).
+			return 0, 0, io.EOF
+		}
+		return code, max(1, int(record.repeatCount)), nil
+	}
+	return 0, 0, nil
+}
 
 // StdinReadyWithin waits up to d for console input using
 // WaitForSingleObject on the console input handle, which is signaled

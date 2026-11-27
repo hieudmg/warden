@@ -146,17 +146,21 @@ func watchBundle(ctx context.Context, bundle model.SSHBundle, rangeSpec string, 
 				}
 				return err
 			}
+			var modeErr error
 			if session.SupportsANSI() {
-				return runFullScreen(ctx, session, stdout, bundle.Target.Name, rangeSpec, func(ctx context.Context, update func([]portRow)) error {
-					// Watch owns this graph exclusively. On quit, close its outer
-					// socket to interrupt SSH startup and channel I/O, even across jumps.
-					stopAbort := context.AfterFunc(ctx, graph.Abort)
-					defer stopAbort()
-					return watchPortsWithView(ctx, scan, ranges, target, io.Discard, io.Discard, interval, update, &processProbe{bundle: bundle})
-				})
+				modeErr = terminal.EnableFullScreenOutput(session)
+				if modeErr == nil {
+					return runFullScreen(ctx, session, stdout, bundle.Target.Name, rangeSpec, func(ctx context.Context, update func([]portRow)) error {
+						// Watch owns this graph exclusively. On quit, close its outer
+						// socket to interrupt SSH startup and channel I/O, even across jumps.
+						stopAbort := context.AfterFunc(ctx, graph.Abort)
+						defer stopAbort()
+						return watchPortsWithView(ctx, scan, ranges, target, io.Discard, io.Discard, interval, update, &processProbe{bundle: bundle})
+					})
+				}
 			}
 			if err := session.Restore(); err != nil {
-				return fmt.Errorf("restore terminal before plain port-watch: %w", err)
+				return errors.Join(modeErr, fmt.Errorf("restore terminal before plain port-watch: %w", err))
 			}
 		}
 	}
