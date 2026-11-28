@@ -8,6 +8,17 @@ import (
 	"os"
 )
 
+func prepareReplacement(path string) (replacementPlan, error) {
+	return replacementPlan{
+		path: path,
+		apply: func(stagedPath, _ string, mode fs.FileMode) (string, error) {
+			_, err := replaceExecutable(stagedPath, path, mode)
+			return "", err
+		},
+		close: func() {},
+	}, nil
+}
+
 // replaceExecutable atomically replaces executablePath with the verified
 // download at tempPath. Unix can rename over a running executable, so the
 // replacement is complete before Upgrade returns.
