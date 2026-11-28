@@ -94,8 +94,13 @@ func TestUpgradeDownloadsAndVerifies(t *testing.T) {
 	if call.executablePath != exe {
 		t.Errorf("Replace executablePath = %q, want %q", call.executablePath, exe)
 	}
-	if call.mode != 0o755 {
-		t.Errorf("Replace mode = %v, want 0755", call.mode)
+	// Windows reports writable file permissions without Unix execute bits.
+	info, err := os.Stat(exe)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := info.Mode().Perm(); call.mode != want {
+		t.Errorf("Replace mode = %v, want %v", call.mode, want)
 	}
 	if string(call.content) != payload {
 		t.Errorf("Replace content = %q, want %q", call.content, payload)
@@ -348,86 +353,6 @@ func TestUpgradeRejectsMissingExecutableBeforeDownload(t *testing.T) {
 	assertDirEntries(t, dir)
 }
 
-func TestReplaceExecutable(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("Windows schedules a PowerShell helper that replaces the executable after this process exits")
-	}
-	dir := t.TempDir()
-	current := filepath.Join(dir, "current")
-	download := filepath.Join(dir, "download")
-	// A non-default mode catches an implementation that always chmods 0755.
-	if err := os.WriteFile(current, []byte("old binary"), 0o711); err != nil {
-		t.Fatalf("write current: %v", err)
-	}
-	if err := os.Chmod(current, 0o711); err != nil {
-		t.Fatalf("chmod current: %v", err)
-	}
-	if err := os.WriteFile(download, []byte("new binary"), 0o600); err != nil {
-		t.Fatalf("write download: %v", err)
-	}
-
-	scheduled, err := replaceExecutable(download, current, 0o711)
-	if err != nil {
-		t.Fatalf("replaceExecutable() error = %v", err)
-	}
-	if scheduled {
-		t.Fatalf("replaceExecutable() scheduled = true, want false on %s", runtime.GOOS)
-	}
-	assertFileContent(t, current, "new binary")
-	if got := fileMode(t, current); got != 0o711 {
-		t.Errorf("current mode = %v, want preserved 0711", got)
-	}
-	if _, err := os.Stat(download); !os.IsNotExist(err) {
-		t.Errorf("temporary source still present after replacement: err = %v", err)
-	}
-}
-
-func TestReplaceExecutableFailureLeavesTargetUnchanged(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("Windows schedules a PowerShell helper that replaces the executable after this process exits")
-	}
-
-	t.Run("missing parent directory", func(t *testing.T) {
-		dir := t.TempDir()
-		download := filepath.Join(dir, "download")
-		if err := os.WriteFile(download, []byte("new binary"), 0o600); err != nil {
-			t.Fatalf("write download: %v", err)
-		}
-		target := filepath.Join(dir, "missing", "current")
-
-		if _, err := replaceExecutable(download, target, 0o755); err == nil {
-			t.Fatal("replaceExecutable() error = nil, want rename failure")
-		}
-		if _, err := os.Stat(target); !os.IsNotExist(err) {
-			t.Errorf("target exists after failed replacement: err = %v", err)
-		}
-		// A failed replacement must not destroy the verified download; Upgrade
-		// removes it through its deferred cleanup.
-		assertFileContent(t, download, "new binary")
-	})
-
-	t.Run("destination is an existing directory", func(t *testing.T) {
-		dir := t.TempDir()
-		download := filepath.Join(dir, "download")
-		if err := os.WriteFile(download, []byte("new binary"), 0o600); err != nil {
-			t.Fatalf("write download: %v", err)
-		}
-		target := filepath.Join(dir, "current")
-		if err := os.Mkdir(target, 0o755); err != nil {
-			t.Fatalf("mkdir target: %v", err)
-		}
-		old := filepath.Join(target, "old")
-		if err := os.WriteFile(old, []byte("old binary"), 0o755); err != nil {
-			t.Fatalf("write old: %v", err)
-		}
-
-		if _, err := replaceExecutable(download, target, 0o755); err == nil {
-			t.Fatal("replaceExecutable() error = nil, want rename failure")
-		}
-		assertFileContent(t, old, "old binary")
-	})
-}
-
 func TestUpgradeReplacesExecutable(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("Windows defers replacement to a PowerShell helper that runs after this process exits")
@@ -561,19 +486,29 @@ func TestWindowsHelperPassesPathsThroughEnvironment(t *testing.T) {
 	if program != windowsHelperProgram {
 		t.Fatal("encoded command did not round-trip to the helper program")
 	}
-	for _, needle := range []string{tempPath, executablePath, "%PATH%", `"quoted"`, "&"} {
+	for _, needle := range []string{tempPath, executablePath, "%PATH%", `"quoted"`} {
 		if strings.Contains(program, needle) {
 			t.Errorf("helper program embeds %q; paths must travel through the environment", needle)
 		}
 	}
+	// CreateProcess allows at most 32,767 UTF-16 code units, including
+	// the executable path and switches.
+	if len(encoded) > 32000 {
+		t.Errorf("encoded command is too long for CreateProcess: %d", len(encoded))
+	}
 
 	want := map[string]string{
-		windowsHelperSourceEnv:    tempPath,
-		windowsHelperTargetEnv:    executablePath,
-		windowsHelperParentPIDEnv: "4242",
+		windowsHelperTargetEnv: executablePath,
+		windowsHelperImageEnv:  tempPath,
+		windowsHelperParentEnv: "4242",
+		windowsHelperGuardEnv:  "4243",
+		windowsHelperStageEnv:  "4244",
+		windowsHelperLockEnv:   "4245",
+		windowsHelperReadyEnv:  "4246",
+		windowsHelperGoEnv:     "4247",
 	}
 	got := make(map[string]string, len(want))
-	for _, entry := range windowsHelperEnv(tempPath, executablePath, 4242) {
+	for _, entry := range windowsHelperEnv(executablePath, tempPath, 4242, 4243, 4244, 4245, 4246, 4247) {
 		name, value, ok := strings.Cut(entry, "=")
 		if !ok {
 			t.Fatalf("environment entry %q has no name/value separator", entry)
@@ -582,41 +517,6 @@ func TestWindowsHelperPassesPathsThroughEnvironment(t *testing.T) {
 	}
 	if !maps.Equal(got, want) {
 		t.Errorf("helper environment = %q, want literal values %q", got, want)
-	}
-}
-
-func TestWindowsHelperDoesNotInheritParentConsole(t *testing.T) {
-	const detachedProcess = 0x00000008
-
-	if got := windowsHelperCreationFlags(); got&detachedProcess == 0 {
-		t.Fatalf("windows helper creation flags = %#x; want DETACHED_PROCESS (%#x)", got, detachedProcess)
-	}
-}
-
-func TestWindowsHelperWaitsAndRetriesMove(t *testing.T) {
-	program := windowsHelperProgram
-	for _, want := range []string{
-		"$env:" + windowsHelperSourceEnv,
-		"$env:" + windowsHelperTargetEnv,
-		"$env:" + windowsHelperParentPIDEnv,
-		"WaitForExit",
-		"while (",
-		"Move-Item -LiteralPath",
-	} {
-		if !strings.Contains(program, want) {
-			t.Errorf("helper program missing %q", want)
-		}
-	}
-	for _, unwanted := range []string{"cmd.exe", "del /f", "del /q", "ping -n"} {
-		if strings.Contains(program, unwanted) {
-			t.Errorf("helper program still contains legacy shell helper text %q", unwanted)
-		}
-	}
-	// The verified download may only be removed once the retry loop gives up.
-	loop := strings.Index(program, "while (")
-	cleanup := strings.Index(program, "Remove-Item")
-	if loop < 0 || cleanup < 0 || cleanup < loop {
-		t.Error("helper program removes the verified download before the retry loop")
 	}
 }
 

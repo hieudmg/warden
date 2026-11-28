@@ -160,10 +160,32 @@ writes `client.json` or cached transport credentials. Only the targets
 published in the latest release are supported; any other OS/architecture fails
 before the installed executable is touched.
 
-On Windows a running executable cannot be replaced in place, so the command
-reports that replacement is scheduled and the verified download is applied
-after the process exits. On Linux the executable is replaced atomically before
-the command returns.
+On Linux the executable is replaced atomically before the command returns.
+On Windows the command schedules replacement and prints the path to its status
+log. After the command exits, the helper stops processes whose executable path
+matches this installation, including a running local agent. This can interrupt
+active sessions. Other copies of Warden are left alone, and no processes are
+restarted automatically.
+
+Wait for `Replacement complete` in the log before treating the upgrade as
+successful. A failed swap keeps the old executable in place and retains the
+staged download beside it; the log names that file and records the error.
+Resolve the reported problem before retrying, then remove obsolete logs and
+staging files if no longer needed. A concurrent upgrade of the same installation
+is rejected.
+
+Windows self-upgrade requires Windows PowerShell and a writable local install
+directory. The executable must not be read-only, be a reparse point, or have
+additional hard links. If a process's exact image path cannot be confirmed, the
+helper does not stop it; an alias, permissions, or a process relaunched during
+the swap may leave the executable locked. The helper waits and retries for a
+limited time rather than deleting the current executable.
+
+Self-upgrade and the current PowerShell installer use the same lock for binary
+replacement. While an upgrade is pending, do not modify the installation path
+or executable with older installers or other tools that do not take this lock.
+The helper checks the current file ID before every rename attempt, but Windows
+does not combine that check and the rename into one operation.
 
 Set `WARDEN_REPO` or `WARDEN_RELEASE_BASE_URL` to upgrade from a release source
 other than the default `hieudmg/warden` GitHub releases. The server has its own

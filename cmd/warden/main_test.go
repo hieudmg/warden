@@ -1762,8 +1762,9 @@ func TestRunClientUpgradeReportsScheduledReplacement(t *testing.T) {
 	oldRunUpgrade := runUpgrade
 	defer func() { runUpgrade = oldRunUpgrade }()
 
+	const status = `C:\Warden [test] & 100%\.warden.exe.upgrade-1234.log`
 	runUpgrade = func(_ context.Context, _ upgrade.Kind, _ upgrade.Options) (upgrade.Result, error) {
-		return upgrade.Result{Asset: "warden.exe", ExecutablePath: `C:\Tools\warden.exe`, Scheduled: true}, nil
+		return upgrade.Result{Asset: "warden.exe", ExecutablePath: `C:\Tools\warden.exe`, Scheduled: true, StatusPath: status}, nil
 	}
 
 	var stdout, stderr bytes.Buffer
@@ -1777,6 +1778,9 @@ func TestRunClientUpgradeReportsScheduledReplacement(t *testing.T) {
 	}
 	if strings.Contains(out, "replaced") {
 		t.Fatalf("stdout = %q, must not claim the running executable was replaced", out)
+	}
+	if !strings.Contains(out, status) {
+		t.Fatalf("stdout = %q, want the replacement status path %q", out, status)
 	}
 	if stderr.Len() != 0 {
 		t.Fatalf("stderr = %q, want empty", stderr.String())

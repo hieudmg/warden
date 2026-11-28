@@ -1118,6 +1118,9 @@ func runClientUpgrade(args []string, stdout, stderr io.Writer, lookupEnv func(st
 func writeUpgradeResult(w io.Writer, prefix string, result upgrade.Result) {
 	if result.Scheduled {
 		fmt.Fprintf(w, "%s: verified %s; replacement of %s is scheduled after this process exits\n", prefix, result.Asset, result.ExecutablePath)
+		if result.StatusPath != "" {
+			fmt.Fprintf(w, "%s: replacement status: %s\n", prefix, result.StatusPath)
+		}
 		return
 	}
 	fmt.Fprintf(w, "%s: replaced %s with %s\n", prefix, result.ExecutablePath, result.Asset)
